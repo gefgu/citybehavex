@@ -30,7 +30,7 @@ _LAT_CANDIDATES = ["lat", "latitude"]
 _LNG_CANDIDATES = ["lng", "lon", "longitude", "long"]
 _UID_CANDIDATES = ["uid", "user_id", "user", "agent_id", "userid"]
 _DURATION_CANDIDATES = ["duration_minutes", "duration", "trip_duration_minutes", "duration_hours"]
-_ACTIVITY_CANDIDATES = ["purpose", "activity", "act", "location_type"]
+_ACTIVITY_CANDIDATES = ["purpose", "activity", "act", "location_type", "category"]
 
 
 def _detect_column(df: pd.DataFrame, candidates: list[str]) -> Optional[str]:
@@ -116,6 +116,65 @@ def _build_tessellation(
     return df
 
 
+def _build_poi_tessellation(
+    min_lon: float,
+    min_lat: float,
+    max_lon: float,
+    max_lat: float,
+    overture_release: str,
+) -> pd.DataFrame:
+    typer.echo(
+        f"Fetching individual POIs from Overture Maps {overture_release} "
+        f"and computing 500 m relevance …"
+    )
+    df = duckdb.sql(f"""
+        INSTALL spatial;  LOAD spatial;
+        SET s3_region = 'us-west-2';
+
+        WITH raw_pois AS (
+            SELECT
+                id                        AS poi_id,
+                ST_Y(geometry)            AS lat,
+                ST_X(geometry)            AS lng,
+                categories.primary        AS category
+            FROM read_parquet(
+                's3://overturemaps-us-west-2/release/{overture_release}/theme=places/type=place/*',
+                filename=true, hive_partitioning=1
+            )
+            WHERE bbox.xmin BETWEEN {min_lon} AND {max_lon}
+              AND bbox.ymin BETWEEN {min_lat} AND {max_lat}
+        ),
+        relevance_counts AS (
+            SELECT
+                p1.poi_id,
+                p1.lat,
+                p1.lng,
+                p1.category,
+                COUNT(p2.poi_id) AS relevance
+            FROM raw_pois p1
+            LEFT JOIN raw_pois p2
+                ON  p1.poi_id != p2.poi_id
+                AND ABS(p2.lat - p1.lat) <= 0.0045
+                AND ABS(p2.lng - p1.lng) <= 0.0045
+                AND 2 * 6371000 * ASIN(SQRT(
+                        POWER(SIN(RADIANS((p2.lat - p1.lat) / 2)), 2) +
+                        COS(RADIANS(p1.lat)) * COS(RADIANS(p2.lat)) *
+                        POWER(SIN(RADIANS((p2.lng - p1.lng) / 2)), 2)
+                    )) <= 500
+            GROUP BY p1.poi_id, p1.lat, p1.lng, p1.category
+        )
+        SELECT
+            poi_id      AS tile_id,
+            lat,
+            lng,
+            category    AS purpose,
+            relevance
+        FROM relevance_counts
+        ORDER BY relevance DESC
+    """).df()
+    return df
+
+
 @app.command()
 def tessellate(
     min_lon: float = typer.Option(..., help="Bounding box west longitude"),
@@ -136,15 +195,30 @@ def tessellate(
     min_poi_count: int = typer.Option(
         1, help="Minimum POI count per cell; cells below this threshold are dropped."
     ),
+    poi_tessellation: bool = typer.Option(
+        False,
+        "--poi-tessellation/--no-poi-tessellation",
+        help=(
+            "Use individual Overture POIs as tiles instead of H3 cells. "
+            "tile_id = POI id, purpose = primary category, "
+            "relevance = POI count within 500 m radius."
+        ),
+    ),
     output: str = typer.Option("tessellation.parquet", help="Output parquet path"),
 ):
     """Generate an H3 tessellation from a bounding box."""
-    df = _build_tessellation(
-        min_lon, min_lat, max_lon, max_lat, resolution, enrich_overture, overture_release,
-        min_poi_count=min_poi_count,
-    )
+    if poi_tessellation:
+        df = _build_poi_tessellation(
+            min_lon, min_lat, max_lon, max_lat, overture_release
+        )
+        typer.echo(f"Saved {len(df):,} POI tiles → {output}")
+    else:
+        df = _build_tessellation(
+            min_lon, min_lat, max_lon, max_lat, resolution, enrich_overture, overture_release,
+            min_poi_count=min_poi_count,
+        )
+        typer.echo(f"Saved {len(df):,} H3 cells → {output}")
     df.to_parquet(output, index=False)
-    typer.echo(f"Saved {len(df):,} H3 cells → {output}")
 
 
 def _waiting_times_minutes(traj: skmob2.TrajDataFrame) -> list:
@@ -164,6 +238,7 @@ def _generate_comparison_report(
     real_path: str,
     observed_label: str,
     output_path: str,
+    synth_activity_col: Optional[str] = None,
 ) -> None:
     from datetime import datetime as _dt
 
@@ -225,7 +300,7 @@ def _generate_comparison_report(
     if fig_trip:
         ecdf_charts_html += fig_trip._repr_html_()
 
-    # Activity profile plots (only when comparison data has a purpose/activity column)
+    # Activity profile plots
     activity_col = _detect_column(real_df, _ACTIVITY_CANDIDATES)
     activity_section_html = ""
     if activity_col:
@@ -242,6 +317,21 @@ def _generate_comparison_report(
     <span>Activity profile &mdash; {observed_label}</span>
   </div>
   <div class="charts">{activity_charts_html}</div>"""
+
+    if synth_activity_col and synth_activity_col in traj.df.columns:
+        fig_synth_purpose = plot_visit_purpose_distribution(traj.df)
+        fig_synth_transition = plot_activity_transition_matrix(traj.df)
+        fig_synth_daily = plot_daily_activity_distribution(traj.df)
+        synth_activity_charts_html = (
+            fig_synth_purpose._repr_html_()
+            + fig_synth_transition._repr_html_()
+            + fig_synth_daily._repr_html_()
+        )
+        activity_section_html += f"""
+  <div class="section-header">
+    <span>Activity profile &mdash; synthetic</span>
+  </div>
+  <div class="charts">{synth_activity_charts_html}</div>"""
 
     # Wasserstein table rows
     w_rows = [
@@ -323,6 +413,15 @@ def simulate(
     min_poi_count: int = typer.Option(
         1, help="Minimum value of --relevance-column per cell; cells below this threshold are dropped."
     ),
+    poi_tessellation: bool = typer.Option(
+        False,
+        "--poi-tessellation/--no-poi-tessellation",
+        help=(
+            "Use individual Overture POIs as tiles instead of H3 cells. "
+            "tile_id = POI id, purpose = primary category, "
+            "relevance = POI count within 500 m radius."
+        ),
+    ),
     agents: int = typer.Option(500, help="Number of synthetic agents"),
     days: int = typer.Option(7, help="Simulation duration in days"),
     relevance_column: str = typer.Option(
@@ -365,11 +464,17 @@ def simulate(
                     f"({len(tessellation_df):,} remaining)"
                 )
     elif has_bbox:
-        tessellation_df = _build_tessellation(
-            min_lon, min_lat, max_lon, max_lat, resolution, enrich_overture, overture_release,
-            min_poi_count=min_poi_count,
-        )
-        typer.echo(f"Generated {len(tessellation_df):,} H3 cells from bbox")
+        if poi_tessellation:
+            tessellation_df = _build_poi_tessellation(
+                min_lon, min_lat, max_lon, max_lat, overture_release
+            )
+            typer.echo(f"Generated {len(tessellation_df):,} POI tiles from bbox")
+        else:
+            tessellation_df = _build_tessellation(
+                min_lon, min_lat, max_lon, max_lat, resolution, enrich_overture,
+                overture_release, min_poi_count=min_poi_count,
+            )
+            typer.echo(f"Generated {len(tessellation_df):,} H3 cells from bbox")
     else:
         typer.echo(
             "Error: provide --tessellation or all four bbox options "
@@ -377,6 +482,9 @@ def simulate(
             err=True,
         )
         raise typer.Exit(1)
+
+    if poi_tessellation and relevance_column == "total_poi_count" and "relevance" in tessellation_df.columns:
+        relevance_column = "relevance"
 
     start_date = pd.Timestamp(
         datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
@@ -398,6 +506,13 @@ def simulate(
     )
 
     traj = skmob2.TrajDataFrame(traj)
+
+    synth_activity_col = None
+    if "purpose" in tessellation_df.columns:
+        lookup = tessellation_df[["lat", "lng", "purpose"]].drop_duplicates(["lat", "lng"])
+        traj.df = traj.df.merge(lookup, on=["lat", "lng"], how="left")
+        synth_activity_col = "purpose"
+
     traj.df.to_parquet(output, index=False)
     typer.echo(
         f"Saved {len(traj.df):,} records "
@@ -410,6 +525,7 @@ def simulate(
             real_path=comparison,
             observed_label=comparison_label,
             output_path=comparison_html,
+            synth_activity_col=synth_activity_col,
         )
 
 
