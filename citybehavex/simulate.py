@@ -71,7 +71,7 @@ def _build_tessellation(
                 ) AS h3_cell
             )
             SELECT
-                h3_cell_to_string(h3_cell)       AS tile_id,
+                h3_h3_to_string(h3_cell)         AS tile_id,
                 h3_cell_to_lat(h3_cell)          AS lat,
                 h3_cell_to_lng(h3_cell)          AS lng,
                 h3_cell_to_boundary_wkt(h3_cell) AS cell_polygon_wkt,
@@ -115,14 +115,24 @@ def _generate_comparison_report(
     real_path: str,
     observed_label: str,
     output_path: str,
+    datetime_col: Optional[str] = None,
+    lat_col: Optional[str] = None,
+    lng_col: Optional[str] = None,
+    uid_col: Optional[str] = None,
 ) -> None:
-    real_traj = skmob2.TrajDataFrame(pd.read_parquet(real_path))
+    real_traj = skmob2.TrajDataFrame(
+        pd.read_parquet(real_path),
+        datetime_col=datetime_col,
+        lat_col=lat_col,
+        lng_col=lng_col,
+        uid_col=uid_col,
+    )
 
     synth_jumps = traj.jump_lengths(merge=True)
     real_jumps = real_traj.jump_lengths(merge=True)
 
-    synth_visits = traj.df["uid"].value_counts().to_list()
-    real_visits = real_traj.df["uid"].value_counts().to_list()
+    synth_visits = traj.df[traj.uid_col].value_counts().to_list()
+    real_visits = real_traj.df[real_traj.uid_col].value_counts().to_list()
 
     w_jump = wasserstein_distance(synth_jumps, real_jumps)
     w_visits = wasserstein_distance(synth_visits, real_visits)
@@ -201,6 +211,18 @@ def simulate(
     comparison_html: str = typer.Option(
         "comparison.html", help="Output path for the comparison HTML report."
     ),
+    comparison_datetime_col: Optional[str] = typer.Option(
+        None, help="datetime column name in the --comparison file (auto-detected if omitted)."
+    ),
+    comparison_lat_col: Optional[str] = typer.Option(
+        None, help="latitude column name in the --comparison file (auto-detected if omitted)."
+    ),
+    comparison_lng_col: Optional[str] = typer.Option(
+        None, help="longitude column name in the --comparison file (auto-detected if omitted)."
+    ),
+    comparison_uid_col: Optional[str] = typer.Option(
+        None, help="user-ID column name in the --comparison file (auto-detected if omitted)."
+    ),
 ):
     """Run DensityEPR simulation on a tessellation file or a bbox."""
     has_bbox = all(v is not None for v in [min_lon, min_lat, max_lon, max_lat])
@@ -259,6 +281,10 @@ def simulate(
             real_path=comparison,
             observed_label=comparison_label,
             output_path=comparison_html,
+            datetime_col=comparison_datetime_col,
+            lat_col=comparison_lat_col,
+            lng_col=comparison_lng_col,
+            uid_col=comparison_uid_col,
         )
 
 
