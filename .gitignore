@@ -10,3 +10,4 @@ trajectories.parquet
 
 test.html
 gparis_sample_trip_with_lengths.parquet
+*.parquet
