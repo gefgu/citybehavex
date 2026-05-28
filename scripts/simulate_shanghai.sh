@@ -12,7 +12,4 @@ REPO_ROOT="$(dirname "$SCRIPT_DIR")"
   --output "$REPO_ROOT/data/shanghai_trajectories.parquet" \
   --comparison "$REPO_ROOT/data/shanghai_quadratic_visitation_h3_sample.parquet" \
   --comparison-label "quadratic visitation" \
-  --comparison-html "$REPO_ROOT/data/shanghai_comparison.html" \
-  --comparison-datetime-col start_timestamp \
-  --comparison-uid-col user_id \
-  --comparison-lng-col lon
+  --comparison-html "$REPO_ROOT/data/shanghai_comparison.html"
