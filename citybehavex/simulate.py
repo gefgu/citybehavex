@@ -1,11 +1,14 @@
 from datetime import datetime, timedelta
+from pathlib import Path
 from typing import Optional
 
 import duckdb
 import pandas as pd
 import skmob2
 import typer
+from skmob2.comparison import wasserstein_distance
 from skmob2.models import DensityEPR
+from skmob_vis import plot_jump_lengths_ecdf, plot_visits_frequency_ecdf
 
 app = typer.Typer(help="CityBehavEx – synthetic urban mobility toolkit.")
 
@@ -107,6 +110,62 @@ def tessellate(
     typer.echo(f"Saved {len(df):,} H3 cells → {output}")
 
 
+def _generate_comparison_report(
+    traj: skmob2.TrajDataFrame,
+    real_path: str,
+    observed_label: str,
+    output_path: str,
+) -> None:
+    real_traj = skmob2.TrajDataFrame(pd.read_parquet(real_path))
+
+    synth_jumps = traj.jump_lengths(merge=True)
+    real_jumps = real_traj.jump_lengths(merge=True)
+
+    synth_visits = traj.df["uid"].value_counts().to_list()
+    real_visits = real_traj.df["uid"].value_counts().to_list()
+
+    w_jump = wasserstein_distance(synth_jumps, real_jumps)
+    w_visits = wasserstein_distance(synth_visits, real_visits)
+
+    fig_jump = plot_jump_lengths_ecdf(
+        synth_jumps, real_jumps,
+        labels=("synthetic", observed_label),
+    )
+    fig_visits = plot_visits_frequency_ecdf(
+        synth_visits, real_visits,
+        labels=("synthetic", observed_label),
+        title="Visits frequency ECDF",
+    )
+
+    metrics_html = (
+        f"<div style=\"font-family:'IBM Plex Mono',monospace;font-size:14px;"
+        f"padding:16px 24px;background:#fbf8f1;color:#14110d;"
+        f"border-top:1px solid #dcd5c4;\">"
+        f"<strong>Wasserstein distances</strong><br>"
+        f"Jump lengths: {w_jump:.4f} km &nbsp;|&nbsp; Visits frequency: {w_visits:.4f}"
+        f"</div>"
+    )
+    full_html = (
+        "<!doctype html>\n<html>\n<head>\n"
+        "  <meta charset=\"utf-8\">\n"
+        "  <title>CityBehavEx Comparison Report</title>\n"
+        "  <style>\n"
+        "    html,body{margin:0;padding:0;background:#fbf8f1;}\n"
+        "    .charts{display:flex;flex-wrap:wrap;}\n"
+        "    .charts iframe{flex:1 1 600px;border:0;min-height:420px;}\n"
+        "  </style>\n"
+        "</head>\n<body>\n"
+        f"  <div class=\"charts\">{fig_jump._repr_html_()}{fig_visits._repr_html_()}</div>\n"
+        f"  {metrics_html}\n"
+        "</body>\n</html>\n"
+    )
+    Path(output_path).write_text(full_html, encoding="utf-8")
+    typer.echo(
+        f"Comparison report → {output_path}  "
+        f"(W-dist: jump={w_jump:.4f}, visits={w_visits:.4f})"
+    )
+
+
 @app.command()
 def simulate(
     tessellation: Optional[str] = typer.Option(
@@ -132,6 +191,16 @@ def simulate(
     ),
     output: str = typer.Option("trajectories.parquet", help="Output parquet path"),
     random_state: int = typer.Option(42, help="Random seed"),
+    comparison: Optional[str] = typer.Option(
+        None, "--comparison",
+        help="Path to a trajectories parquet (same schema as output) to compare against. Triggers HTML report.",
+    ),
+    comparison_label: str = typer.Option(
+        "observed", help="Legend label for the comparison series in plots."
+    ),
+    comparison_html: str = typer.Option(
+        "comparison.html", help="Output path for the comparison HTML report."
+    ),
 ):
     """Run DensityEPR simulation on a tessellation file or a bbox."""
     has_bbox = all(v is not None for v in [min_lon, min_lat, max_lon, max_lat])
@@ -183,6 +252,14 @@ def simulate(
         f"Saved {len(traj.df):,} records "
         f"({traj.df['uid'].nunique()} agents) → {output}"
     )
+
+    if comparison:
+        _generate_comparison_report(
+            traj=traj,
+            real_path=comparison,
+            observed_label=comparison_label,
+            output_path=comparison_html,
+        )
 
 
 if __name__ == "__main__":
