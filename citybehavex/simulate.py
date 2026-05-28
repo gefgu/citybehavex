@@ -120,6 +120,14 @@ def _build_tessellation(
     return df
 
 
+_CATEGORY_CSV = Path(__file__).parent / "category" / "unique_categories.csv"
+
+
+def _load_category_mapping() -> dict[str, str]:
+    mapping_df = pd.read_csv(_CATEGORY_CSV)
+    return dict(zip(mapping_df["primary_category"], mapping_df["purpose"]))
+
+
 def _build_poi_tessellation(
     min_lon: float,
     min_lat: float,
@@ -171,11 +179,13 @@ def _build_poi_tessellation(
             poi_id      AS tile_id,
             lat,
             lng,
-            category    AS purpose,
+            category,
             relevance
         FROM relevance_counts
         ORDER BY relevance DESC
     """).df()
+    category_map = _load_category_mapping()
+    df["purpose"] = df["category"].map(category_map).fillna("OTHER")
     return df
 
 
