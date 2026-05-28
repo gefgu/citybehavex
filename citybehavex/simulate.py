@@ -10,10 +10,13 @@ from skmob2.comparison import wasserstein_distance
 from skmob2.measures.spatial import waiting_times as _waiting_times
 from skmob2.models import DensityEPR
 from skmob_vis import (
+    plot_activity_transition_matrix,
+    plot_daily_activity_distribution,
     plot_dwell_time_ecdf,
     plot_jump_lengths_ecdf,
     plot_radius_of_gyration_ecdf,
     plot_trip_duration_ecdf,
+    plot_visit_purpose_distribution,
     plot_visits_frequency_ecdf,
 )
 
@@ -27,6 +30,7 @@ _LAT_CANDIDATES = ["lat", "latitude"]
 _LNG_CANDIDATES = ["lng", "lon", "longitude", "long"]
 _UID_CANDIDATES = ["uid", "user_id", "user", "agent_id", "userid"]
 _DURATION_CANDIDATES = ["duration_minutes", "duration", "trip_duration_minutes", "duration_hours"]
+_ACTIVITY_CANDIDATES = ["purpose", "activity", "act", "location_type"]
 
 
 def _detect_column(df: pd.DataFrame, candidates: list[str]) -> Optional[str]:
@@ -203,7 +207,7 @@ def _generate_comparison_report(
     else:
         real_trip = synth_trip = w_trip = None
 
-    # Build plots
+    # Build ECDF plots
     fig_jump = plot_jump_lengths_ecdf(synth_jumps, real_jumps, labels=labels)
     fig_visits = plot_visits_frequency_ecdf(synth_visits, real_visits, labels=labels)
     fig_rog = plot_radius_of_gyration_ecdf(synth_rog, real_rog, labels=labels)
@@ -214,13 +218,30 @@ def _generate_comparison_report(
         else None
     )
 
-    charts_html = "".join(
+    ecdf_charts_html = "".join(
         f._repr_html_()
         for f in [fig_jump, fig_visits, fig_rog, fig_dwell]
-        if f is not None
     )
     if fig_trip:
-        charts_html += fig_trip._repr_html_()
+        ecdf_charts_html += fig_trip._repr_html_()
+
+    # Activity profile plots (only when comparison data has a purpose/activity column)
+    activity_col = _detect_column(real_df, _ACTIVITY_CANDIDATES)
+    activity_section_html = ""
+    if activity_col:
+        fig_purpose = plot_visit_purpose_distribution(real_df)
+        fig_transition = plot_activity_transition_matrix(real_df)
+        fig_daily = plot_daily_activity_distribution(real_df)
+        activity_charts_html = (
+            fig_purpose._repr_html_()
+            + fig_transition._repr_html_()
+            + fig_daily._repr_html_()
+        )
+        activity_section_html = f"""
+  <div class="section-header">
+    <span>Activity profile &mdash; {observed_label}</span>
+  </div>
+  <div class="charts">{activity_charts_html}</div>"""
 
     # Wasserstein table rows
     w_rows = [
@@ -250,6 +271,7 @@ def _generate_comparison_report(
     .header{{padding:32px 32px 24px;border-bottom:1px solid #dcd5c4;}}
     .header h1{{margin:0;font-size:20px;font-weight:600;letter-spacing:-0.01em;}}
     .header p{{margin:6px 0 0;font-size:13px;color:#6b5e4c;}}
+    .section-header{{padding:20px 32px 0;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.1em;color:#6b5e4c;}}
     .charts{{display:flex;flex-wrap:wrap;padding:24px;gap:24px;}}
     .charts iframe{{flex:1 1 580px;border:0;min-height:420px;}}
     .metrics{{padding:24px 32px 32px;border-top:1px solid #dcd5c4;}}
@@ -265,7 +287,8 @@ def _generate_comparison_report(
     <h1>synthetic &nbsp;vs&nbsp; {observed_label}</h1>
     <p>Generated {generated_at}</p>
   </div>
-  <div class="charts">{charts_html}</div>
+  <div class="section-header">Distribution comparisons</div>
+  <div class="charts">{ecdf_charts_html}</div>{activity_section_html}
   <div class="metrics">
     <h2>Wasserstein distances</h2>
     <table>{table_rows}</table>
