@@ -8,12 +8,14 @@ import skmob2
 import typer
 from skmob2.comparison import wasserstein_distance
 from skmob2.measures.spatial import waiting_times as _waiting_times
+from skmob2.measures.visits.motifs import discover_daily_motifs_from_agents
 from skmob2.models import DensityEPR
 from skmob_vis import (
     plot_activity_transition_matrix,
     plot_daily_activity_distribution,
     plot_dwell_time_ecdf,
     plot_jump_lengths_ecdf,
+    plot_motif_literature_comparison,
     plot_radius_of_gyration_ecdf,
     plot_trip_duration_ecdf,
     plot_visit_purpose_distribution,
@@ -24,13 +26,15 @@ app = typer.Typer(help="CityBehavEx – synthetic urban mobility toolkit.")
 
 _DATETIME_CANDIDATES = [
     "datetime", "start_timestamp", "timestamp", "check-in_time",
-    "start_time", "checkin_time", "time", "date",
+    "start_time", "_start_time", "checkin_time", "time", "date",
 ]
 _LAT_CANDIDATES = ["lat", "latitude"]
 _LNG_CANDIDATES = ["lng", "lon", "longitude", "long"]
 _UID_CANDIDATES = ["uid", "user_id", "user", "agent_id", "userid"]
 _DURATION_CANDIDATES = ["duration_minutes", "duration", "trip_duration_minutes", "duration_hours"]
-_ACTIVITY_CANDIDATES = ["purpose", "activity", "act", "location_type", "category"]
+_ACTIVITY_CANDIDATES = ["purpose", "activity", "act", "location_type", "category", "purpose_d"]
+_LOCATION_CANDIDATES = ["location_id", "tile_id", "Code_INSEE_D", "area", "venueId", "location"]
+_END_TS_CANDIDATES = ["end_timestamp", "_end_time", "end_time"]
 
 
 def _detect_column(df: pd.DataFrame, candidates: list[str]) -> Optional[str]:
@@ -333,6 +337,56 @@ def _generate_comparison_report(
   </div>
   <div class="charts">{synth_activity_charts_html}</div>"""
 
+    # Motif comparison chart
+    motif_section_html = ""
+    try:
+        real_uid = _detect_column(real_df, _UID_CANDIDATES + ["id"])
+        real_loc = _detect_column(real_df, _LOCATION_CANDIDATES)
+        real_purpose = _detect_column(real_df, _ACTIVITY_CANDIDATES)
+        real_start = _detect_column(real_df, _DATETIME_CANDIDATES)
+        real_end = _detect_column(real_df, _END_TS_CANDIDATES)
+        if all(c is not None for c in [real_uid, real_loc, real_purpose, real_start, real_end]):
+            _, real_motif_dist = discover_daily_motifs_from_agents(
+                real_df,
+                user_id_col=real_uid,
+                location_id_col=real_loc,
+                purpose_col=real_purpose,
+                timestamp_col=real_start,
+                end_timestamp_col=real_end,
+            )
+        else:
+            real_motif_dist = None
+
+        synth_motif_dist = None
+        if synth_activity_col and "tile_id" in traj.df.columns:
+            synth_df = traj.df.sort_values([traj.uid_col, traj.datetime_col]).copy()
+            synth_df["_end_ts"] = synth_df.groupby(traj.uid_col)[traj.datetime_col].shift(-1)
+            synth_df = synth_df.dropna(subset=["_end_ts"]).rename(
+                columns={traj.datetime_col: "start_timestamp", "_end_ts": "end_timestamp"}
+            )
+            _, synth_motif_dist = discover_daily_motifs_from_agents(
+                synth_df,
+                user_id_col=traj.uid_col,
+                location_id_col="tile_id",
+                purpose_col=synth_activity_col,
+                timestamp_col="start_timestamp",
+                end_timestamp_col="end_timestamp",
+            )
+
+        if real_motif_dist is not None or synth_motif_dist is not None:
+            fig_motif = plot_motif_literature_comparison(
+                reference_distribution=real_motif_dist,
+                comparison_distribution=synth_motif_dist,
+                labels=(observed_label, "synthetic"),
+            )
+            motif_section_html = f"""
+  <div class="section-header">
+    <span>Motif comparison &mdash; literature vs {observed_label}{" vs synthetic" if synth_motif_dist is not None else ""}</span>
+  </div>
+  <div class="charts">{fig_motif._repr_html_()}</div>"""
+    except Exception:
+        pass
+
     # Wasserstein table rows
     w_rows = [
         ("Jump lengths", f"{w_jump:.4f}", "km"),
@@ -378,7 +432,7 @@ def _generate_comparison_report(
     <p>Generated {generated_at}</p>
   </div>
   <div class="section-header">Distribution comparisons</div>
-  <div class="charts">{ecdf_charts_html}</div>{activity_section_html}
+  <div class="charts">{ecdf_charts_html}</div>{activity_section_html}{motif_section_html}
   <div class="metrics">
     <h2>Wasserstein distances</h2>
     <table>{table_rows}</table>
@@ -509,7 +563,8 @@ def simulate(
 
     synth_activity_col = None
     if "purpose" in tessellation_df.columns:
-        lookup = tessellation_df[["lat", "lng", "purpose"]].drop_duplicates(["lat", "lng"])
+        extra_cols = [c for c in ["tile_id", "purpose"] if c in tessellation_df.columns]
+        lookup = tessellation_df[["lat", "lng"] + extra_cols].drop_duplicates(["lat", "lng"])
         traj.df = traj.df.merge(lookup, on=["lat", "lng"], how="left")
         synth_activity_col = "purpose"
 
