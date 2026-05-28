@@ -7,8 +7,15 @@ import pandas as pd
 import skmob2
 import typer
 from skmob2.comparison import wasserstein_distance
+from skmob2.measures.spatial import waiting_times as _waiting_times
 from skmob2.models import DensityEPR
-from skmob_vis import plot_jump_lengths_ecdf, plot_visits_frequency_ecdf
+from skmob_vis import (
+    plot_dwell_time_ecdf,
+    plot_jump_lengths_ecdf,
+    plot_radius_of_gyration_ecdf,
+    plot_trip_duration_ecdf,
+    plot_visits_frequency_ecdf,
+)
 
 app = typer.Typer(help="CityBehavEx – synthetic urban mobility toolkit.")
 
@@ -19,6 +26,7 @@ _DATETIME_CANDIDATES = [
 _LAT_CANDIDATES = ["lat", "latitude"]
 _LNG_CANDIDATES = ["lng", "lon", "longitude", "long"]
 _UID_CANDIDATES = ["uid", "user_id", "user", "agent_id", "userid"]
+_DURATION_CANDIDATES = ["duration_minutes", "duration", "trip_duration_minutes", "duration_hours"]
 
 
 def _detect_column(df: pd.DataFrame, candidates: list[str]) -> Optional[str]:
@@ -135,12 +143,26 @@ def tessellate(
     typer.echo(f"Saved {len(df):,} H3 cells → {output}")
 
 
+def _waiting_times_minutes(traj: skmob2.TrajDataFrame) -> list:
+    secs = _waiting_times(
+        traj.df,
+        merge=True,
+        datetime_col=traj.datetime_col,
+        lat_col=traj.lat_col,
+        lng_col=traj.lng_col,
+        uid_col=traj.uid_col,
+    )
+    return [s / 60 for s in secs]
+
+
 def _generate_comparison_report(
     traj: skmob2.TrajDataFrame,
     real_path: str,
     observed_label: str,
     output_path: str,
 ) -> None:
+    from datetime import datetime as _dt
+
     real_df = pd.read_parquet(real_path)
     real_traj = skmob2.TrajDataFrame(
         real_df,
@@ -150,52 +172,111 @@ def _generate_comparison_report(
         uid_col=_detect_column(real_df, _UID_CANDIDATES),
     )
 
+    labels = ("synthetic", observed_label)
+
+    # Jump lengths
     synth_jumps = traj.jump_lengths(merge=True)
     real_jumps = real_traj.jump_lengths(merge=True)
+    w_jump = wasserstein_distance(synth_jumps, real_jumps)
 
+    # Visits frequency
     synth_visits = traj.df[traj.uid_col].value_counts().to_list()
     real_visits = real_traj.df[real_traj.uid_col].value_counts().to_list()
-
-    w_jump = wasserstein_distance(synth_jumps, real_jumps)
     w_visits = wasserstein_distance(synth_visits, real_visits)
 
-    fig_jump = plot_jump_lengths_ecdf(
-        synth_jumps, real_jumps,
-        labels=("synthetic", observed_label),
-    )
-    fig_visits = plot_visits_frequency_ecdf(
-        synth_visits, real_visits,
-        labels=("synthetic", observed_label),
-        title="Visits frequency ECDF",
+    # Radius of gyration
+    synth_rog = traj.radius_of_gyration()["radius_of_gyration"].to_numpy()
+    real_rog = real_traj.radius_of_gyration()["radius_of_gyration"].to_numpy()
+    w_rog = wasserstein_distance(synth_rog, real_rog)
+
+    # Dwell time (waiting times between consecutive visits, in minutes)
+    synth_dwell = _waiting_times_minutes(traj)
+    real_dwell = _waiting_times_minutes(real_traj)
+    w_dwell = wasserstein_distance(synth_dwell, real_dwell)
+
+    # Trip duration — use explicit duration column if available in real data
+    duration_col = _detect_column(real_df, _DURATION_CANDIDATES)
+    if duration_col:
+        real_trip = real_df[duration_col].dropna().tolist()
+        synth_trip = _waiting_times_minutes(traj)
+        w_trip = wasserstein_distance(synth_trip, real_trip)
+    else:
+        real_trip = synth_trip = w_trip = None
+
+    # Build plots
+    fig_jump = plot_jump_lengths_ecdf(synth_jumps, real_jumps, labels=labels)
+    fig_visits = plot_visits_frequency_ecdf(synth_visits, real_visits, labels=labels)
+    fig_rog = plot_radius_of_gyration_ecdf(synth_rog, real_rog, labels=labels)
+    fig_dwell = plot_dwell_time_ecdf(synth_dwell, real_dwell, labels=labels)
+    fig_trip = (
+        plot_trip_duration_ecdf(synth_trip, real_trip, labels=labels)
+        if real_trip is not None
+        else None
     )
 
-    metrics_html = (
-        f"<div style=\"font-family:'IBM Plex Mono',monospace;font-size:14px;"
-        f"padding:16px 24px;background:#fbf8f1;color:#14110d;"
-        f"border-top:1px solid #dcd5c4;\">"
-        f"<strong>Wasserstein distances</strong><br>"
-        f"Jump lengths: {w_jump:.4f} km &nbsp;|&nbsp; Visits frequency: {w_visits:.4f}"
-        f"</div>"
+    charts_html = "".join(
+        f._repr_html_()
+        for f in [fig_jump, fig_visits, fig_rog, fig_dwell]
+        if f is not None
     )
-    full_html = (
-        "<!doctype html>\n<html>\n<head>\n"
-        "  <meta charset=\"utf-8\">\n"
-        "  <title>CityBehavEx Comparison Report</title>\n"
-        "  <style>\n"
-        "    html,body{margin:0;padding:0;background:#fbf8f1;}\n"
-        "    .charts{display:flex;flex-wrap:wrap;}\n"
-        "    .charts iframe{flex:1 1 600px;border:0;min-height:420px;}\n"
-        "  </style>\n"
-        "</head>\n<body>\n"
-        f"  <div class=\"charts\">{fig_jump._repr_html_()}{fig_visits._repr_html_()}</div>\n"
-        f"  {metrics_html}\n"
-        "</body>\n</html>\n"
+    if fig_trip:
+        charts_html += fig_trip._repr_html_()
+
+    # Wasserstein table rows
+    w_rows = [
+        ("Jump lengths", f"{w_jump:.4f}", "km"),
+        ("Visits frequency", f"{w_visits:.4f}", ""),
+        ("Radius of gyration", f"{w_rog:.4f}", "km"),
+        ("Dwell time", f"{w_dwell:.4f}", "min"),
+    ]
+    if w_trip is not None:
+        w_rows.append(("Trip duration", f"{w_trip:.4f}", "min"))
+
+    table_rows = "".join(
+        f"<tr><td>{name}</td><td>{val}</td><td>{unit}</td></tr>"
+        for name, val, unit in w_rows
     )
+
+    generated_at = _dt.now().strftime("%Y-%m-%d %H:%M")
+
+    full_html = f"""<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>CityBehavEx Comparison Report</title>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono&family=IBM+Plex+Sans:wght@400;600&display=swap">
+  <style>
+    html,body{{margin:0;padding:0;background:#fbf8f1;color:#14110d;font-family:'IBM Plex Sans',sans-serif;}}
+    .header{{padding:32px 32px 24px;border-bottom:1px solid #dcd5c4;}}
+    .header h1{{margin:0;font-size:20px;font-weight:600;letter-spacing:-0.01em;}}
+    .header p{{margin:6px 0 0;font-size:13px;color:#6b5e4c;}}
+    .charts{{display:flex;flex-wrap:wrap;padding:24px;gap:24px;}}
+    .charts iframe{{flex:1 1 580px;border:0;min-height:420px;}}
+    .metrics{{padding:24px 32px 32px;border-top:1px solid #dcd5c4;}}
+    .metrics h2{{margin:0 0 14px;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.1em;color:#6b5e4c;}}
+    .metrics table{{border-collapse:collapse;font-family:'IBM Plex Mono',monospace;font-size:13px;}}
+    .metrics td{{padding:3px 20px 3px 0;}}
+    .metrics td:nth-child(2){{font-weight:500;font-variant-numeric:tabular-nums;}}
+    .metrics td:nth-child(3){{color:#6b5e4c;}}
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>synthetic &nbsp;vs&nbsp; {observed_label}</h1>
+    <p>Generated {generated_at}</p>
+  </div>
+  <div class="charts">{charts_html}</div>
+  <div class="metrics">
+    <h2>Wasserstein distances</h2>
+    <table>{table_rows}</table>
+  </div>
+</body>
+</html>
+"""
     Path(output_path).write_text(full_html, encoding="utf-8")
-    typer.echo(
-        f"Comparison report → {output_path}  "
-        f"(W-dist: jump={w_jump:.4f}, visits={w_visits:.4f})"
-    )
+
+    summary = "  ".join(f"{n}: {v}" for n, v, _ in w_rows)
+    typer.echo(f"Comparison report → {output_path}  ({summary})")
 
 
 @app.command()
