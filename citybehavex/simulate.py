@@ -12,6 +12,22 @@ from skmob_vis import plot_jump_lengths_ecdf, plot_visits_frequency_ecdf
 
 app = typer.Typer(help="CityBehavEx – synthetic urban mobility toolkit.")
 
+_DATETIME_CANDIDATES = [
+    "datetime", "start_timestamp", "timestamp", "check-in_time",
+    "start_time", "checkin_time", "time", "date",
+]
+_LAT_CANDIDATES = ["lat", "latitude"]
+_LNG_CANDIDATES = ["lng", "lon", "longitude", "long"]
+_UID_CANDIDATES = ["uid", "user_id", "user", "agent_id", "userid"]
+
+
+def _detect_column(df: pd.DataFrame, candidates: list[str]) -> Optional[str]:
+    cols_lower = {c.lower(): c for c in df.columns}
+    for candidate in candidates:
+        if candidate.lower() in cols_lower:
+            return cols_lower[candidate.lower()]
+    return None
+
 
 def _build_tessellation(
     min_lon: float,
@@ -21,6 +37,7 @@ def _build_tessellation(
     resolution: int,
     enrich_overture: bool,
     overture_release: str,
+    min_poi_count: int = 1,
 ) -> pd.DataFrame:
     bbox_wkt = (
         f"POLYGON(({min_lon} {min_lat}, {max_lon} {min_lat}, "
@@ -50,6 +67,7 @@ def _build_tessellation(
                 WHERE bbox.xmin BETWEEN {min_lon} AND {max_lon}
                   AND bbox.ymin BETWEEN {min_lat} AND {max_lat}
                 GROUP BY h3_str
+                HAVING COUNT(*) >= {min_poi_count}
             )
             SELECT
                 h3_str                                          AS tile_id,
@@ -80,6 +98,9 @@ def _build_tessellation(
             ORDER BY h3_cell
         """).df()
 
+    if min_poi_count > 0:
+        df = df[df["total_poi_count"] >= min_poi_count].reset_index(drop=True)
+
     return df
 
 
@@ -100,11 +121,15 @@ def tessellate(
     overture_release: str = typer.Option(
         "2026-05-20.0", help="Overture Maps release tag (used only with --enrich-overture)."
     ),
+    min_poi_count: int = typer.Option(
+        1, help="Minimum POI count per cell; cells below this threshold are dropped."
+    ),
     output: str = typer.Option("tessellation.parquet", help="Output parquet path"),
 ):
     """Generate an H3 tessellation from a bounding box."""
     df = _build_tessellation(
-        min_lon, min_lat, max_lon, max_lat, resolution, enrich_overture, overture_release
+        min_lon, min_lat, max_lon, max_lat, resolution, enrich_overture, overture_release,
+        min_poi_count=min_poi_count,
     )
     df.to_parquet(output, index=False)
     typer.echo(f"Saved {len(df):,} H3 cells → {output}")
@@ -115,17 +140,14 @@ def _generate_comparison_report(
     real_path: str,
     observed_label: str,
     output_path: str,
-    datetime_col: Optional[str] = None,
-    lat_col: Optional[str] = None,
-    lng_col: Optional[str] = None,
-    uid_col: Optional[str] = None,
 ) -> None:
+    real_df = pd.read_parquet(real_path)
     real_traj = skmob2.TrajDataFrame(
-        pd.read_parquet(real_path),
-        datetime_col=datetime_col,
-        lat_col=lat_col,
-        lng_col=lng_col,
-        uid_col=uid_col,
+        real_df,
+        datetime_col=_detect_column(real_df, _DATETIME_CANDIDATES),
+        lat_col=_detect_column(real_df, _LAT_CANDIDATES),
+        lng_col=_detect_column(real_df, _LNG_CANDIDATES),
+        uid_col=_detect_column(real_df, _UID_CANDIDATES),
     )
 
     synth_jumps = traj.jump_lengths(merge=True)
@@ -194,6 +216,9 @@ def simulate(
     overture_release: str = typer.Option(
         "2026-05-20.0", help="Overture Maps release tag (used only with --enrich-overture)."
     ),
+    min_poi_count: int = typer.Option(
+        1, help="Minimum value of --relevance-column per cell; cells below this threshold are dropped."
+    ),
     agents: int = typer.Option(500, help="Number of synthetic agents"),
     days: int = typer.Option(7, help="Simulation duration in days"),
     relevance_column: str = typer.Option(
@@ -203,25 +228,13 @@ def simulate(
     random_state: int = typer.Option(42, help="Random seed"),
     comparison: Optional[str] = typer.Option(
         None, "--comparison",
-        help="Path to a trajectories parquet (same schema as output) to compare against. Triggers HTML report.",
+        help="Path to a trajectories parquet to compare against. Triggers HTML report.",
     ),
     comparison_label: str = typer.Option(
         "observed", help="Legend label for the comparison series in plots."
     ),
     comparison_html: str = typer.Option(
         "comparison.html", help="Output path for the comparison HTML report."
-    ),
-    comparison_datetime_col: Optional[str] = typer.Option(
-        None, help="datetime column name in the --comparison file (auto-detected if omitted)."
-    ),
-    comparison_lat_col: Optional[str] = typer.Option(
-        None, help="latitude column name in the --comparison file (auto-detected if omitted)."
-    ),
-    comparison_lng_col: Optional[str] = typer.Option(
-        None, help="longitude column name in the --comparison file (auto-detected if omitted)."
-    ),
-    comparison_uid_col: Optional[str] = typer.Option(
-        None, help="user-ID column name in the --comparison file (auto-detected if omitted)."
     ),
 ):
     """Run DensityEPR simulation on a tessellation file or a bbox."""
@@ -236,9 +249,21 @@ def simulate(
     if tessellation:
         typer.echo(f"Loading tessellation from {tessellation} …")
         tessellation_df = pd.read_parquet(tessellation)
+        if min_poi_count > 0 and relevance_column in tessellation_df.columns:
+            n_before = len(tessellation_df)
+            tessellation_df = tessellation_df[
+                tessellation_df[relevance_column] >= min_poi_count
+            ].reset_index(drop=True)
+            n_dropped = n_before - len(tessellation_df)
+            if n_dropped:
+                typer.echo(
+                    f"Dropped {n_dropped:,} cells with {relevance_column} < {min_poi_count} "
+                    f"({len(tessellation_df):,} remaining)"
+                )
     elif has_bbox:
         tessellation_df = _build_tessellation(
-            min_lon, min_lat, max_lon, max_lat, resolution, enrich_overture, overture_release
+            min_lon, min_lat, max_lon, max_lat, resolution, enrich_overture, overture_release,
+            min_poi_count=min_poi_count,
         )
         typer.echo(f"Generated {len(tessellation_df):,} H3 cells from bbox")
     else:
@@ -272,7 +297,7 @@ def simulate(
     traj.df.to_parquet(output, index=False)
     typer.echo(
         f"Saved {len(traj.df):,} records "
-        f"({traj.df['uid'].nunique()} agents) → {output}"
+        f"({traj.df[traj.uid_col].nunique()} agents) → {output}"
     )
 
     if comparison:
@@ -281,10 +306,6 @@ def simulate(
             real_path=comparison,
             observed_label=comparison_label,
             output_path=comparison_html,
-            datetime_col=comparison_datetime_col,
-            lat_col=comparison_lat_col,
-            lng_col=comparison_lng_col,
-            uid_col=comparison_uid_col,
         )
 
 
