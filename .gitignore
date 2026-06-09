@@ -12,3 +12,5 @@ test.html
 gparis_sample_trip_with_lengths.parquet
 *.parquet
 *.gz
+
+*.html
