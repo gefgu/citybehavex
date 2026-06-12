@@ -3,7 +3,6 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SKMOB2_DIR="${ROOT_DIR}/../skmob2"
-SKMOB_VIZ_DIR="${ROOT_DIR}/../skmob-viz"
 VENV_DIR="${ROOT_DIR}/.venv"
 
 require_path() {
@@ -17,38 +16,65 @@ require_path() {
 }
 
 require_path "${ROOT_DIR}/pyproject.toml" "project pyproject.toml"
-require_path "${ROOT_DIR}/uv.lock" "project uv.lock"
-require_path "${VENV_DIR}" "project uv venv"
+require_path "${VENV_DIR}/bin/python" "project virtual environment Python"
 require_path "${SKMOB2_DIR}/pyproject.toml" "skmob2 package"
 require_path "${SKMOB2_DIR}/Cargo.toml" "skmob2 Rust manifest"
-require_path "${SKMOB_VIZ_DIR}/pyproject.toml" "skmob-viz package"
-require_path "${SKMOB_VIZ_DIR}/Cargo.toml" "skmob-viz Rust manifest"
+require_path "${SKMOB2_DIR}/skmob2-py/Cargo.toml" "skmob2 Python Rust manifest"
 
-if ! command -v uv >/dev/null 2>&1; then
-    echo "uv is not available on PATH" >&2
+MATURIN_CMD=()
+if [[ -x "${VENV_DIR}/bin/maturin" ]]; then
+    MATURIN_CMD=("${VENV_DIR}/bin/maturin")
+elif [[ -x "${SKMOB2_DIR}/.venv/bin/maturin" ]]; then
+    MATURIN_CMD=("${SKMOB2_DIR}/.venv/bin/maturin")
+elif command -v maturin >/dev/null 2>&1; then
+    MATURIN_CMD=(maturin)
+elif command -v uv >/dev/null 2>&1; then
+    MATURIN_CMD=(uv tool run --from "maturin>=1.13,<2.0" maturin)
+else
+    echo "Unable to find maturin." >&2
+    echo "Install maturin in ${VENV_DIR}, ${SKMOB2_DIR}/.venv, or on PATH." >&2
     exit 1
 fi
 
-unset CONDA_PREFIX
-export VIRTUAL_ENV="${VENV_DIR}"
-export PATH="${VENV_DIR}/bin:${PATH}"
+echo "Building skmob2 into ${VENV_DIR} with maturin develop --release"
+echo "  source: ${SKMOB2_DIR}"
+echo "  maturin: ${MATURIN_CMD[*]}"
 
-echo "Rebuilding editable local packages into ${VENV_DIR}"
-echo "  skmob2:    ${SKMOB2_DIR}"
-echo "  skmob-vis: ${SKMOB_VIZ_DIR}"
+(
+    cd "${SKMOB2_DIR}"
+    env -u CONDA_PREFIX \
+        VIRTUAL_ENV="${VENV_DIR}" \
+        PATH="${VENV_DIR}/bin:${PATH}" \
+        "${MATURIN_CMD[@]}" develop --release
+)
 
-uv sync \
-    --project "${ROOT_DIR}" \
-    --reinstall-package skmob2 \
-    --reinstall-package skmob-vis
+echo "Verifying the local skmob2 build"
+SKMOB2_DIR="${SKMOB2_DIR}" "${VENV_DIR}/bin/python" - <<'PY'
+import os
+from pathlib import Path
 
-echo "Verifying imports"
-"${VENV_DIR}/bin/python" - <<'PY'
 import skmob2
-import skmob_vis
+import skmob2._core as core
+from skmob2 import discover_daily_motifs_from_agents, waiting_times
 
-print(f"skmob2: {skmob2.__file__}")
-print(f"skmob_vis: {skmob_vis.__file__}")
+expected = Path(os.environ["SKMOB2_DIR"]).resolve()
+package_path = Path(skmob2.__file__).resolve()
+core_path = Path(core.__file__).resolve()
+
+if not package_path.is_relative_to(expected):
+    raise SystemExit(
+        f"skmob2 imported from {package_path}, expected a path under {expected}"
+    )
+if not core_path.is_relative_to(expected):
+    raise SystemExit(
+        f"skmob2._core imported from {core_path}, expected a path under {expected}"
+    )
+if not callable(waiting_times) or not callable(discover_daily_motifs_from_agents):
+    raise SystemExit("Current skmob2 public measure APIs are unavailable")
+
+print(f"skmob2: {package_path}")
+print(f"skmob2._core: {core_path}")
+print("Public measure APIs: OK")
 PY
 
 echo "Done"

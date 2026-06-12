@@ -1,3 +1,3 @@
-from citybehavex.simulate import app
+from citybehavex.cli import app
 
 app()
