@@ -108,7 +108,10 @@ def maybe_build_diaries(
 
     distribution = purpose_distribution(tessellation_df)
     location_counts = allocate_location_counts(
-        config.diaries.location_count_weights, config.llm.diary_count
+        config.diaries.location_count_mu,
+        config.diaries.location_count_sigma,
+        config.diaries.max_locations,
+        config.llm.diary_count,
     )
     batches: dict[str, DiaryBatch] = {}
     for day_type in ("weekday", "weekend"):
@@ -118,6 +121,9 @@ def maybe_build_diaries(
             representative_day=config.diaries.representative_day,
             purpose_distribution=distribution,
             location_counts=location_counts,
+            location_count_mu=config.diaries.location_count_mu,
+            location_count_sigma=config.diaries.location_count_sigma,
+            max_locations=config.diaries.max_locations,
             variant=day_type,
         )
     return batches

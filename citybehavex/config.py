@@ -94,7 +94,7 @@ class LLMConfig(BaseModel):
     max_tokens: Optional[int] = None
     timeout_seconds: float = 60.0
     retries: int = 1
-    diary_count: int = Field(default=20, ge=10, le=30)
+    diary_count: int = Field(default=30, ge=10, le=30)
     cache_dir: str = ".citybehavex/llm_diaries"
     prompt_path: Optional[str] = None
     raw_response_path: Optional[str] = None
@@ -128,13 +128,10 @@ class DiariesConfig(BaseModel):
             "OTHER",
         ]
     )
-    # Distribution of the number of distinct locations (including HOME) a daily
-    # schedule should visit. Maps a location count to a relative weight; the LLM
-    # diary mix is allocated across these buckets and each diary's prompt requests
-    # its target count. Defaults approximate a log-normal shape peaking at 2.
-    location_count_weights: dict[int, int] = Field(
-        default_factory=lambda: {1: 1, 2: 10, 3: 7, 4: 5, 5: 3, 6: 2}
-    )
+    # Rounded log-normal distribution for distinct daily locations, including HOME.
+    location_count_mu: float = 1.0
+    location_count_sigma: float = Field(default=0.5, gt=0)
+    max_locations: int = Field(default=6, ge=1, le=6)
 
     def profile_for(self, day_type: str) -> str:
         """City profile for ``"weekday"`` / ``"weekend"``, falling back to the shared one."""

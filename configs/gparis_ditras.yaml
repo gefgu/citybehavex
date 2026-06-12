@@ -22,7 +22,7 @@ llm:
   base_url: "http://localhost:8080"
   api_key: "none"
   model: "Qwen/Qwen2.5-32B-Instruct-AWQ"
-  diary_count: 10
+  diary_count: 30
   max_tokens: 768
   cache_dir: data/llm_diaries_gparis
   validated_diaries_path: data/llm_diaries_gparis/validated_diaries.json
@@ -33,15 +33,11 @@ diaries:
   city_profile_weekday: "Greater Paris weekday routines: commuting to work or studies, midday errands, evening leisure, and home."
   city_profile_weekend: "Greater Paris weekend routines: later mornings at home, leisure, shopping, social visits, fewer work/study trips."
   representative_day: "2026-01-01"
-  # Distribution of distinct locations per daily schedule (incl. HOME); shapes the
-  # LLM diary mix so most days are simple (home + 1 place).
-  location_count_weights:
-    1: 1
-    2: 10
-    3: 7
-    4: 5
-    5: 3
-    6: 2
+  # Truncated rounded log-normal distribution of distinct daily locations,
+  # including HOME.
+  location_count_mu: 1.0
+  location_count_sigma: 0.5
+  max_locations: 6
 
 comparison:
   path: data/gparis_visitation_df.parquet

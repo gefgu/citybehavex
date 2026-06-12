@@ -10,10 +10,16 @@ from citybehavex.diaries import diary_batch_to_markov_training
 from citybehavex.llm_diaries import (
     DiaryBatch,
     DiaryValidationError,
+    allocate_location_counts,
+    build_single_diary_prompt,
     fetch_diary_batch,
+    load_validated_diary_cache,
+    lognormal_location_probabilities,
     parse_diary_response,
     parse_single_diary_response,
 )
+
+DEFAULT_COUNTS = allocate_location_counts(1.0, 0.5, 6, 10)
 
 
 def _diary(day_id: int = 1) -> dict:
@@ -29,10 +35,35 @@ def _diary(day_id: int = 1) -> dict:
     }
 
 
-def _batch() -> dict:
+def _home_diary(day_id: int = 1) -> dict:
+    return {
+        "diary_id": f"routine-{day_id}",
+        "episodes": [
+            {"start": "00:00", "end": "24:00", "purpose": "HOME"},
+        ],
+    }
+
+
+def _batch(
+    *,
+    location_counts: list[int] | None = None,
+    mu: float = 1.0,
+    sigma: float = 0.5,
+    max_locations: int = 6,
+) -> dict:
+    counts = location_counts or DEFAULT_COUNTS
     return {
         "representative_day": "2026-01-01",
-        "diaries": [_diary(i) for i in range(10)],
+        "location_count_distribution": {
+            "mu": mu,
+            "sigma": sigma,
+            "max_locations": max_locations,
+        },
+        "target_location_counts": counts,
+        "diaries": [
+            _home_diary(i) if count == 1 else _diary(i)
+            for i, count in enumerate(counts, start=1)
+        ],
     }
 
 
@@ -64,6 +95,60 @@ def test_parse_single_diary_response_accepts_fenced_json():
     assert diary.diary_id == "routine-1"
 
 
+def test_truncated_lognormal_probabilities_and_allocations():
+    probabilities = lognormal_location_probabilities(1.0, 0.5, 6)
+
+    assert sum(probabilities.values()) == pytest.approx(1.0)
+    assert probabilities[2] == max(probabilities.values())
+    assert allocate_location_counts(1.0, 0.5, 6, 10) == [
+        1,
+        2,
+        2,
+        2,
+        3,
+        3,
+        3,
+        4,
+        4,
+        5,
+    ]
+    assert allocate_location_counts(1.0, 0.5, 6, 20) == [
+        1,
+        1,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        3,
+        3,
+        3,
+        3,
+        3,
+        4,
+        4,
+        4,
+        5,
+        5,
+        6,
+    ]
+
+
+def test_one_location_prompt_requires_single_home_episode():
+    prompt = build_single_diary_prompt(
+        diary_number=1,
+        diary_count=10,
+        city_profile="test city",
+        representative_day="2026-01-01",
+        location_count=1,
+    )
+
+    assert "HOME is the only visited location" in prompt
+    assert "exactly one episode from 00:00 to 24:00" in prompt
+
+
 @pytest.mark.parametrize(
     "payload",
     [
@@ -83,8 +168,8 @@ def test_parse_malformed_response_fails(payload):
     [
         lambda batch: batch["diaries"].pop(),
         lambda batch: batch["diaries"][0]["episodes"].__setitem__(0, {"start": "00:00", "end": "01:00", "purpose": "WORK"}),
-        lambda batch: batch["diaries"][0]["episodes"].__setitem__(1, {"start": "06:00", "end": "09:00", "purpose": "OTHER"}),
-        lambda batch: batch["diaries"][0]["episodes"].__setitem__(2, {"start": "09:00", "end": "17:00", "purpose": "BAD"}),
+        lambda batch: batch["diaries"][1]["episodes"].__setitem__(1, {"start": "06:00", "end": "09:00", "purpose": "OTHER"}),
+        lambda batch: batch["diaries"][1]["episodes"].__setitem__(2, {"start": "09:00", "end": "17:00", "purpose": "BAD"}),
     ],
 )
 def test_invalid_diary_payload_fails(mutate):
@@ -108,13 +193,41 @@ def test_cache_fallback_after_llm_failure(monkeypatch, tmp_path):
         model="test-model",
         cache_dir=str(tmp_path),
         validated_diaries_path=str(valid_cache),
+        diary_count=10,
     )
     batch = fetch_diary_batch(
         config,
         city_profile="test city",
         representative_day="2026-01-01",
+        location_counts=DEFAULT_COUNTS,
     )
     assert len(batch.diaries) == 10
+
+
+def test_legacy_and_mismatched_caches_are_rejected(tmp_path):
+    legacy_path = tmp_path / "legacy.json"
+    legacy = _batch()
+    legacy.pop("location_count_distribution")
+    legacy.pop("target_location_counts")
+    legacy_path.write_text(json.dumps(legacy), encoding="utf-8")
+
+    with pytest.raises(DiaryValidationError):
+        load_validated_diary_cache(legacy_path)
+
+    mismatch_path = tmp_path / "mismatch.json"
+    mismatch_path.write_text(json.dumps(_batch(mu=1.1)), encoding="utf-8")
+    config = LLMConfig(
+        cache_dir=str(tmp_path),
+        validated_diaries_path=str(mismatch_path),
+        diary_count=10,
+    )
+    with pytest.raises(DiaryValidationError):
+        fetch_diary_batch(
+            config,
+            city_profile="test city",
+            representative_day="2026-01-01",
+            location_counts=DEFAULT_COUNTS,
+        )
 
 
 def test_fetch_diary_batch_calls_llm_once_per_diary(monkeypatch, tmp_path):
@@ -152,12 +265,66 @@ def test_fetch_diary_batch_calls_llm_once_per_diary(monkeypatch, tmp_path):
         config,
         city_profile="test city",
         representative_day="2026-01-01",
+        location_counts=[2] * 10,
     )
 
     assert len(batch.diaries) == 10
     assert len(calls) == 10
+    assert batch.target_location_counts == [2] * 10
+    assert batch.location_count_distribution.model_dump() == {
+        "mu": 1.0,
+        "sigma": 0.5,
+        "max_locations": 6,
+    }
     assert (tmp_path / "raw_response_001.json").exists()
     assert (tmp_path / "prompt_001.txt").exists()
+
+
+def test_one_location_diary_retries_until_home_only(monkeypatch, tmp_path):
+    calls = []
+
+    class Response:
+        text = ""
+
+        def __init__(self, payload):
+            self._payload = payload
+            self.text = json.dumps(payload)
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return self._payload
+
+    responses = [_diary(1), _home_diary(1)] + [_diary(i) for i in range(2, 11)]
+
+    def post(*args, **kwargs):
+        calls.append(kwargs["json"])
+        return Response(_chat(responses[len(calls) - 1]))
+
+    monkeypatch.setattr(
+        "citybehavex.llm_diaries.requests.get",
+        lambda *args, **kwargs: Response({"data": []}),
+    )
+    monkeypatch.setattr("citybehavex.llm_diaries.requests.post", post)
+    config = LLMConfig(
+        base_url="http://localhost:8000",
+        api_key="test",
+        model="test-model",
+        cache_dir=str(tmp_path),
+        diary_count=10,
+        retries=2,
+    )
+
+    batch = fetch_diary_batch(
+        config,
+        city_profile="test city",
+        representative_day="2026-01-01",
+        location_counts=[1] + [2] * 9,
+    )
+
+    assert len(calls) == 11
+    assert all(episode.purpose == "HOME" for episode in batch.diaries[0].episodes)
 
 
 def test_markov_training_requires_validated_batch():

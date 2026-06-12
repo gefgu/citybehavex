@@ -29,6 +29,13 @@ Run the configured Greater Paris simulation from the repository root:
 uv run citybehavex simulate --config configs/gparis_ditras.yaml
 ```
 
+LLM generation creates 30 weekday and 30 weekend diaries by default. Override
+the number, within the supported range of 10 to 30, from the CLI:
+
+```bash
+uv run citybehavex simulate --config configs/gparis_ditras.yaml --diary-count 20
+```
+
 Equivalently, run the package as a Python module:
 
 ```bash
