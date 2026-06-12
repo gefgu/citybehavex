@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Optional
 
 import h3
+import numpy as np
 import pandas as pd
 import skmob2
 import typer
@@ -12,8 +13,12 @@ from skmob2 import (
     activity_distribution_jensen_shannon_divergence,
     activity_transition_matrix,
     activity_transition_matrix_jensen_shannon_divergence,
+    bin_visitation_law_data,
+    compute_visitation_law_data,
     daily_activity_distribution,
     discover_daily_motifs_from_agents,
+    fit_values_to_truncated_powerlaw,
+    fit_visitation_law,
     jensen_shannon_divergence,
     time_bin_matrix_jensen_shannon_divergence,
     visits_per_user_wasserstein_distance,
@@ -21,14 +26,17 @@ from skmob2 import (
     wasserstein_distance,
 )
 from skmob_vis import (
-    plot_activity_transition_matrix,
-    plot_daily_activity_distribution,
+    plot_activity_transition_difference,
+    plot_daily_activity_difference,
+    plot_distance_frequency_law,
     plot_dwell_time_ecdf,
     plot_jump_lengths_ecdf,
+    plot_lognormal_fits,
     plot_motif_literature_comparison,
     plot_radius_of_gyration_ecdf,
     plot_trip_duration_ecdf,
-    plot_visit_purpose_distribution,
+    plot_truncated_powerlaw_fits,
+    plot_visit_purpose_comparison,
     plot_visits_frequency_ecdf,
 )
 
@@ -139,6 +147,289 @@ def _motif_distribution_jsd(
         [left_counts.get(label, 0) for label in labels],
         [right_counts.get(label, 0) for label in labels],
     )
+
+
+def _activity_comparison_section_html(
+    observed_visits: Optional[pd.DataFrame],
+    synthetic_visits: Optional[pd.DataFrame],
+    observed_label: str,
+) -> str:
+    if observed_visits is None or synthetic_visits is None:
+        return ""
+
+    labels = (observed_label, "synthetic")
+    charts_html = (
+        plot_visit_purpose_comparison(
+            {
+                observed_label: observed_visits,
+                "synthetic": synthetic_visits,
+            }
+        )._repr_html_()
+        + plot_activity_transition_difference(
+            observed_visits,
+            synthetic_visits,
+            labels=labels,
+        )._repr_html_()
+        + plot_daily_activity_difference(
+            observed_visits,
+            synthetic_visits,
+            labels=labels,
+        )._repr_html_()
+    )
+    return f"""
+  <div class="section-header">
+    <span>Activity comparison &mdash; {observed_label} vs synthetic</span>
+  </div>
+  <div class="charts">{charts_html}</div>"""
+
+
+def _mobility_law_visits(
+    df: pd.DataFrame,
+    *,
+    uid_col: str,
+    datetime_col: str,
+    lat_col: str,
+    lng_col: str,
+    location_col: Optional[str] = None,
+    activity_col: Optional[str] = None,
+    location_resolution: int = 10,
+) -> pd.DataFrame:
+    columns = [uid_col, datetime_col, lat_col, lng_col]
+    if location_col:
+        columns.append(location_col)
+    if activity_col:
+        columns.append(activity_col)
+
+    source = df[columns].copy()
+    source[datetime_col] = pd.to_datetime(source[datetime_col], errors="coerce")
+    source[lat_col] = pd.to_numeric(source[lat_col], errors="coerce")
+    source[lng_col] = pd.to_numeric(source[lng_col], errors="coerce")
+    source = source.dropna(subset=[uid_col, datetime_col, lat_col, lng_col])
+    source = source[
+        source[lat_col].between(-90, 90) & source[lng_col].between(-180, 180)
+    ]
+
+    visits = pd.DataFrame(
+        {
+            "user_id": source[uid_col],
+            "timestamp": source[datetime_col],
+            "lat": source[lat_col],
+            "lng": source[lng_col],
+        }
+    )
+    fallback_locations = pd.Series(
+        [
+            h3.latlng_to_cell(lat, lng, location_resolution)
+            for lat, lng in zip(visits["lat"], visits["lng"])
+        ],
+        index=visits.index,
+    )
+    if location_col:
+        visits["location_id"] = source[location_col].where(
+            source[location_col].notna(),
+            fallback_locations,
+        ).astype(str)
+    else:
+        visits["location_id"] = fallback_locations
+    if activity_col:
+        visits["purpose"] = source[activity_col].to_numpy()
+    return visits.reset_index(drop=True)
+
+
+def _daily_location_lognormal_dataset(
+    visits: pd.DataFrame,
+    label: str,
+) -> tuple[np.ndarray, np.ndarray, float, float, str]:
+    daily = (
+        visits.assign(date=visits["timestamp"].dt.normalize())
+        .groupby(["user_id", "date"])["location_id"]
+        .nunique()
+    )
+    values = daily.to_numpy(dtype=float)
+    values = values[np.isfinite(values) & (values > 0)]
+    if values.size < 2:
+        raise ValueError("at least two daily location counts are required")
+
+    log_values = np.log(values)
+    mu = float(log_values.mean())
+    sigma = float(log_values.std())
+    if not np.isfinite(sigma) or sigma <= 1e-12:
+        raise ValueError("daily location counts must have positive log variance")
+
+    x_points, counts = np.unique(values, return_counts=True)
+    y_points = counts / counts.sum()
+    return x_points, y_points, mu, sigma, label
+
+
+def _truncated_powerlaw_dataset(
+    values: list | np.ndarray,
+    label: str,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, str]:
+    filtered = np.asarray(values, dtype=float)
+    filtered = filtered[np.isfinite(filtered) & (filtered > 0)]
+    if filtered.size < 2 or np.unique(filtered).size < 2:
+        raise ValueError("at least two distinct positive values are required")
+    parameters, x_points, y_points = fit_values_to_truncated_powerlaw(
+        filtered.tolist()
+    )
+    return parameters, x_points, y_points, label
+
+
+def _distance_frequency_dataset(
+    visits: pd.DataFrame,
+    label: str,
+) -> tuple[np.ndarray, np.ndarray, float, float, str]:
+    purpose_col = "purpose" if "purpose" in visits.columns else None
+    law_data = compute_visitation_law_data(
+        visits,
+        user_id_col="user_id",
+        location_id_col="location_id",
+        timestamp_col="timestamp",
+        purpose_col=purpose_col,
+        lat_col="lat",
+        lng_col="lng",
+    )
+    rf_points, rho_points, _ = bin_visitation_law_data(
+        law_data,
+        user_id_col="user_id",
+        location_id_col="location_id",
+    )
+    eta, mu, _ = fit_visitation_law(rf_points, rho_points)
+    if eta <= 0 or mu <= 0:
+        raise ValueError("distance-frequency fit parameters must be positive")
+    return rf_points, rho_points, eta, mu, label
+
+
+def _fit_parameters_html(
+    formula: str,
+    rows: list[tuple[str, list[tuple[str, float]]]],
+) -> str:
+    parameter_rows = "".join(
+        "<tr>"
+        f"<td>{label}</td>"
+        f"<td>{', '.join(f'{name}={value:.4g}' for name, value in parameters)}</td>"
+        "</tr>"
+        for label, parameters in rows
+    )
+    return f"""
+    <div class="fit-parameters">
+      <div class="fit-formula">{formula}</div>
+      <table>{parameter_rows}</table>
+    </div>"""
+
+
+def _mobility_laws_section_html(
+    *,
+    observed_visits: pd.DataFrame,
+    synthetic_visits: pd.DataFrame,
+    observed_jumps: list | np.ndarray,
+    synthetic_jumps: list | np.ndarray,
+    observed_rog: list | np.ndarray,
+    synthetic_rog: list | np.ndarray,
+    observed_label: str,
+) -> str:
+    chart_html: list[str] = []
+
+    def render(name: str, build_chart) -> None:
+        try:
+            figure, parameters_html = build_chart()
+            chart_html.append(
+                '<div class="mobility-law-chart">'
+                f"{figure._repr_html_()}{parameters_html}"
+                "</div>"
+            )
+        except (RuntimeError, TypeError, ValueError) as exc:
+            typer.echo(f"Warning: {name} mobility-law chart skipped: {exc}", err=True)
+
+    def truncated_powerlaw_chart(values_observed, values_synthetic, **plot_kwargs):
+        observed = _truncated_powerlaw_dataset(values_observed, observed_label)
+        synthetic = _truncated_powerlaw_dataset(values_synthetic, "synthetic")
+        figure = plot_truncated_powerlaw_fits(
+            observed,
+            synthetic,
+            **plot_kwargs,
+        )
+        return figure, _fit_parameters_html(
+            "p(x) = c (x + r0)<sup>-beta</sup> exp(-x / kappa)",
+            [
+                (
+                    observed[3],
+                    list(zip(("c", "r0", "beta", "kappa"), observed[0])),
+                ),
+                (
+                    synthetic[3],
+                    list(zip(("c", "r0", "beta", "kappa"), synthetic[0])),
+                ),
+            ],
+        )
+
+    render(
+        "travel-distance",
+        lambda: truncated_powerlaw_chart(
+            observed_jumps,
+            synthetic_jumps,
+            title="Travel-distance mobility law",
+        ),
+    )
+    render(
+        "radius-of-gyration",
+        lambda: truncated_powerlaw_chart(
+            observed_rog,
+            synthetic_rog,
+            title="Radius-of-gyration mobility law",
+            x_label="radius of gyration · km",
+            y_label="P(r_g)",
+        ),
+    )
+
+    def lognormal_chart():
+        observed = _daily_location_lognormal_dataset(
+            observed_visits,
+            observed_label,
+        )
+        synthetic = _daily_location_lognormal_dataset(
+            synthetic_visits,
+            "synthetic",
+        )
+        figure = plot_lognormal_fits(observed, synthetic)
+        return figure, _fit_parameters_html(
+            "f(N) = exp(-(ln N - mu)<sup>2</sup> / (2 sigma<sup>2</sup>)) "
+            "/ (N sigma sqrt(2 pi))",
+            [
+                (observed[4], [("mu", observed[2]), ("sigma", observed[3])]),
+                (synthetic[4], [("mu", synthetic[2]), ("sigma", synthetic[3])]),
+            ],
+        )
+
+    render(
+        "daily-locations log-normal",
+        lognormal_chart,
+    )
+
+    def distance_frequency_chart():
+        observed = _distance_frequency_dataset(observed_visits, observed_label)
+        synthetic = _distance_frequency_dataset(synthetic_visits, "synthetic")
+        figure = plot_distance_frequency_law(observed, synthetic)
+        return figure, _fit_parameters_html(
+            "rho(r, f) = mu (r f)<sup>-eta</sup>",
+            [
+                (observed[4], [("eta", observed[2]), ("mu", observed[3])]),
+                (synthetic[4], [("eta", synthetic[2]), ("mu", synthetic[3])]),
+            ],
+        )
+
+    render(
+        "distance-frequency",
+        distance_frequency_chart,
+    )
+
+    if not chart_html:
+        return ""
+    return f"""
+  <div class="section-header">
+    <span>Mobility laws &mdash; {observed_label} vs synthetic</span>
+  </div>
+  <div class="charts mobility-law-charts">{"".join(chart_html)}</div>"""
 
 
 def load_trajectory(path: str) -> skmob2.TrajDataFrame:
@@ -327,33 +618,51 @@ def generate_comparison_report(
     if fig_trip:
         ecdf_charts_html += fig_trip._repr_html_()
 
-    activity_col = detect_column(real_df, _ACTIVITY_CANDIDATES)
-    activity_section_html = ""
-    if activity_col:
-        typer.echo(f"Rendering activity charts for {observed_label} ...")
-        activity_charts_html = (
-            plot_visit_purpose_distribution(real_df)._repr_html_()
-            + plot_activity_transition_matrix(real_df)._repr_html_()
-            + plot_daily_activity_distribution(real_df)._repr_html_()
-        )
-        activity_section_html = f"""
-  <div class="section-header">
-    <span>Activity profile &mdash; {observed_label}</span>
-  </div>
-  <div class="charts">{activity_charts_html}</div>"""
+    typer.echo("Rendering mobility-law charts ...")
+    real_location_col = detect_column(real_df, _LOCATION_CANDIDATES)
+    synth_location_col = detect_column(traj.df, _LOCATION_CANDIDATES)
+    real_activity_col = detect_column(real_df, _ACTIVITY_CANDIDATES)
+    mobility_observed_visits = _mobility_law_visits(
+        real_df,
+        uid_col=real_traj.uid_col,
+        datetime_col=real_traj.datetime_col,
+        lat_col=real_traj.lat_col,
+        lng_col=real_traj.lng_col,
+        location_col=real_location_col,
+        activity_col=real_activity_col,
+    )
+    mobility_synthetic_visits = _mobility_law_visits(
+        traj.df,
+        uid_col=traj.uid_col,
+        datetime_col=traj.datetime_col,
+        lat_col=traj.lat_col,
+        lng_col=traj.lng_col,
+        location_col=synth_location_col,
+        activity_col=(
+            synth_activity_col
+            if synth_activity_col and synth_activity_col in traj.df.columns
+            else None
+        ),
+    )
+    mobility_laws_section_html = _mobility_laws_section_html(
+        observed_visits=mobility_observed_visits,
+        synthetic_visits=mobility_synthetic_visits,
+        observed_jumps=real_jumps,
+        synthetic_jumps=synth_jumps,
+        observed_rog=real_rog,
+        synthetic_rog=synth_rog,
+        observed_label=observed_label,
+    )
 
-    if synth_activity_col and synth_activity_col in traj.df.columns:
-        typer.echo("Rendering activity charts for synthetic trajectories ...")
-        synth_activity_charts_html = (
-            plot_visit_purpose_distribution(traj.df)._repr_html_()
-            + plot_activity_transition_matrix(traj.df)._repr_html_()
-            + plot_daily_activity_distribution(traj.df)._repr_html_()
+    if observed_visits is not None and synthetic_visits is not None:
+        typer.echo(
+            f"Rendering activity comparison for {observed_label} and synthetic trajectories ..."
         )
-        activity_section_html += f"""
-  <div class="section-header">
-    <span>Activity profile &mdash; synthetic</span>
-  </div>
-  <div class="charts">{synth_activity_charts_html}</div>"""
+    activity_section_html = _activity_comparison_section_html(
+        observed_visits,
+        synthetic_visits,
+        observed_label,
+    )
 
     motif_section_html = ""
     try:
@@ -446,6 +755,13 @@ def generate_comparison_report(
     .section-header{{padding:20px 32px 0;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.1em;color:#6b5e4c;}}
     .charts{{display:flex;flex-wrap:wrap;padding:24px;gap:24px;}}
     .charts iframe{{flex:1 1 580px;border:0;min-height:420px;}}
+    .mobility-law-chart{{flex:1 1 580px;min-width:0;}}
+    .mobility-law-chart iframe{{width:100%;}}
+    .fit-parameters{{margin:8px 12px 0;padding:12px 16px;border:1px solid #dcd5c4;background:#fffdf8;font-family:monospace;font-size:12px;}}
+    .fit-formula{{margin-bottom:8px;color:#6b5e4c;}}
+    .fit-parameters table{{border-collapse:collapse;}}
+    .fit-parameters td{{padding:2px 18px 2px 0;}}
+    .fit-parameters td:first-child{{font-weight:600;}}
     .metrics{{display:flex;flex-wrap:wrap;gap:64px;padding:24px 32px 32px;border-bottom:1px solid #dcd5c4;}}
     .metrics h2{{margin:0 0 14px;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.1em;color:#6b5e4c;}}
     .metrics table{{border-collapse:collapse;font-family:monospace;font-size:13px;}}
@@ -458,7 +774,7 @@ def generate_comparison_report(
     <p>Generated {generated_at}</p>
   </div>{metrics_html}
   <div class="section-header">Distribution comparisons</div>
-  <div class="charts">{ecdf_charts_html}</div>{activity_section_html}{motif_section_html}
+  <div class="charts">{ecdf_charts_html}</div>{mobility_laws_section_html}{activity_section_html}{motif_section_html}
 </body>
 </html>
 """

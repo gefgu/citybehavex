@@ -5,6 +5,10 @@ from types import SimpleNamespace
 import pandas as pd
 
 from citybehavex.reports import (
+    _activity_comparison_section_html,
+    _daily_location_lognormal_dataset,
+    _mobility_law_visits,
+    _mobility_laws_section_html,
     _motif_visits,
     _visits_for_comparison,
     load_trajectory,
@@ -80,3 +84,267 @@ def test_motif_visits_use_h3_locations_and_binary_purposes():
 
     assert motif_visits["location_id"].str.startswith("8a").all()
     assert motif_visits["purpose"].tolist() == ["HOME", "VISIT"]
+
+
+def test_activity_comparison_section_uses_comparison_plots(monkeypatch):
+    observed_visits = pd.DataFrame({"source": ["observed"]})
+    synthetic_visits = pd.DataFrame({"source": ["synthetic"]})
+    calls = []
+
+    class Figure:
+        def __init__(self, name):
+            self.name = name
+
+        def _repr_html_(self):
+            return f"<iframe>{self.name}</iframe>"
+
+    def purpose(datasets):
+        calls.append(("purpose", datasets))
+        return Figure("purpose")
+
+    def transition(first, second, *, labels):
+        calls.append(("transition", first, second, labels))
+        return Figure("transition")
+
+    def daily(first, second, *, labels):
+        calls.append(("daily", first, second, labels))
+        return Figure("daily")
+
+    monkeypatch.setattr("citybehavex.reports.plot_visit_purpose_comparison", purpose)
+    monkeypatch.setattr(
+        "citybehavex.reports.plot_activity_transition_difference",
+        transition,
+    )
+    monkeypatch.setattr(
+        "citybehavex.reports.plot_daily_activity_difference",
+        daily,
+    )
+
+    html = _activity_comparison_section_html(
+        observed_visits,
+        synthetic_visits,
+        "survey",
+    )
+
+    assert len(calls) == 3
+    assert calls[0][0] == "purpose"
+    assert list(calls[0][1]) == ["survey", "synthetic"]
+    assert calls[0][1]["survey"] is observed_visits
+    assert calls[0][1]["synthetic"] is synthetic_visits
+    assert calls[1][0] == "transition"
+    assert calls[1][1] is observed_visits
+    assert calls[1][2] is synthetic_visits
+    assert calls[1][3] == ("survey", "synthetic")
+    assert calls[2][0] == "daily"
+    assert calls[2][1] is observed_visits
+    assert calls[2][2] is synthetic_visits
+    assert calls[2][3] == ("survey", "synthetic")
+    assert html.count("Activity comparison") == 1
+    assert html.count("<iframe>") == 3
+
+
+def test_activity_comparison_section_requires_both_datasets():
+    visits = pd.DataFrame({"source": ["observed"]})
+
+    assert _activity_comparison_section_html(visits, None, "survey") == ""
+    assert _activity_comparison_section_html(None, visits, "survey") == ""
+
+
+def test_mobility_law_visits_use_existing_locations_or_h3_fallback():
+    source = pd.DataFrame(
+        {
+            "uid": ["u1", "u1"],
+            "datetime": pd.to_datetime(
+                ["2026-01-01 08:00:00", "2026-01-01 10:00:00"]
+            ),
+            "lat": [48.85, 48.86],
+            "lng": [2.35, 2.36],
+            "tile_id": ["home", None],
+            "purpose": ["HOME", "WORK"],
+        }
+    )
+
+    existing = _mobility_law_visits(
+        source,
+        uid_col="uid",
+        datetime_col="datetime",
+        lat_col="lat",
+        lng_col="lng",
+        location_col="tile_id",
+        activity_col="purpose",
+    )
+    fallback = _mobility_law_visits(
+        source,
+        uid_col="uid",
+        datetime_col="datetime",
+        lat_col="lat",
+        lng_col="lng",
+    )
+
+    assert existing["location_id"].iloc[0] == "home"
+    assert existing["location_id"].iloc[1].startswith("8a")
+    assert existing["purpose"].tolist() == ["HOME", "WORK"]
+    assert fallback["location_id"].str.startswith("8a").all()
+
+
+def test_daily_location_lognormal_dataset_counts_distinct_locations():
+    visits = pd.DataFrame(
+        {
+            "user_id": ["u1", "u1", "u1", "u1", "u2", "u2"],
+            "timestamp": pd.to_datetime(
+                [
+                    "2026-01-01 08:00:00",
+                    "2026-01-01 09:00:00",
+                    "2026-01-01 10:00:00",
+                    "2026-01-02 08:00:00",
+                    "2026-01-01 08:00:00",
+                    "2026-01-01 09:00:00",
+                ]
+            ),
+            "location_id": ["home", "work", "work", "home", "home", "shop"],
+        }
+    )
+
+    x_points, probabilities, mu, sigma, label = (
+        _daily_location_lognormal_dataset(visits, "observed")
+    )
+
+    assert x_points.tolist() == [1.0, 2.0]
+    assert probabilities.tolist() == [1 / 3, 2 / 3]
+    assert mu > 0
+    assert sigma > 0
+    assert label == "observed"
+
+
+def test_mobility_laws_section_renders_all_four_charts(monkeypatch):
+    calls = []
+
+    class Figure:
+        def __init__(self, name):
+            self.name = name
+
+        def _repr_html_(self):
+            return f"<iframe>{self.name}</iframe>"
+
+    monkeypatch.setattr(
+        "citybehavex.reports._truncated_powerlaw_dataset",
+        lambda values, label: ((1.0, 2.0, 3.0, 4.0), [1.0], [0.5], label),
+    )
+    monkeypatch.setattr(
+        "citybehavex.reports._daily_location_lognormal_dataset",
+        lambda visits, label: ([1.0], [0.5], 0.6, 0.7, label),
+    )
+    monkeypatch.setattr(
+        "citybehavex.reports._distance_frequency_dataset",
+        lambda visits, label: ([1.0], [0.5], 1.8, 2.5, label),
+    )
+
+    def truncated(*datasets, **kwargs):
+        calls.append(("truncated", datasets, kwargs))
+        return Figure(kwargs["title"])
+
+    def lognormal(*datasets, **kwargs):
+        calls.append(("lognormal", datasets, kwargs))
+        return Figure("lognormal")
+
+    def distance_frequency(*datasets, **kwargs):
+        calls.append(("distance-frequency", datasets, kwargs))
+        return Figure("distance-frequency")
+
+    monkeypatch.setattr(
+        "citybehavex.reports.plot_truncated_powerlaw_fits",
+        truncated,
+    )
+    monkeypatch.setattr("citybehavex.reports.plot_lognormal_fits", lognormal)
+    monkeypatch.setattr(
+        "citybehavex.reports.plot_distance_frequency_law",
+        distance_frequency,
+    )
+
+    visits = pd.DataFrame({"row": [1, 2]})
+    html = _mobility_laws_section_html(
+        observed_visits=visits,
+        synthetic_visits=visits,
+        observed_jumps=[1.0, 2.0],
+        synthetic_jumps=[2.0, 3.0],
+        observed_rog=[3.0, 4.0],
+        synthetic_rog=[4.0, 5.0],
+        observed_label="survey",
+    )
+
+    assert [call[0] for call in calls] == [
+        "truncated",
+        "truncated",
+        "lognormal",
+        "distance-frequency",
+    ]
+    for _, datasets, _ in calls:
+        assert datasets[0][-1] == "survey"
+        assert datasets[1][-1] == "synthetic"
+    assert calls[1][2]["x_label"] == "radius of gyration · km"
+    assert "Mobility laws" in html
+    assert html.count("<iframe>") == 4
+    assert html.count('class="fit-parameters"') == 4
+    assert "c=1" in html
+    assert "r0=2" in html
+    assert "beta=3" in html
+    assert "kappa=4" in html
+    assert "mu=0.6" in html
+    assert "sigma=0.7" in html
+    assert "eta=1.8" in html
+    assert "mu=2.5" in html
+
+
+def test_mobility_laws_section_skips_only_failed_chart(monkeypatch):
+    class Figure:
+        def _repr_html_(self):
+            return "<iframe>chart</iframe>"
+
+    monkeypatch.setattr(
+        "citybehavex.reports._truncated_powerlaw_dataset",
+        lambda values, label: ((1.0, 2.0, 3.0, 4.0), [1.0], [0.5], label),
+    )
+    monkeypatch.setattr(
+        "citybehavex.reports._daily_location_lognormal_dataset",
+        lambda visits, label: ([1.0], [0.5], 0.6, 0.7, label),
+    )
+    monkeypatch.setattr(
+        "citybehavex.reports._distance_frequency_dataset",
+        lambda visits, label: ([1.0], [0.5], 1.8, 2.5, label),
+    )
+
+    truncated_calls = 0
+
+    def truncated(*datasets, **kwargs):
+        nonlocal truncated_calls
+        truncated_calls += 1
+        if truncated_calls == 1:
+            raise ValueError("insufficient travel distances")
+        return Figure()
+
+    monkeypatch.setattr(
+        "citybehavex.reports.plot_truncated_powerlaw_fits",
+        truncated,
+    )
+    monkeypatch.setattr(
+        "citybehavex.reports.plot_lognormal_fits",
+        lambda *datasets, **kwargs: Figure(),
+    )
+    monkeypatch.setattr(
+        "citybehavex.reports.plot_distance_frequency_law",
+        lambda *datasets, **kwargs: Figure(),
+    )
+
+    visits = pd.DataFrame({"row": [1, 2]})
+    html = _mobility_laws_section_html(
+        observed_visits=visits,
+        synthetic_visits=visits,
+        observed_jumps=[1.0, 2.0],
+        synthetic_jumps=[2.0, 3.0],
+        observed_rog=[3.0, 4.0],
+        synthetic_rog=[4.0, 5.0],
+        observed_label="survey",
+    )
+
+    assert html.count("<iframe>") == 3
+    assert html.count('class="fit-parameters"') == 3
