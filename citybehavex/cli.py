@@ -7,6 +7,7 @@ import typer
 from .config import (
     CityBehavExConfig,
     ComparisonConfig,
+    LLMConfig,
     SimulationConfig,
     TessellationConfig,
     apply_overrides,
@@ -171,6 +172,13 @@ def simulate(
     relevance_column: Optional[str] = typer.Option(None, help="Location attractiveness column"),
     output: Optional[str] = typer.Option(None, help="Output parquet path"),
     random_state: Optional[int] = typer.Option(None, help="Random seed"),
+    diary_count: Optional[int] = typer.Option(
+        None,
+        "--diary-count",
+        min=10,
+        max=30,
+        help="Number of weekday and weekend LLM diaries to generate (default: 30).",
+    ),
     comparison: Optional[str] = typer.Option(
         None, "--comparison", help="Path to trajectories parquet to compare against."
     ),
@@ -214,13 +222,20 @@ def simulate(
             "html": comparison_html,
         },
     )
+    llm = apply_overrides(
+        loaded.llm,
+        {
+            "diary_count": diary_count,
+        },
+    )
     assert isinstance(tess, TessellationConfig)
     assert isinstance(sim, SimulationConfig)
     assert isinstance(comp, ComparisonConfig)
+    assert isinstance(llm, LLMConfig)
     effective = CityBehavExConfig(
         tessellation=tess,
         simulation=sim,
-        llm=loaded.llm,
+        llm=llm,
         diaries=loaded.diaries,
         comparison=comp,
     )

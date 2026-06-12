@@ -2,7 +2,13 @@ from __future__ import annotations
 
 import pytest
 
-from citybehavex.config import SimulationConfig, apply_overrides, load_config
+from citybehavex.config import (
+    DiariesConfig,
+    LLMConfig,
+    SimulationConfig,
+    apply_overrides,
+    load_config,
+)
 
 
 def test_load_config_expands_environment(monkeypatch, tmp_path):
@@ -33,6 +39,10 @@ def test_cli_overrides_config_defaults():
     assert updated.output == "trajectories.parquet"
 
 
+def test_llm_config_defaults_to_thirty_diaries():
+    assert LLMConfig().diary_count == 30
+
+
 def test_simulation_config_rejects_tessellation_and_bbox():
     with pytest.raises(ValueError):
         SimulationConfig(
@@ -42,3 +52,17 @@ def test_simulation_config_rejects_tessellation_and_bbox():
             max_lon=1,
             max_lat=1,
         )
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"location_count_sigma": 0},
+        {"location_count_sigma": -0.5},
+        {"max_locations": 7},
+        {"max_locations": 0},
+    ],
+)
+def test_diaries_config_rejects_invalid_location_distribution(kwargs):
+    with pytest.raises(ValueError):
+        DiariesConfig(**kwargs)

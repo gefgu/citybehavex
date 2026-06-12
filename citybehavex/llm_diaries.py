@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 from pathlib import Path
 from typing import Any, Literal, Optional
 
@@ -120,11 +121,44 @@ class Diary(BaseModel):
         return self
 
 
+class LocationCountDistribution(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    mu: float
+    sigma: float = Field(gt=0)
+    max_locations: int = Field(ge=1, le=6)
+
+    @field_validator("mu", "sigma")
+    @classmethod
+    def finite_parameters(cls, value: float) -> float:
+        if not math.isfinite(value):
+            raise ValueError("location-count distribution parameters must be finite")
+        return value
+
+
 class DiaryBatch(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     representative_day: Optional[str] = None
+    location_count_distribution: LocationCountDistribution
+    target_location_counts: list[int] = Field(min_length=10, max_length=30)
     diaries: list[Diary] = Field(min_length=10, max_length=30)
+
+    @model_validator(mode="after")
+    def validate_location_count_metadata(self) -> DiaryBatch:
+        if len(self.target_location_counts) != len(self.diaries):
+            raise ValueError("target_location_counts must have one entry per diary")
+        if any(
+            count < 1 or count > self.location_count_distribution.max_locations
+            for count in self.target_location_counts
+        ):
+            raise ValueError("target location counts must be within the configured range")
+        for count, diary in zip(self.target_location_counts, self.diaries):
+            if count == 1 and any(
+                episode.purpose != "HOME" for episode in diary.episodes
+            ):
+                raise ValueError("one-location diaries must contain only HOME episodes")
+        return self
 
 
 def parse_chat_completion_response(payload: Any) -> ChatCompletionResponse:
@@ -228,7 +262,13 @@ def build_single_diary_prompt(
 ) -> str:
     distribution = purpose_distribution or {}
     location_rule = ""
-    if location_count is not None:
+    if location_count == 1:
+        location_rule = (
+            "This is a one-location schedule: HOME is the only visited location. "
+            "Return exactly one episode from 00:00 to 24:00 with purpose HOME. "
+            "Do not include any non-HOME purpose.\n"
+        )
+    elif location_count is not None:
         location_rule = (
             f"This schedule should visit exactly {location_count} distinct "
             f"location(s) counting HOME (so {max(location_count - 1, 0)} non-home "
@@ -251,33 +291,59 @@ def build_single_diary_prompt(
     )
 
 
-def allocate_location_counts(weights: dict[int, int], n: int) -> list[int]:
-    """Allocate ``n`` diaries across location-count buckets proportional to weights.
+def lognormal_location_probabilities(
+    mu: float,
+    sigma: float,
+    max_locations: int,
+) -> dict[int, float]:
+    """Return rounded log-normal probabilities truncated to ``1..max_locations``."""
+    distribution = LocationCountDistribution(
+        mu=mu,
+        sigma=sigma,
+        max_locations=max_locations,
+    )
 
-    Returns a list of length ``n`` of target location counts. Uses largest-remainder
-    rounding so the mix matches the weights as closely as possible.
-    """
+    def cdf(value: float) -> float:
+        if value <= 0:
+            return 0.0
+        z = (math.log(value) - distribution.mu) / (
+            distribution.sigma * math.sqrt(2.0)
+        )
+        return 0.5 * (1.0 + math.erf(z))
+
+    probabilities = {
+        count: cdf(count + 0.5) - cdf(count - 0.5)
+        for count in range(1, distribution.max_locations + 1)
+    }
+    total = sum(probabilities.values())
+    if total <= 0:
+        raise ValueError("location-count distribution has no probability in range")
+    return {count: probability / total for count, probability in probabilities.items()}
+
+
+def allocate_location_counts(
+    mu: float,
+    sigma: float,
+    max_locations: int,
+    n: int,
+) -> list[int]:
+    """Allocate ``n`` diaries to a truncated rounded log-normal distribution."""
     if n <= 0:
         return []
-    positive = {int(k): float(v) for k, v in weights.items() if v and v > 0}
-    if not positive:
-        return [2] * n
-    total = sum(positive.values())
-    raw = {k: (v / total) * n for k, v in positive.items()}
+    probabilities = lognormal_location_probabilities(mu, sigma, max_locations)
+    raw = {count: probability * n for count, probability in probabilities.items()}
     counts = {k: int(value) for k, value in raw.items()}
     assigned = sum(counts.values())
     remainder = sorted(
-        positive.keys(), key=lambda k: (raw[k] - counts[k], positive[k]), reverse=True
+        probabilities, key=lambda k: (raw[k] - counts[k], probabilities[k]), reverse=True
     )
-    i = 0
-    while assigned < n and remainder:
-        counts[remainder[i % len(remainder)]] += 1
+    for count in remainder[: n - assigned]:
+        counts[count] += 1
         assigned += 1
-        i += 1
     out: list[int] = []
     for k in sorted(counts):
         out.extend([k] * counts[k])
-    return out[:n]
+    return out
 
 
 def _cache_paths(config: LLMConfig) -> tuple[Path, Path, Path]:
@@ -302,12 +368,32 @@ def _apply_variant(path: Path, variant: str) -> Path:
     return path.with_name(f"{path.stem}_{variant}{path.suffix}")
 
 
-def load_validated_diary_cache(path: Path) -> DiaryBatch:
+def load_validated_diary_cache(
+    path: Path,
+    *,
+    expected_distribution: Optional[LocationCountDistribution] = None,
+    expected_location_counts: Optional[list[int]] = None,
+) -> DiaryBatch:
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
-        return DiaryBatch.model_validate(payload)
+        batch = DiaryBatch.model_validate(payload)
     except (OSError, json.JSONDecodeError, ValidationError) as exc:
         raise DiaryValidationError(f"invalid diary cache at {path}: {exc}") from exc
+    if (
+        expected_distribution is not None
+        and batch.location_count_distribution != expected_distribution
+    ):
+        raise DiaryValidationError(
+            f"invalid diary cache at {path}: location-count distribution does not match configuration"
+        )
+    if (
+        expected_location_counts is not None
+        and batch.target_location_counts != expected_location_counts
+    ):
+        raise DiaryValidationError(
+            f"invalid diary cache at {path}: target location counts do not match configuration"
+        )
+    return batch
 
 
 def save_validated_diary_cache(batch: DiaryBatch, path: Path) -> None:
@@ -315,12 +401,26 @@ def save_validated_diary_cache(batch: DiaryBatch, path: Path) -> None:
     path.write_text(batch.model_dump_json(indent=2), encoding="utf-8")
 
 
-def _load_cache_with_fallback(valid_path: Path, base_valid_path: Path) -> DiaryBatch:
+def _load_cache_with_fallback(
+    valid_path: Path,
+    base_valid_path: Path,
+    *,
+    expected_distribution: LocationCountDistribution,
+    expected_location_counts: list[int],
+) -> DiaryBatch:
     try:
-        return load_validated_diary_cache(valid_path)
+        return load_validated_diary_cache(
+            valid_path,
+            expected_distribution=expected_distribution,
+            expected_location_counts=expected_location_counts,
+        )
     except DiaryValidationError:
         if base_valid_path != valid_path:
-            return load_validated_diary_cache(base_valid_path)
+            return load_validated_diary_cache(
+                base_valid_path,
+                expected_distribution=expected_distribution,
+                expected_location_counts=expected_location_counts,
+            )
         raise
 
 
@@ -331,6 +431,9 @@ def fetch_diary_batch(
     representative_day: str,
     purpose_distribution: Optional[dict[str, float]] = None,
     location_counts: Optional[list[int]] = None,
+    location_count_mu: float = 1.0,
+    location_count_sigma: float = 0.5,
+    max_locations: int = 6,
     variant: str = "",
 ) -> DiaryBatch:
     base_prompt_path, base_raw_path, base_valid_path = _cache_paths(config)
@@ -346,13 +449,35 @@ def fetch_diary_batch(
     prompt_path.parent.mkdir(parents=True, exist_ok=True)
     prompt_path.write_text(batch_prompt, encoding="utf-8")
 
-    def location_count_for(diary_number: int) -> Optional[int]:
-        if not location_counts:
-            return None
-        return location_counts[(diary_number - 1) % len(location_counts)]
+    distribution_metadata = LocationCountDistribution(
+        mu=location_count_mu,
+        sigma=location_count_sigma,
+        max_locations=max_locations,
+    )
+    expected_location_counts = location_counts or allocate_location_counts(
+        location_count_mu,
+        location_count_sigma,
+        max_locations,
+        config.diary_count,
+    )
+    if len(expected_location_counts) != config.diary_count:
+        raise ValueError("location_counts must have one entry per configured diary")
+    if any(
+        count < 1 or count > distribution_metadata.max_locations
+        for count in expected_location_counts
+    ):
+        raise ValueError("location_counts must be within the configured range")
+
+    def location_count_for(diary_number: int) -> int:
+        return expected_location_counts[diary_number - 1]
 
     if not all([config.base_url, config.api_key, config.model]):
-        return _load_cache_with_fallback(valid_path, base_valid_path)
+        return _load_cache_with_fallback(
+            valid_path,
+            base_valid_path,
+            expected_distribution=distribution_metadata,
+            expected_location_counts=expected_location_counts,
+        )
 
     url = config.base_url.rstrip("/") + "/v1/chat/completions"
     headers = {"Authorization": f"Bearer {config.api_key}", "Content-Type": "application/json"}
@@ -370,7 +495,12 @@ def fetch_diary_batch(
             f"LLM server preflight failed at {config.base_url.rstrip('/')}/v1/models: {exc}"
         )
         try:
-            return _load_cache_with_fallback(valid_path, base_valid_path)
+            return _load_cache_with_fallback(
+                valid_path,
+                base_valid_path,
+                expected_distribution=distribution_metadata,
+                expected_location_counts=expected_location_counts,
+            )
         except DiaryValidationError as cache_error:
             raise DiaryValidationError(
                 f"LLM diary generation failed and no valid cache was available: {last_error}"
@@ -416,6 +546,12 @@ def fetch_diary_batch(
                         f"LLM server returned non-JSON response at {url}: {response.text[:500]}"
                     ) from exc
                 diary = parse_single_diary_response(payload)
+                if location_count_for(diary_number) == 1 and any(
+                    episode.purpose != "HOME" for episode in diary.episodes
+                ):
+                    raise DiaryValidationError(
+                        "one-location diary must contain only HOME episodes"
+                    )
                 diary.diary_id = f"routine-{diary_number:03d}"
                 # Persist only the parsed diary, not the raw HTTP envelope.
                 raw_path.parent.mkdir(parents=True, exist_ok=True)
@@ -432,7 +568,12 @@ def fetch_diary_batch(
     if len(diaries) == config.diary_count:
         try:
             batch = DiaryBatch.model_validate(
-                {"representative_day": representative_day, "diaries": diaries}
+                {
+                    "representative_day": representative_day,
+                    "location_count_distribution": distribution_metadata.model_dump(),
+                    "target_location_counts": expected_location_counts,
+                    "diaries": diaries,
+                }
             )
         except ValidationError as exc:
             last_error = DiaryValidationError(f"invalid combined diary batch: {exc}")
@@ -443,7 +584,12 @@ def fetch_diary_batch(
             return batch
 
     try:
-        return _load_cache_with_fallback(valid_path, base_valid_path)
+        return _load_cache_with_fallback(
+            valid_path,
+            base_valid_path,
+            expected_distribution=distribution_metadata,
+            expected_location_counts=expected_location_counts,
+        )
     except DiaryValidationError as cache_error:
         raise DiaryValidationError(
             f"LLM diary generation failed and no valid cache was available: {last_error}"
