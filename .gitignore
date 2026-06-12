@@ -4,6 +4,8 @@ __pycache__/
 *.egg-info/
 dist/
 build/
+target/
+*.so
 .jupyter/
 .ipynb_checkpoints/
 trajectories.parquet
@@ -14,3 +16,7 @@ gparis_sample_trip_with_lengths.parquet
 *.gz
 
 *.html
+# Regenerable LLM diary cache (keep only validated_diaries*.json)
+data/llm_diaries_gparis/prompt*.txt
+data/llm_diaries_gparis/raw_response*.json
+data/llm_diaries_gparis/markov_training.parquet

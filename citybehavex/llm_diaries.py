@@ -1,0 +1,450 @@
+from __future__ import annotations
+
+import json
+from pathlib import Path
+from typing import Any, Literal, Optional
+
+import requests
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
+
+from .config import LLMConfig
+
+Purpose = Literal["HOME", "WORK", "STUDIES", "PURCHASE", "LEISURE", "HEALTH", "OTHER"]
+
+
+class DiaryValidationError(ValueError):
+    """Raised when an LLM response or diary artifact fails validation."""
+
+
+class ChatMessage(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    role: Optional[str] = None
+    content: str
+
+
+class ChatChoice(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    message: ChatMessage
+
+
+class ChatCompletionResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    choices: list[ChatChoice] = Field(min_length=1)
+
+
+def parse_clock_minutes(value: str) -> int:
+    if not isinstance(value, str):
+        raise ValueError("time must be a string")
+    parts = value.strip().split(":")
+    if len(parts) != 2:
+        raise ValueError("time must use HH:MM format")
+    hour, minute = (int(part) for part in parts)
+    if hour == 24 and minute == 0:
+        return 24 * 60
+    if hour < 0 or hour > 23 or minute < 0 or minute > 59:
+        raise ValueError("time must be between 00:00 and 24:00")
+    return hour * 60 + minute
+
+
+class DiaryEpisode(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    start: str
+    end: Optional[str] = None
+    duration_minutes: Optional[int] = None
+    purpose: Purpose
+    notes: Optional[str] = None
+
+    @field_validator("start", "end")
+    @classmethod
+    def validate_clock(cls, value: Optional[str]) -> Optional[str]:
+        if value is not None:
+            parse_clock_minutes(value)
+        return value
+
+    @field_validator("duration_minutes")
+    @classmethod
+    def validate_duration(cls, value: Optional[int]) -> Optional[int]:
+        if value is not None and value <= 0:
+            raise ValueError("duration_minutes must be positive")
+        return value
+
+    @model_validator(mode="after")
+    def validate_end_or_duration(self) -> DiaryEpisode:
+        if (self.end is None) == (self.duration_minutes is None):
+            raise ValueError("provide exactly one of end or duration_minutes")
+        if self.end is not None and self.end_minutes <= self.start_minutes:
+            raise ValueError("episode end must be after start")
+        if self.duration_minutes is not None and self.start_minutes + self.duration_minutes > 24 * 60:
+            raise ValueError("episode duration exceeds representative day")
+        return self
+
+    @property
+    def start_minutes(self) -> int:
+        return parse_clock_minutes(self.start)
+
+    @property
+    def end_minutes(self) -> int:
+        if self.end is not None:
+            return parse_clock_minutes(self.end)
+        if self.duration_minutes is None:
+            raise ValueError("episode has no end or duration")
+        return self.start_minutes + self.duration_minutes
+
+
+class Diary(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    diary_id: str
+    description: Optional[str] = None
+    episodes: list[DiaryEpisode] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def validate_episodes(self) -> Diary:
+        if not any(episode.purpose == "HOME" for episode in self.episodes):
+            raise ValueError("each diary must contain HOME")
+
+        previous_end = 0
+        for index, episode in enumerate(self.episodes):
+            if index == 0 and episode.start_minutes != 0:
+                raise ValueError("diary must start at 00:00")
+            if episode.start_minutes != previous_end:
+                raise ValueError("episodes must be ordered, non-overlapping, and cover the day")
+            previous_end = episode.end_minutes
+
+        if previous_end != 24 * 60:
+            raise ValueError("diary must cover the representative day through 24:00")
+        return self
+
+
+class DiaryBatch(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    representative_day: Optional[str] = None
+    diaries: list[Diary] = Field(min_length=10, max_length=30)
+
+
+def parse_chat_completion_response(payload: Any) -> ChatCompletionResponse:
+    try:
+        return ChatCompletionResponse.model_validate(payload)
+    except ValidationError as exc:
+        raise DiaryValidationError(f"invalid OpenAI-compatible response: {exc}") from exc
+
+
+def parse_diary_content(content: str) -> DiaryBatch:
+    try:
+        payload = _loads_model_json(content)
+    except json.JSONDecodeError as exc:
+        raise DiaryValidationError(f"diary content is not valid JSON: {exc}") from exc
+    try:
+        return DiaryBatch.model_validate(payload)
+    except ValidationError as exc:
+        raise DiaryValidationError(f"invalid diary payload: {exc}") from exc
+
+
+def parse_diary_response(payload: Any) -> DiaryBatch:
+    response = parse_chat_completion_response(payload)
+    return parse_diary_content(response.choices[0].message.content)
+
+
+def parse_single_diary_content(content: str) -> Diary:
+    try:
+        payload = _loads_model_json(content)
+    except json.JSONDecodeError as exc:
+        raise DiaryValidationError(f"diary content is not valid JSON: {exc}") from exc
+    if isinstance(payload, dict) and "diary" in payload:
+        payload = payload["diary"]
+    elif isinstance(payload, dict) and "diaries" in payload:
+        diaries = payload["diaries"]
+        if not isinstance(diaries, list) or len(diaries) != 1:
+            raise DiaryValidationError("single-diary response must contain exactly one diary")
+        payload = diaries[0]
+    try:
+        return Diary.model_validate(payload)
+    except ValidationError as exc:
+        raise DiaryValidationError(f"invalid diary payload: {exc}") from exc
+
+
+def parse_single_diary_response(payload: Any) -> Diary:
+    response = parse_chat_completion_response(payload)
+    return parse_single_diary_content(response.choices[0].message.content)
+
+
+def diary_schema() -> dict[str, Any]:
+    return DiaryBatch.model_json_schema()
+
+
+def _loads_model_json(content: str) -> Any:
+    text = content.strip()
+    if text.startswith("```"):
+        lines = text.splitlines()
+        if lines and lines[0].startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].startswith("```"):
+            lines = lines[:-1]
+        text = "\n".join(lines).strip()
+    if not text.startswith("{"):
+        start = text.find("{")
+        end = text.rfind("}")
+        if start >= 0 and end > start:
+            text = text[start : end + 1]
+    return json.loads(text)
+
+
+def build_diary_prompt(
+    *,
+    city_profile: str,
+    diary_count: int,
+    representative_day: str,
+    purpose_distribution: Optional[dict[str, float]] = None,
+) -> str:
+    distribution = purpose_distribution or {}
+    return (
+        "Return JSON only for synthetic daily mobility diaries.\n"
+        "Shape: {\"representative_day\":\"YYYY-MM-DD\",\"diaries\":[{\"diary_id\":\"d1\","
+        "\"episodes\":[{\"start\":\"00:00\",\"end\":\"07:00\",\"purpose\":\"HOME\"}]}]}.\n"
+        f"Representative day: {representative_day}\n"
+        f"Number of diaries: {diary_count}\n"
+        f"City profile: {city_profile or 'No additional city profile provided.'}\n"
+        f"Purpose distribution hints: {json.dumps(distribution, sort_keys=True)}\n"
+        "Allowed purposes: HOME, WORK, STUDIES, PURCHASE, LEISURE, HEALTH, OTHER.\n"
+        "Rules: each diary starts at 00:00, ends at 24:00, has contiguous non-overlapping "
+        "episodes, includes HOME, and uses only start/end times in HH:MM.\n"
+        "Keep descriptions and notes out of the JSON.\n"
+    )
+
+
+def build_single_diary_prompt(
+    *,
+    diary_number: int,
+    diary_count: int,
+    city_profile: str,
+    representative_day: str,
+    purpose_distribution: Optional[dict[str, float]] = None,
+    location_count: Optional[int] = None,
+) -> str:
+    distribution = purpose_distribution or {}
+    location_rule = ""
+    if location_count is not None:
+        location_rule = (
+            f"This schedule should visit exactly {location_count} distinct "
+            f"location(s) counting HOME (so {max(location_count - 1, 0)} non-home "
+            "place(s)); returning to a place already visited does not add to that count.\n"
+        )
+    return (
+        "Return JSON only for one synthetic daily mobility diary.\n"
+        "Shape: {\"diary_id\":\"d1\",\"episodes\":[{\"start\":\"00:00\",\"end\":\"07:00\","
+        "\"purpose\":\"HOME\"}]}.\n"
+        f"Representative day: {representative_day}\n"
+        f"Diary number: {diary_number} of {diary_count}\n"
+        f"City profile: {city_profile or 'No additional city profile provided.'}\n"
+        f"Purpose distribution hints: {json.dumps(distribution, sort_keys=True)}\n"
+        f"{location_rule}"
+        "Allowed purposes: HOME, WORK, STUDIES, PURCHASE, LEISURE, HEALTH, OTHER.\n"
+        "Rules: start at 00:00, end at 24:00, use contiguous non-overlapping episodes, "
+        "include HOME, and use only start/end times in HH:MM.\n"
+        "Vary this diary from the others by routine timing and non-home activity mix.\n"
+        "No descriptions, notes, markdown, or commentary.\n"
+    )
+
+
+def allocate_location_counts(weights: dict[int, int], n: int) -> list[int]:
+    """Allocate ``n`` diaries across location-count buckets proportional to weights.
+
+    Returns a list of length ``n`` of target location counts. Uses largest-remainder
+    rounding so the mix matches the weights as closely as possible.
+    """
+    if n <= 0:
+        return []
+    positive = {int(k): float(v) for k, v in weights.items() if v and v > 0}
+    if not positive:
+        return [2] * n
+    total = sum(positive.values())
+    raw = {k: (v / total) * n for k, v in positive.items()}
+    counts = {k: int(value) for k, value in raw.items()}
+    assigned = sum(counts.values())
+    remainder = sorted(
+        positive.keys(), key=lambda k: (raw[k] - counts[k], positive[k]), reverse=True
+    )
+    i = 0
+    while assigned < n and remainder:
+        counts[remainder[i % len(remainder)]] += 1
+        assigned += 1
+        i += 1
+    out: list[int] = []
+    for k in sorted(counts):
+        out.extend([k] * counts[k])
+    return out[:n]
+
+
+def _cache_paths(config: LLMConfig) -> tuple[Path, Path, Path]:
+    cache_dir = Path(config.cache_dir)
+    prompt_path = Path(config.prompt_path) if config.prompt_path else cache_dir / "prompt.txt"
+    raw_path = Path(config.raw_response_path) if config.raw_response_path else cache_dir / "raw_response.json"
+    valid_path = (
+        Path(config.validated_diaries_path)
+        if config.validated_diaries_path
+        else cache_dir / "validated_diaries.json"
+    )
+    return prompt_path, raw_path, valid_path
+
+
+def _numbered_path(path: Path, number: int) -> Path:
+    return path.with_name(f"{path.stem}_{number:03d}{path.suffix}")
+
+
+def _apply_variant(path: Path, variant: str) -> Path:
+    if not variant:
+        return path
+    return path.with_name(f"{path.stem}_{variant}{path.suffix}")
+
+
+def load_validated_diary_cache(path: Path) -> DiaryBatch:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        return DiaryBatch.model_validate(payload)
+    except (OSError, json.JSONDecodeError, ValidationError) as exc:
+        raise DiaryValidationError(f"invalid diary cache at {path}: {exc}") from exc
+
+
+def save_validated_diary_cache(batch: DiaryBatch, path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(batch.model_dump_json(indent=2), encoding="utf-8")
+
+
+def _load_cache_with_fallback(valid_path: Path, base_valid_path: Path) -> DiaryBatch:
+    try:
+        return load_validated_diary_cache(valid_path)
+    except DiaryValidationError:
+        if base_valid_path != valid_path:
+            return load_validated_diary_cache(base_valid_path)
+        raise
+
+
+def fetch_diary_batch(
+    config: LLMConfig,
+    *,
+    city_profile: str,
+    representative_day: str,
+    purpose_distribution: Optional[dict[str, float]] = None,
+    location_counts: Optional[list[int]] = None,
+    variant: str = "",
+) -> DiaryBatch:
+    base_prompt_path, base_raw_path, base_valid_path = _cache_paths(config)
+    prompt_path = _apply_variant(base_prompt_path, variant)
+    raw_path = _apply_variant(base_raw_path, variant)
+    valid_path = _apply_variant(base_valid_path, variant)
+    batch_prompt = build_diary_prompt(
+        city_profile=city_profile,
+        diary_count=config.diary_count,
+        representative_day=representative_day,
+        purpose_distribution=purpose_distribution,
+    )
+    prompt_path.parent.mkdir(parents=True, exist_ok=True)
+    prompt_path.write_text(batch_prompt, encoding="utf-8")
+
+    def location_count_for(diary_number: int) -> Optional[int]:
+        if not location_counts:
+            return None
+        return location_counts[(diary_number - 1) % len(location_counts)]
+
+    if not all([config.base_url, config.api_key, config.model]):
+        return _load_cache_with_fallback(valid_path, base_valid_path)
+
+    url = config.base_url.rstrip("/") + "/v1/chat/completions"
+    headers = {"Authorization": f"Bearer {config.api_key}", "Content-Type": "application/json"}
+
+    last_error: Exception | None = None
+    try:
+        models_response = requests.get(
+            config.base_url.rstrip("/") + "/v1/models",
+            headers=headers,
+            timeout=min(config.timeout_seconds, 10.0),
+        )
+        models_response.raise_for_status()
+    except Exception as exc:  # noqa: BLE001 - converted to cache fallback or domain error.
+        last_error = DiaryValidationError(
+            f"LLM server preflight failed at {config.base_url.rstrip('/')}/v1/models: {exc}"
+        )
+        try:
+            return _load_cache_with_fallback(valid_path, base_valid_path)
+        except DiaryValidationError as cache_error:
+            raise DiaryValidationError(
+                f"LLM diary generation failed and no valid cache was available: {last_error}"
+            ) from cache_error
+
+    diaries: list[Diary] = []
+    for diary_number in range(1, config.diary_count + 1):
+        prompt = build_single_diary_prompt(
+            diary_number=diary_number,
+            diary_count=config.diary_count,
+            city_profile=city_profile,
+            representative_day=representative_day,
+            purpose_distribution=purpose_distribution,
+            location_count=location_count_for(diary_number),
+        )
+        _numbered_path(prompt_path, diary_number).write_text(prompt, encoding="utf-8")
+        request_payload = {
+            "model": config.model,
+            "temperature": config.temperature,
+            "messages": [
+                {"role": "system", "content": "You generate strictly valid JSON for mobility simulation."},
+                {"role": "user", "content": prompt},
+            ],
+            "response_format": {"type": "json_object"},
+        }
+        if config.max_tokens is not None:
+            request_payload["max_tokens"] = config.max_tokens
+
+        diary: Diary | None = None
+        for _ in range(max(config.retries, 1)):
+            try:
+                response = requests.post(
+                    url,
+                    headers=headers,
+                    json=request_payload,
+                    timeout=config.timeout_seconds,
+                )
+                response.raise_for_status()
+                try:
+                    payload = response.json()
+                except ValueError as exc:
+                    raise DiaryValidationError(
+                        f"LLM server returned non-JSON response at {url}: {response.text[:500]}"
+                    ) from exc
+                diary = parse_single_diary_response(payload)
+                diary.diary_id = f"routine-{diary_number:03d}"
+                # Persist only the parsed diary, not the raw HTTP envelope.
+                raw_path.parent.mkdir(parents=True, exist_ok=True)
+                _numbered_path(raw_path, diary_number).write_text(
+                    diary.model_dump_json(indent=2), encoding="utf-8"
+                )
+                break
+            except Exception as exc:  # noqa: BLE001 - converted to cache fallback or domain error.
+                last_error = exc
+        if diary is None:
+            break
+        diaries.append(diary)
+
+    if len(diaries) == config.diary_count:
+        try:
+            batch = DiaryBatch.model_validate(
+                {"representative_day": representative_day, "diaries": diaries}
+            )
+        except ValidationError as exc:
+            last_error = DiaryValidationError(f"invalid combined diary batch: {exc}")
+        else:
+            # raw_response.json holds the parsed batch (no raw HTTP envelope).
+            save_validated_diary_cache(batch, raw_path)
+            save_validated_diary_cache(batch, valid_path)
+            return batch
+
+    try:
+        return _load_cache_with_fallback(valid_path, base_valid_path)
+    except DiaryValidationError as cache_error:
+        raise DiaryValidationError(
+            f"LLM diary generation failed and no valid cache was available: {last_error}"
+        ) from cache_error

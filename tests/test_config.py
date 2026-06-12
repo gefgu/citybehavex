@@ -1,0 +1,44 @@
+from __future__ import annotations
+
+import pytest
+
+from citybehavex.config import SimulationConfig, apply_overrides, load_config
+
+
+def test_load_config_expands_environment(monkeypatch, tmp_path):
+    monkeypatch.setenv("CBX_OUT", "configured.parquet")
+    path = tmp_path / "config.yaml"
+    path.write_text(
+        """
+simulation:
+  tessellation: input.parquet
+  output: ${CBX_OUT}
+llm:
+  base_url: http://localhost:8000
+  api_key: ${CBX_KEY}
+  model: test-model
+""",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("CBX_KEY", "secret")
+    config = load_config(str(path))
+    assert config.simulation.output == "configured.parquet"
+    assert config.llm.api_key == "secret"
+
+
+def test_cli_overrides_config_defaults():
+    model = SimulationConfig(tessellation="config.parquet", agents=10)
+    updated = apply_overrides(model, {"agents": 20, "output": None})
+    assert updated.agents == 20
+    assert updated.output == "trajectories.parquet"
+
+
+def test_simulation_config_rejects_tessellation_and_bbox():
+    with pytest.raises(ValueError):
+        SimulationConfig(
+            tessellation="input.parquet",
+            min_lon=0,
+            min_lat=0,
+            max_lon=1,
+            max_lat=1,
+        )

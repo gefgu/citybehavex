@@ -1,0 +1,188 @@
+from __future__ import annotations
+
+import os
+from pathlib import Path
+from typing import Any, Optional
+
+import yaml
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+
+class TessellationConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    path: Optional[str] = None
+    min_lon: Optional[float] = None
+    min_lat: Optional[float] = None
+    max_lon: Optional[float] = None
+    max_lat: Optional[float] = None
+    resolution: int = 10
+    enrich_overture: bool = False
+    overture_release: str = "2026-05-20.0"
+    min_poi_count: int = 1
+    poi_tessellation: bool = False
+    output: str = "tessellation.parquet"
+    relevance_column: str = "total_poi_count"
+
+    @model_validator(mode="after")
+    def validate_source(self) -> TessellationConfig:
+        bbox_values = [self.min_lon, self.min_lat, self.max_lon, self.max_lat]
+        has_any_bbox = any(v is not None for v in bbox_values)
+        has_full_bbox = all(v is not None for v in bbox_values)
+        if has_any_bbox and not has_full_bbox:
+            raise ValueError("bbox requires min_lon, min_lat, max_lon, and max_lat")
+        return self
+
+
+class SimulationConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    tessellation: Optional[str] = None
+    min_lon: Optional[float] = None
+    min_lat: Optional[float] = None
+    max_lon: Optional[float] = None
+    max_lat: Optional[float] = None
+    agents: int = 500
+    days: int = 7
+    start_date: Optional[str] = None
+    output: str = "trajectories.parquet"
+    random_state: int = 42
+    relevance_column: str = "total_poi_count"
+    granularity_minutes: int = 15
+    car_speed_kmh: float = 50.0
+
+    @field_validator("agents", "days")
+    @classmethod
+    def positive_int(cls, value: int) -> int:
+        if value <= 0:
+            raise ValueError("must be positive")
+        return value
+
+    @field_validator("granularity_minutes")
+    @classmethod
+    def valid_granularity(cls, value: int) -> int:
+        if value <= 0 or 1440 % value != 0:
+            raise ValueError("granularity_minutes must be a positive divisor of 1440")
+        return value
+
+    @field_validator("car_speed_kmh")
+    @classmethod
+    def positive_speed(cls, value: float) -> float:
+        if value <= 0:
+            raise ValueError("car_speed_kmh must be positive")
+        return value
+
+    @model_validator(mode="after")
+    def validate_source(self) -> SimulationConfig:
+        bbox_values = [self.min_lon, self.min_lat, self.max_lon, self.max_lat]
+        has_any_bbox = any(v is not None for v in bbox_values)
+        has_full_bbox = all(v is not None for v in bbox_values)
+        if self.tessellation and has_any_bbox:
+            raise ValueError("provide either tessellation or bbox, not both")
+        if has_any_bbox and not has_full_bbox:
+            raise ValueError("bbox requires min_lon, min_lat, max_lon, and max_lat")
+        return self
+
+
+class LLMConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    base_url: Optional[str] = None
+    api_key: Optional[str] = None
+    model: Optional[str] = None
+    temperature: float = 0.4
+    max_tokens: Optional[int] = None
+    timeout_seconds: float = 60.0
+    retries: int = 1
+    diary_count: int = Field(default=20, ge=10, le=30)
+    cache_dir: str = ".citybehavex/llm_diaries"
+    prompt_path: Optional[str] = None
+    raw_response_path: Optional[str] = None
+    validated_diaries_path: Optional[str] = None
+    training_path: Optional[str] = None
+
+    @model_validator(mode="after")
+    def validate_client_fields(self) -> LLMConfig:
+        if any([self.base_url, self.api_key, self.model]) and not all(
+            [self.base_url, self.api_key, self.model]
+        ):
+            raise ValueError("llm base_url, api_key, and model must be provided together")
+        return self
+
+
+class DiariesConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    city_profile: str = ""
+    city_profile_weekday: str = ""
+    city_profile_weekend: str = ""
+    representative_day: str = "2026-01-01"
+    allowed_purposes: list[str] = Field(
+        default_factory=lambda: [
+            "HOME",
+            "WORK",
+            "STUDIES",
+            "PURCHASE",
+            "LEISURE",
+            "HEALTH",
+            "OTHER",
+        ]
+    )
+    # Distribution of the number of distinct locations (including HOME) a daily
+    # schedule should visit. Maps a location count to a relative weight; the LLM
+    # diary mix is allocated across these buckets and each diary's prompt requests
+    # its target count. Defaults approximate a log-normal shape peaking at 2.
+    location_count_weights: dict[int, int] = Field(
+        default_factory=lambda: {1: 1, 2: 10, 3: 7, 4: 5, 5: 3, 6: 2}
+    )
+
+    def profile_for(self, day_type: str) -> str:
+        """City profile for ``"weekday"`` / ``"weekend"``, falling back to the shared one."""
+        specific = self.city_profile_weekday if day_type == "weekday" else self.city_profile_weekend
+        return specific or self.city_profile
+
+
+class ComparisonConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    path: Optional[str] = None
+    label: str = "observed"
+    html: str = "comparison.html"
+
+
+class CityBehavExConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    tessellation: TessellationConfig = Field(default_factory=TessellationConfig)
+    simulation: SimulationConfig = Field(default_factory=SimulationConfig)
+    llm: LLMConfig = Field(default_factory=LLMConfig)
+    diaries: DiariesConfig = Field(default_factory=DiariesConfig)
+    comparison: ComparisonConfig = Field(default_factory=ComparisonConfig)
+
+
+def _expand_env(value: Any) -> Any:
+    if isinstance(value, str):
+        return os.path.expandvars(value)
+    if isinstance(value, list):
+        return [_expand_env(item) for item in value]
+    if isinstance(value, dict):
+        return {key: _expand_env(item) for key, item in value.items()}
+    return value
+
+
+def load_config(path: Optional[str]) -> CityBehavExConfig:
+    if path is None:
+        return CityBehavExConfig()
+    raw = yaml.safe_load(Path(path).read_text(encoding="utf-8")) or {}
+    if not isinstance(raw, dict):
+        raise ValueError("config file must contain a YAML mapping")
+    return CityBehavExConfig.model_validate(_expand_env(raw))
+
+
+def apply_overrides(model: BaseModel, overrides: dict[str, Any]) -> BaseModel:
+    clean = {key: value for key, value in overrides.items() if value is not None}
+    if not clean:
+        return model
+    data = model.model_dump()
+    data.update(clean)
+    return model.__class__.model_validate(data)
