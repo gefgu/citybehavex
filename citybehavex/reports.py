@@ -20,12 +20,14 @@ from skmob2 import (
     fit_values_to_truncated_powerlaw,
     fit_visitation_law,
     jensen_shannon_divergence,
+    od_matrix_common_part_of_commuters,
     time_bin_matrix_jensen_shannon_divergence,
     visits_per_user_wasserstein_distance,
     waiting_times,
     wasserstein_distance,
 )
 from skmob_vis import (
+    get_resource_bundle,
     plot_activity_transition_difference,
     plot_daily_activity_difference,
     plot_distance_frequency_law,
@@ -34,6 +36,7 @@ from skmob_vis import (
     plot_lognormal_fits,
     plot_motif_literature_comparison,
     plot_radius_of_gyration_ecdf,
+    plot_stvd_comparison,
     plot_trip_duration_ecdf,
     plot_truncated_powerlaw_fits,
     plot_visit_purpose_comparison,
@@ -55,6 +58,7 @@ _END_TS_CANDIDATES = ["end_timestamp", "_end_time", "end_time"]
 # Speed used to turn real jump lengths into a car travel-time proxy for the trip
 # duration comparison. Matches the synthetic SimulationConfig.car_speed_kmh default.
 CAR_SPEED_KMH = 50.0
+CPC_H3_RESOLUTIONS = (7, 8, 9)
 
 
 def detect_column(df: pd.DataFrame, candidates: list[str]) -> Optional[str]:
@@ -75,6 +79,109 @@ def waiting_times_minutes(traj: skmob2.TrajDataFrame) -> list:
         uid_col=traj.uid_col,
     )
     return [s / 60 for s in secs]
+
+
+def _trajectory_od_matrix(
+    df: pd.DataFrame,
+    *,
+    uid_col: str,
+    datetime_col: str,
+    lat_col: str,
+    lng_col: str,
+    resolution: int,
+) -> pd.DataFrame:
+    points = df[[uid_col, datetime_col, lat_col, lng_col]].copy()
+    points["_datetime"] = pd.to_datetime(points[datetime_col], errors="coerce")
+    points["_lat"] = pd.to_numeric(points[lat_col], errors="coerce")
+    points["_lng"] = pd.to_numeric(points[lng_col], errors="coerce")
+    points = points.dropna(subset=[uid_col, "_datetime", "_lat", "_lng"])
+    points = points[
+        points["_lat"].between(-90, 90)
+        & points["_lng"].between(-180, 180)
+    ]
+    points = points.sort_values([uid_col, "_datetime"], kind="mergesort")
+    points["origin"] = [
+        h3.latlng_to_cell(lat, lng, resolution)
+        for lat, lng in zip(points["_lat"], points["_lng"])
+    ]
+    points["destination"] = points.groupby(uid_col)["origin"].shift(-1)
+    trips = points.dropna(subset=["destination"])
+    trips = trips[trips["origin"] != trips["destination"]]
+
+    if trips.empty:
+        return pd.DataFrame(dtype=float)
+
+    flows = (
+        trips.groupby(["origin", "destination"])
+        .size()
+        .unstack(fill_value=0)
+        .astype(float)
+    )
+    return flows
+
+
+def _common_part_of_commuters(
+    traj: skmob2.TrajDataFrame,
+    real_traj: skmob2.TrajDataFrame,
+    resolutions: tuple[int, ...] = CPC_H3_RESOLUTIONS,
+) -> list[tuple[int, float]]:
+    values = []
+    for resolution in resolutions:
+        synthetic_od = _trajectory_od_matrix(
+            traj.df,
+            uid_col=traj.uid_col,
+            datetime_col=traj.datetime_col,
+            lat_col=traj.lat_col,
+            lng_col=traj.lng_col,
+            resolution=resolution,
+        )
+        observed_od = _trajectory_od_matrix(
+            real_traj.df,
+            uid_col=real_traj.uid_col,
+            datetime_col=real_traj.datetime_col,
+            lat_col=real_traj.lat_col,
+            lng_col=real_traj.lng_col,
+            resolution=resolution,
+        )
+        values.append(
+            (
+                resolution,
+                od_matrix_common_part_of_commuters(synthetic_od, observed_od),
+            )
+        )
+    return values
+
+
+def _metrics_section_html(
+    wasserstein_rows: list[tuple[str, str, str]],
+    jsd_rows: list[tuple[str, str, str]],
+    cpc_rows: list[tuple[int, float]],
+) -> str:
+    def table_rows(rows: list[tuple[str, str, str]]) -> str:
+        return "".join(
+            f"<tr><td>{name}</td><td>{value}</td><td>{unit}</td></tr>"
+            for name, value, unit in rows
+        )
+
+    cpc_table_rows = "".join(
+        f"<tr><td>H3 {resolution}</td><td>{value:.4f}</td><td></td></tr>"
+        for resolution, value in cpc_rows
+    )
+    return f"""
+  <div class="metrics">
+    <div>
+      <h2>Wasserstein distances</h2>
+      <table>{table_rows(wasserstein_rows)}</table>
+    </div>
+    <div>
+      <h2>Jensen-Shannon divergences</h2>
+      <table>{table_rows(jsd_rows)}</table>
+    </div>
+    <div>
+      <h2>Common Part of Commuters</h2>
+      <table>{cpc_table_rows}</table>
+    </div>
+  </div>"""
 
 
 def _visits_for_comparison(
@@ -136,6 +243,76 @@ def _location_resolution(
     return default
 
 
+def _compute_stvd_layers(
+    traj: skmob2.TrajDataFrame,
+    real_traj: skmob2.TrajDataFrame,
+    resolutions: list[int],
+) -> dict[int, dict]:
+    """Compute per-H3-zone volume diff and peak shift for the STVD visualisation."""
+    syn = traj.df[[traj.uid_col, traj.lat_col, traj.lng_col, traj.datetime_col]].copy()
+    real = real_traj.df[[real_traj.uid_col, real_traj.lat_col, real_traj.lng_col, real_traj.datetime_col]].copy()
+
+    syn["_dt"] = pd.to_datetime(syn[traj.datetime_col], errors="coerce")
+    real["_dt"] = pd.to_datetime(real[real_traj.datetime_col], errors="coerce")
+    syn = syn.dropna(subset=["_dt", traj.lat_col, traj.lng_col])
+    real = real.dropna(subset=["_dt", real_traj.lat_col, real_traj.lng_col])
+    syn["_hour"] = syn["_dt"].dt.hour
+    real["_hour"] = real["_dt"].dt.hour
+
+    layers: dict[int, dict] = {}
+    for res in resolutions:
+        syn["_cell"] = [
+            h3.latlng_to_cell(lat, lng, res)
+            for lat, lng in zip(syn[traj.lat_col], syn[traj.lng_col])
+        ]
+        real["_cell"] = [
+            h3.latlng_to_cell(lat, lng, res)
+            for lat, lng in zip(real[real_traj.lat_col], real[real_traj.lng_col])
+        ]
+
+        all_hours = list(range(24))
+        syn_hourly = (
+            syn.groupby(["_cell", "_hour"]).size().unstack(fill_value=0).reindex(columns=all_hours, fill_value=0)
+        )
+        real_hourly = (
+            real.groupby(["_cell", "_hour"]).size().unstack(fill_value=0).reindex(columns=all_hours, fill_value=0)
+        )
+
+        all_cells = set(syn_hourly.index) | set(real_hourly.index)
+        features = []
+        for cell in all_cells:
+            syn_row = syn_hourly.loc[cell] if cell in syn_hourly.index else pd.Series(0, index=all_hours)
+            real_row = real_hourly.loc[cell] if cell in real_hourly.index else pd.Series(0, index=all_hours)
+
+            syn_vol = float(syn_row.sum())
+            real_vol = float(real_row.sum())
+            syn_peak = int(syn_row.idxmax()) if syn_vol > 0 else 0
+            real_peak = int(real_row.idxmax()) if real_vol > 0 else 0
+
+            volume_diff_pct = (syn_vol - real_vol) / max(real_vol, 1.0) * 100.0
+            raw_shift = abs(syn_peak - real_peak)
+            peak_shift_hours = float(min(raw_shift, 12 - raw_shift if raw_shift <= 12 else raw_shift))
+            peak_shift_hours = min(peak_shift_hours, 12.0)
+
+            boundary = h3.cell_to_boundary(cell)
+            ring = [[lng, lat] for lat, lng in boundary]
+            ring.append(ring[0])
+
+            features.append({
+                "type": "Feature",
+                "geometry": {"type": "Polygon", "coordinates": [ring]},
+                "properties": {
+                    "area": cell,
+                    "volume_diff_pct": round(volume_diff_pct, 4),
+                    "peak_shift_hours": round(peak_shift_hours, 4),
+                },
+            })
+
+        layers[res] = {"type": "FeatureCollection", "features": features}
+
+    return layers
+
+
 def _motif_distribution_jsd(
     left: pd.DataFrame,
     right: pd.DataFrame,
@@ -163,17 +340,20 @@ def _activity_comparison_section_html(
             {
                 observed_label: observed_visits,
                 "synthetic": synthetic_visits,
-            }
+            },
+            bundle_libs=False,
         )._repr_html_()
         + plot_activity_transition_difference(
             observed_visits,
             synthetic_visits,
             labels=labels,
+            bundle_libs=False,
         )._repr_html_()
         + plot_daily_activity_difference(
             observed_visits,
             synthetic_visits,
             labels=labels,
+            bundle_libs=False,
         )._repr_html_()
     )
     return f"""
@@ -347,6 +527,7 @@ def _mobility_laws_section_html(
         figure = plot_truncated_powerlaw_fits(
             observed,
             synthetic,
+            bundle_libs=False,
             **plot_kwargs,
         )
         return figure, _fit_parameters_html(
@@ -391,7 +572,7 @@ def _mobility_laws_section_html(
             synthetic_visits,
             "synthetic",
         )
-        figure = plot_lognormal_fits(observed, synthetic)
+        figure = plot_lognormal_fits(observed, synthetic, bundle_libs=False)
         return figure, _fit_parameters_html(
             "f(N) = exp(-(ln N - mu)<sup>2</sup> / (2 sigma<sup>2</sup>)) "
             "/ (N sigma sqrt(2 pi))",
@@ -409,7 +590,7 @@ def _mobility_laws_section_html(
     def distance_frequency_chart():
         observed = _distance_frequency_dataset(observed_visits, observed_label)
         synthetic = _distance_frequency_dataset(synthetic_visits, "synthetic")
-        figure = plot_distance_frequency_law(observed, synthetic)
+        figure = plot_distance_frequency_law(observed, synthetic, bundle_libs=False)
         return figure, _fit_parameters_html(
             "rho(r, f) = mu (r f)<sup>-eta</sup>",
             [
@@ -515,6 +696,9 @@ def generate_comparison_report(
     real_rog = real_traj.radius_of_gyration()["radius_of_gyration"].to_numpy()
     w_rog = wasserstein_distance(synth_rog, real_rog)
 
+    typer.echo("Computing Common Part of Commuters ...")
+    cpc_rows = _common_part_of_commuters(traj, real_traj)
+
     # Dwell time = time spent at a location. The synthetic trip-DITRAS records this
     # directly as departure - arrival (`dwell_minutes`); otherwise fall back to
     # inter-event gaps. The observed side uses the real stay-duration column when
@@ -601,12 +785,12 @@ def generate_comparison_report(
             )
 
     typer.echo("Rendering distribution charts ...")
-    fig_jump = plot_jump_lengths_ecdf(synth_jumps, real_jumps, labels=labels)
-    fig_visits = plot_visits_frequency_ecdf(synth_visits, real_visits, labels=labels)
-    fig_rog = plot_radius_of_gyration_ecdf(synth_rog, real_rog, labels=labels)
-    fig_dwell = plot_dwell_time_ecdf(synth_dwell, real_dwell, labels=labels)
+    fig_jump = plot_jump_lengths_ecdf(synth_jumps, real_jumps, labels=labels, bundle_libs=False)
+    fig_visits = plot_visits_frequency_ecdf(synth_visits, real_visits, labels=labels, bundle_libs=False)
+    fig_rog = plot_radius_of_gyration_ecdf(synth_rog, real_rog, labels=labels, bundle_libs=False)
+    fig_dwell = plot_dwell_time_ecdf(synth_dwell, real_dwell, labels=labels, bundle_libs=False)
     fig_trip = (
-        plot_trip_duration_ecdf(synth_trip, real_trip, labels=labels)
+        plot_trip_duration_ecdf(synth_trip, real_trip, labels=labels, bundle_libs=False)
         if real_trip is not None
         else None
     )
@@ -704,6 +888,7 @@ def generate_comparison_report(
                 reference_distribution=real_motif_dist,
                 comparison_distribution=synth_motif_dist,
                 labels=(observed_label, "synthetic"),
+                bundle_libs=False,
             )
             motif_section_html = f"""
   <div class="section-header">
@@ -712,6 +897,24 @@ def generate_comparison_report(
   <div class="charts">{fig_motif._repr_html_()}</div>"""
     except Exception as exc:
         typer.echo(f"Warning: motif chart skipped: {exc}", err=True)
+
+    stvd_section_html = ""
+    if traj.lat_col and traj.lng_col and real_traj.lat_col and real_traj.lng_col:
+        try:
+            typer.echo("Rendering STVD map ...")
+            stvd_layers = _compute_stvd_layers(traj, real_traj, resolutions=[7, 9])
+            fig_stvd = plot_stvd_comparison(
+                stvd_layers,
+                title=f"STVD — {observed_label} vs synthetic",
+                bundle_libs=False,
+            )
+            stvd_section_html = f"""
+  <div class="section-header">
+    <span>Spatial-temporal volume difference &mdash; {observed_label} vs synthetic</span>
+  </div>
+  <div class="charts stvd-section">{fig_stvd._repr_html_()}</div>"""
+        except Exception as exc:
+            typer.echo(f"Warning: STVD chart skipped: {exc}", err=True)
 
     w_rows = [
         ("Jump lengths", f"{w_jump:.4f}", "km"),
@@ -722,31 +925,15 @@ def generate_comparison_report(
     if w_trip is not None:
         w_rows.append(("Trip duration (car)", f"{w_trip:.4f}", "min"))
 
-    wasserstein_rows = "".join(
-        f"<tr><td>{name}</td><td>{val}</td><td>{unit}</td></tr>"
-        for name, val, unit in w_rows
-    )
-    jsd_rows = "".join(
-        f"<tr><td>{name}</td><td>{val}</td><td>{unit}</td></tr>"
-        for name, val, unit in js_rows
-    )
-    metrics_html = f"""
-  <div class="metrics">
-    <div>
-      <h2>Wasserstein distances</h2>
-      <table>{wasserstein_rows}</table>
-    </div>
-    <div>
-      <h2>Jensen-Shannon divergences</h2>
-      <table>{jsd_rows}</table>
-    </div>
-  </div>"""
+    metrics_html = _metrics_section_html(w_rows, js_rows, cpc_rows)
     generated_at = _dt.now().strftime("%Y-%m-%d %H:%M")
+    resource_bundle = get_resource_bundle(echarts=True, leaflet=True)
     full_html = f"""<!doctype html>
 <html>
 <head>
   <meta charset="utf-8">
   <title>CityBehavEx Comparison Report</title>
+  {resource_bundle}
   <style>
     html,body{{margin:0;padding:0;background:#fbf8f1;color:#14110d;font-family:sans-serif;}}
     .header{{padding:32px 32px 24px;border-bottom:1px solid #dcd5c4;}}
@@ -755,8 +942,10 @@ def generate_comparison_report(
     .section-header{{padding:20px 32px 0;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.1em;color:#6b5e4c;}}
     .charts{{display:flex;flex-wrap:wrap;padding:24px;gap:24px;}}
     .charts iframe{{flex:1 1 580px;border:0;min-height:420px;}}
+    .charts .skmob-vis-widget{{min-height:420px;}}
     .mobility-law-chart{{flex:1 1 580px;min-width:0;}}
     .mobility-law-chart iframe{{width:100%;}}
+    .stvd-section .skmob-vis-widget{{min-height:600px;}}
     .fit-parameters{{margin:8px 12px 0;padding:12px 16px;border:1px solid #dcd5c4;background:#fffdf8;font-family:monospace;font-size:12px;}}
     .fit-formula{{margin-bottom:8px;color:#6b5e4c;}}
     .fit-parameters table{{border-collapse:collapse;}}
@@ -774,7 +963,7 @@ def generate_comparison_report(
     <p>Generated {generated_at}</p>
   </div>{metrics_html}
   <div class="section-header">Distribution comparisons</div>
-  <div class="charts">{ecdf_charts_html}</div>{mobility_laws_section_html}{activity_section_html}{motif_section_html}
+  <div class="charts">{ecdf_charts_html}</div>{mobility_laws_section_html}{activity_section_html}{motif_section_html}{stvd_section_html}
 </body>
 </html>
 """

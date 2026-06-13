@@ -2,14 +2,18 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import h3
 import pandas as pd
 
 from citybehavex.reports import (
     _activity_comparison_section_html,
+    _common_part_of_commuters,
     _daily_location_lognormal_dataset,
+    _metrics_section_html,
     _mobility_law_visits,
     _mobility_laws_section_html,
     _motif_visits,
+    _trajectory_od_matrix,
     _visits_for_comparison,
     load_trajectory,
     waiting_times_minutes,
@@ -60,6 +64,92 @@ def test_load_trajectory_detects_common_column_names(tmp_path):
     assert traj.lng_col == "longitude"
 
 
+def test_trajectory_od_matrix_orders_users_and_excludes_invalid_and_self_loops():
+    source = pd.DataFrame(
+        {
+            "uid": ["u1", "u2", "u1", "u1", "u2", "u1"],
+            "datetime": pd.to_datetime(
+                [
+                    "2026-01-01 10:00:00",
+                    "2026-01-01 09:00:00",
+                    "2026-01-01 08:00:00",
+                    "2026-01-01 09:00:00",
+                    "2026-01-01 08:00:00",
+                    "2026-01-01 11:00:00",
+                ]
+            ),
+            "lat": [48.90, 48.90, 48.85, 48.85, 48.85, 999.0],
+            "lng": [2.45, 2.45, 2.35, 2.35, 2.35, 2.50],
+        }
+    )
+
+    matrix = _trajectory_od_matrix(
+        source,
+        uid_col="uid",
+        datetime_col="datetime",
+        lat_col="lat",
+        lng_col="lng",
+        resolution=9,
+    )
+
+    origin = h3.latlng_to_cell(48.85, 2.35, 9)
+    destination = h3.latlng_to_cell(48.90, 2.45, 9)
+    assert matrix.loc[origin, destination] == 2.0
+    assert float(matrix.to_numpy().sum()) == 2.0
+    assert origin not in matrix.columns
+
+
+def test_common_part_of_commuters_uses_labeled_od_matrices(monkeypatch):
+    traj = SimpleNamespace(
+        df=pd.DataFrame(
+            {
+                "uid": [1, 1],
+                "datetime": pd.to_datetime(
+                    ["2026-01-01 08:00:00", "2026-01-01 09:00:00"]
+                ),
+                "lat": [48.85, 48.90],
+                "lng": [2.35, 2.45],
+            }
+        ),
+        uid_col="uid",
+        datetime_col="datetime",
+        lat_col="lat",
+        lng_col="lng",
+    )
+    calls = []
+
+    def cpc(synthetic_od, observed_od):
+        calls.append((synthetic_od, observed_od))
+        return 0.75
+
+    monkeypatch.setattr(
+        "citybehavex.reports.od_matrix_common_part_of_commuters",
+        cpc,
+    )
+
+    values = _common_part_of_commuters(traj, traj)
+
+    assert values == [(7, 0.75), (8, 0.75), (9, 0.75)]
+    assert len(calls) == 3
+    for synthetic_od, observed_od in calls:
+        assert isinstance(synthetic_od, pd.DataFrame)
+        assert synthetic_od.index.equals(observed_od.index)
+        assert synthetic_od.columns.equals(observed_od.columns)
+
+
+def test_metrics_section_html_shows_cpc_at_all_resolutions():
+    html = _metrics_section_html(
+        [("Jump lengths", "1.2345", "km")],
+        [("Activity distribution", "0.1234", "")],
+        [(7, 0.1), (8, 0.25), (9, 1.0)],
+    )
+
+    assert "Common Part of Commuters" in html
+    assert "<td>H3 7</td><td>0.1000</td>" in html
+    assert "<td>H3 8</td><td>0.2500</td>" in html
+    assert "<td>H3 9</td><td>1.0000</td>" in html
+
+
 def test_motif_visits_use_h3_locations_and_binary_purposes():
     source = pd.DataFrame(
         {
@@ -98,15 +188,15 @@ def test_activity_comparison_section_uses_comparison_plots(monkeypatch):
         def _repr_html_(self):
             return f"<iframe>{self.name}</iframe>"
 
-    def purpose(datasets):
+    def purpose(datasets, **kwargs):
         calls.append(("purpose", datasets))
         return Figure("purpose")
 
-    def transition(first, second, *, labels):
+    def transition(first, second, *, labels, **kwargs):
         calls.append(("transition", first, second, labels))
         return Figure("transition")
 
-    def daily(first, second, *, labels):
+    def daily(first, second, *, labels, **kwargs):
         calls.append(("daily", first, second, labels))
         return Figure("daily")
 
