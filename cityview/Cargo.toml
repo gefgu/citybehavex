@@ -8,3 +8,4 @@ bevy = "0.14"
 flatgeobuf = { version = "6", default-features = false }
 geozero = { version = "0.15", default-features = false, features = ["with-geo"] }
 geo-types = "0.7"
+image = "0.25"
