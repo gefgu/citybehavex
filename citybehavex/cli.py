@@ -13,6 +13,7 @@ from .config import (
     apply_overrides,
     load_config,
 )
+from .cityview import build_cityview_file
 from .simulation import run_simulation
 from .tessellation import build_poi_tessellation, build_tessellation
 
@@ -241,6 +242,54 @@ def simulate(
     )
     try:
         run_simulation(effective)
+    except ValueError as exc:
+        typer.echo(f"Error: {exc}", err=True)
+        raise typer.Exit(1) from exc
+
+
+@app.command()
+def cityview(
+    config: Optional[str] = typer.Option(None, "--config", help="YAML config path"),
+    min_lon: Optional[float] = typer.Option(None, help="Bounding box west longitude"),
+    min_lat: Optional[float] = typer.Option(None, help="Bounding box south latitude"),
+    max_lon: Optional[float] = typer.Option(None, help="Bounding box east longitude"),
+    max_lat: Optional[float] = typer.Option(None, help="Bounding box north latitude"),
+    overture_release: Optional[str] = typer.Option(None, help="Overture Maps release tag"),
+    output: Optional[str] = typer.Option(
+        None, help="Output FlatGeobuf path (default: cityview.fgb)"
+    ),
+):
+    """Export pre-triangulated buildings/roads/green spaces to FlatGeobuf for the Bevy viewer."""
+    loaded = load_config(config)
+    tess = apply_overrides(
+        loaded.tessellation,
+        {
+            "min_lon": min_lon,
+            "min_lat": min_lat,
+            "max_lon": max_lon,
+            "max_lat": max_lat,
+            "overture_release": overture_release,
+        },
+    )
+    assert isinstance(tess, TessellationConfig)
+    if None in [tess.min_lon, tess.min_lat, tess.max_lon, tess.max_lat]:
+        typer.echo(
+            "Error: provide bbox values in config or CLI "
+            "(--min-lon, --min-lat, --max-lon, --max-lat).",
+            err=True,
+        )
+        raise typer.Exit(1)
+
+    out = output or "cityview.fgb"
+    try:
+        build_cityview_file(
+            tess.min_lon,
+            tess.min_lat,
+            tess.max_lon,
+            tess.max_lat,
+            tess.overture_release,
+            out,
+        )
     except ValueError as exc:
         typer.echo(f"Error: {exc}", err=True)
         raise typer.Exit(1) from exc
