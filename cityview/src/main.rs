@@ -1,7 +1,12 @@
 use bevy::{
     diagnostic::{DiagnosticsStore, FrameTimeDiagnosticsPlugin},
     prelude::*,
-    render::{mesh::PrimitiveTopology, render_asset::RenderAssetUsages},
+    render::{
+        mesh::PrimitiveTopology,
+        render_asset::RenderAssetUsages,
+        render_resource::{Extent3d, TextureDimension, TextureFormat},
+        texture::{ImageAddressMode, ImageSampler, ImageSamplerDescriptor},
+    },
     sprite::{MaterialMesh2dBundle, Mesh2dHandle},
     window::PresentMode,
 };
@@ -9,6 +14,17 @@ use flatgeobuf::*;
 use geozero::ToGeo;
 use std::fs::File;
 use std::io::BufReader;
+
+// Texture tilesets baked into the binary. We crop one plain sub-tile from each and tile it.
+const ROAD_PNG: &[u8] = include_bytes!("../assets/UpdatedDarkRoad.png");
+const SIDEWALK_PNG: &[u8] = include_bytes!("../assets/Sidewalks.png");
+
+// Plain sub-tile crop rectangles (x, y, w, h) within each sheet. Clamped at runtime.
+const ROAD_CROP: [u32; 4] = [112, 8, 44, 44];
+const SIDEWALK_CROP: [u32; 4] = [16, 196, 44, 44];
+
+// World-space size (EPSG:3857 metres) one texture tile spans before repeating.
+const TILE_WORLD: f32 = 12.0;
 
 // --- COMPONENTS & RESOURCES ---
 
@@ -20,8 +36,9 @@ struct FpsText;
 struct MapPath(Option<String>);
 
 /// A single shape read from the file: a triangle soup (every 3 vertices = 1 triangle),
-/// already in EPSG:3857 metres.
+/// already in EPSG:3857 metres, tagged with its `kind` (building/road/sidewalk/green).
 struct Shape {
+    kind: String,
     verts: Vec<[f64; 2]>,
 }
 
@@ -91,6 +108,7 @@ fn load_map(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<ColorMaterial>>,
+    mut images: ResMut<Assets<Image>>,
     map_path: Res<MapPath>,
 ) {
     let Some(path) = map_path.0.as_ref() else {
@@ -111,6 +129,24 @@ fn load_map(
         return;
     }
 
+    // Shared textured materials for roads/sidewalks. If decode/crop fails, fall back to a flat
+    // colour so the app never panics on a bad asset.
+    let road_material = match tiled_texture(ROAD_PNG, ROAD_CROP) {
+        Some(image) => materials.add(ColorMaterial {
+            color: Color::WHITE,
+            texture: Some(images.add(image)),
+        }),
+        None => materials.add(Color::srgb(0.18, 0.18, 0.20)),
+    };
+    let sidewalk_material = match tiled_texture(SIDEWALK_PNG, SIDEWALK_CROP) {
+        Some(image) => materials.add(ColorMaterial {
+            color: Color::WHITE,
+            texture: Some(images.add(image)),
+        }),
+        None => materials.add(Color::srgb(0.6, 0.6, 0.6)),
+    };
+    let green_material = materials.add(Color::srgb(0.56, 0.74, 0.56));
+
     // Center the geometry on the origin (3857 metres are huge; centering keeps f32 precise
     // and places the map under the default camera).
     let (mut min_x, mut min_y) = (f64::MAX, f64::MAX);
@@ -127,26 +163,72 @@ fn load_map(
     let center_y = (min_y + max_y) / 2.0;
 
     for (i, shape) in shapes.iter().enumerate() {
-        let positions: Vec<[f32; 3]> = shape
-            .verts
-            .iter()
-            .map(|v| [(v[0] - center_x) as f32, (v[1] - center_y) as f32, 0.0])
-            .collect();
+        let mut positions = Vec::with_capacity(shape.verts.len());
+        let mut uvs = Vec::with_capacity(shape.verts.len());
+        for v in &shape.verts {
+            let x = (v[0] - center_x) as f32;
+            let y = (v[1] - center_y) as f32;
+            positions.push([x, y, 0.0]);
+            // Planar UVs so the tile repeats across the shape in world space.
+            uvs.push([x / TILE_WORLD, y / TILE_WORLD]);
+        }
 
         let mut mesh = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default());
         mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
+        mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uvs);
 
-        // A distinct hue per shape (golden-angle spacing avoids adjacent shapes clashing).
-        let color = Color::hsl((i as f32 * 137.5).rem_euclid(360.0), 0.6, 0.55);
+        // Pick the material and draw order (z) by kind, so sidewalks sit under roads and
+        // buildings sit on top.
+        let (material, z) = match shape.kind.as_str() {
+            "road" => (road_material.clone(), 2.0),
+            "sidewalk" => (sidewalk_material.clone(), 1.0),
+            "green" => (green_material.clone(), 0.0),
+            _ => {
+                // Buildings keep a distinct hue per shape (golden-angle spacing).
+                let color = Color::hsl((i as f32 * 137.5).rem_euclid(360.0), 0.6, 0.55);
+                (materials.add(color), 3.0)
+            }
+        };
 
         commands.spawn(MaterialMesh2dBundle {
             mesh: Mesh2dHandle(meshes.add(mesh)),
-            material: materials.add(color),
+            material,
+            transform: Transform::from_xyz(0.0, 0.0, z),
             ..default()
         });
     }
 
     info!("Loaded {} shapes from '{}'.", shapes.len(), path);
+}
+
+/// Decode a PNG, crop a sub-tile, and turn it into a tiling (Repeat) texture. Returns `None`
+/// if the bytes can't be decoded. The crop rectangle is clamped to the image so it never panics.
+fn tiled_texture(bytes: &[u8], crop: [u32; 4]) -> Option<Image> {
+    let rgba = image::load_from_memory(bytes).ok()?.to_rgba8();
+    let (img_w, img_h) = rgba.dimensions();
+    let x = crop[0].min(img_w.saturating_sub(1));
+    let y = crop[1].min(img_h.saturating_sub(1));
+    let w = crop[2].min(img_w - x).max(1);
+    let h = crop[3].min(img_h - y).max(1);
+    let tile = image::imageops::crop_imm(&rgba, x, y, w, h).to_image();
+
+    let mut image = Image::new(
+        Extent3d {
+            width: w,
+            height: h,
+            depth_or_array_layers: 1,
+        },
+        TextureDimension::D2,
+        tile.into_raw(),
+        TextureFormat::Rgba8UnormSrgb,
+        RenderAssetUsages::default(),
+    );
+    image.sampler = ImageSampler::Descriptor(ImageSamplerDescriptor {
+        address_mode_u: ImageAddressMode::Repeat,
+        address_mode_v: ImageAddressMode::Repeat,
+        ..default()
+    });
+    Some(image)
 }
 
 /// Read every feature from the FlatGeobuf file as a triangle soup. The exporter stores each
@@ -157,11 +239,12 @@ fn read_shapes(path: &str) -> std::result::Result<Vec<Shape>, Box<dyn std::error
 
     let mut shapes = Vec::new();
     while let Some(feature) = fgb.next()? {
+        let kind = feature.property::<String>("kind").unwrap_or_default();
         let geom = feature.to_geo()?;
         let mut verts = Vec::new();
         collect_triangles(&geom, &mut verts);
         if !verts.is_empty() {
-            shapes.push(Shape { verts });
+            shapes.push(Shape { kind, verts });
         }
     }
     Ok(shapes)

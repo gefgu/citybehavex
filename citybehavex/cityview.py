@@ -14,9 +14,10 @@ _ROADS_PATH = "theme=transportation/type=segment/*"
 _GREEN_PATH = "theme=base/type=land_use/*"
 _GREEN_SUBTYPES = ("park", "garden", "forest", "grass", "recreation_ground")
 
-# Buffer width (EPSG:3857 metres) used to turn road centre-lines into thin ribbons before
-# triangulation. ~6 projected units ≈ 4 real metres at Paris latitude.
-_ROAD_BUFFER = 6.0
+# Half-widths (EPSG:3857 metres, ~1.52x real metres at Paris latitude) used to turn road
+# centre-lines into ribbons: the road surface, plus a sidewalk strip on each side.
+_ROAD_HALF_WIDTH = 6.0
+_SIDEWALK_WIDTH = 4.0
 
 
 def _connect() -> duckdb.DuckDBPyConnection:
@@ -134,13 +135,19 @@ def build_cityview_file(
     """Build a single FlatGeobuf of pre-triangulated building/road/green geometries."""
     layers = load_overture_layers(min_lon, min_lat, max_lon, max_lat, overture_release)
 
-    # Roads are line geometries: buffer them into thin ribbons so they can be triangulated
-    # and rendered as filled meshes like the polygon layers.
-    roads = layers["road"]
+    # Roads are line geometries. Buffer the centre-lines into the road surface, and a sidewalk
+    # ring on each side (the wider buffer minus the road), so both can be triangulated and
+    # rendered as filled meshes like the polygon layers.
+    roads = layers.pop("road")
     if not roads.empty:
-        roads = roads.copy()
-        roads["geometry"] = roads.geometry.buffer(_ROAD_BUFFER)
-        layers["road"] = roads
+        road_poly = roads.geometry.buffer(_ROAD_HALF_WIDTH)
+        side_poly = roads.geometry.buffer(_ROAD_HALF_WIDTH + _SIDEWALK_WIDTH).difference(
+            road_poly
+        )
+        layers["road"] = roads.assign(geometry=road_poly)
+        layers["sidewalk"] = roads.assign(geometry=side_poly)
+    else:
+        layers["sidewalk"] = roads
 
     parts: list[gpd.GeoDataFrame] = []
     for kind, gdf in layers.items():
