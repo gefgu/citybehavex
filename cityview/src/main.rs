@@ -15,12 +15,13 @@ use geozero::ToGeo;
 use std::fs::File;
 use std::io::BufReader;
 
-// Texture tilesets baked into the binary. We crop one plain sub-tile from each and tile it.
-const ROAD_PNG: &[u8] = include_bytes!("../assets/UpdatedDarkRoad.png");
+// Textures baked into the binary. road.png is a seamless tile used whole; Sidewalks.png is a
+// tileset we crop one plain sub-tile from. Both are tiled across the ribbons.
+const ROAD_PNG: &[u8] = include_bytes!("../assets/road.png");
 const SIDEWALK_PNG: &[u8] = include_bytes!("../assets/Sidewalks.png");
 
-// Plain sub-tile crop rectangles (x, y, w, h) within each sheet. Clamped at runtime.
-const ROAD_CROP: [u32; 4] = [112, 8, 44, 44];
+// Crop rectangles (x, y, w, h), clamped at runtime. road.png (32x36) is used whole.
+const ROAD_CROP: [u32; 4] = [0, 0, 32, 36];
 const SIDEWALK_CROP: [u32; 4] = [16, 196, 44, 44];
 
 // World-space size (EPSG:3857 metres) one texture tile spans before repeating.
