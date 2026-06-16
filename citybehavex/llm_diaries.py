@@ -257,6 +257,19 @@ def build_diary_prompt(
     )
 
 
+def diary_episode_summary(diary: Diary) -> str:
+    """Compact one-line ``HH:MM-HH:MM PURPOSE | ...`` summary of a diary."""
+    return " | ".join(
+        f"{ep.start}-{ep.end if ep.end is not None else f'+{ep.duration_minutes}m'} "
+        f"{ep.purpose}"
+        for ep in diary.episodes
+    )
+
+
+# Cap how many prior schedules are echoed back into a prompt (token budget).
+_MAX_PREVIOUS_SCHEDULES = 20
+
+
 def build_single_diary_prompt(
     *,
     diary_number: int,
@@ -265,6 +278,7 @@ def build_single_diary_prompt(
     representative_day: str,
     purpose_distribution: Optional[dict[str, float]] = None,
     location_count: Optional[int] = None,
+    previous_diaries: Optional[list[Diary]] = None,
 ) -> str:
     distribution = purpose_distribution or {}
     location_rule = ""
@@ -280,6 +294,23 @@ def build_single_diary_prompt(
             f"location(s) counting HOME (so {max(location_count - 1, 0)} non-home "
             "place(s)); returning to a place already visited does not add to that count.\n"
         )
+
+    # One-location schedules are necessarily identical (a single HOME episode), so
+    # there is nothing to differentiate; only de-duplicate multi-location ones.
+    dedup_rule = ""
+    if location_count != 1 and previous_diaries:
+        shown = previous_diaries[-_MAX_PREVIOUS_SCHEDULES:]
+        listing = "".join(
+            f"  {i}. {diary_episode_summary(d)}\n" for i, d in enumerate(shown, start=1)
+        )
+        dedup_rule = (
+            f"The following {len(shown)} schedule(s) with this same location count "
+            "have already been generated. Produce a clearly different routine (vary "
+            "wake/sleep and activity timing and the non-home activity mix); do NOT "
+            "repeat or trivially rephrase any of them:\n"
+            f"{listing}"
+        )
+
     return (
         "Return JSON only for one synthetic daily mobility diary.\n"
         "Shape: {\"diary_id\":\"d1\",\"episodes\":[{\"start\":\"00:00\",\"end\":\"07:00\","
@@ -289,6 +320,7 @@ def build_single_diary_prompt(
         f"City profile: {city_profile or 'No additional city profile provided.'}\n"
         f"Purpose distribution hints: {json.dumps(distribution, sort_keys=True)}\n"
         f"{location_rule}"
+        f"{dedup_rule}"
         "Allowed purposes: HOME, WORK, STUDIES, PURCHASE, LEISURE, HEALTH, OTHER.\n"
         "Rules: start at 00:00, end at 24:00, use contiguous non-overlapping episodes, "
         "include HOME, and use only start/end times in HH:MM.\n"
@@ -514,14 +546,19 @@ def fetch_diary_batch(
             ) from cache_error
 
     diaries: list[Diary] = []
+    # Previously generated diaries grouped by their location count, so each new
+    # prompt can show prior schedules of the same count and avoid duplicates.
+    generated_by_count: dict[int, list[Diary]] = {}
     for diary_number in range(1, config.diary_count + 1):
+        diary_location_count = location_count_for(diary_number)
         prompt = build_single_diary_prompt(
             diary_number=diary_number,
             diary_count=config.diary_count,
             city_profile=city_profile,
             representative_day=representative_day,
             purpose_distribution=purpose_distribution,
-            location_count=location_count_for(diary_number),
+            location_count=diary_location_count,
+            previous_diaries=generated_by_count.get(diary_location_count),
         )
         _numbered_path(prompt_path, diary_number).write_text(prompt, encoding="utf-8")
         request_payload = {
@@ -573,6 +610,7 @@ def fetch_diary_batch(
         if diary is None:
             break
         diaries.append(diary)
+        generated_by_count.setdefault(diary_location_count, []).append(diary)
 
     if len(diaries) == config.diary_count:
         try:

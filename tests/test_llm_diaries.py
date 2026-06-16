@@ -8,6 +8,7 @@ import pytest
 from citybehavex.config import LLMConfig
 from citybehavex.diaries import diary_batch_to_markov_training
 from citybehavex.llm_diaries import (
+    Diary,
     DiaryBatch,
     DiaryValidationError,
     LLMStats,
@@ -148,6 +149,35 @@ def test_one_location_prompt_requires_single_home_episode():
 
     assert "HOME is the only visited location" in prompt
     assert "exactly one episode from 00:00 to 24:00" in prompt
+
+
+def test_prompt_lists_previous_schedules_to_avoid_duplicates():
+    previous = [Diary.model_validate(_diary(1)), Diary.model_validate(_diary(2))]
+    prompt = build_single_diary_prompt(
+        diary_number=3,
+        diary_count=10,
+        city_profile="test city",
+        representative_day="2026-01-01",
+        location_count=4,
+        previous_diaries=previous,
+    )
+    assert "already been generated" in prompt
+    assert "do NOT" in prompt
+    # The compact episode summary of a prior schedule is echoed back.
+    assert "00:00-07:00 HOME | 07:00-09:00 OTHER" in prompt
+
+
+def test_one_location_prompt_ignores_previous_schedules():
+    previous = [Diary.model_validate(_diary(1))]
+    prompt = build_single_diary_prompt(
+        diary_number=2,
+        diary_count=10,
+        city_profile="test city",
+        representative_day="2026-01-01",
+        location_count=1,
+        previous_diaries=previous,
+    )
+    assert "already been generated" not in prompt
 
 
 @pytest.mark.parametrize(
