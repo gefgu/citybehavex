@@ -1,0 +1,46 @@
+tessellation:
+  min_lon: 1.6
+  min_lat: 48.5
+  max_lon: 2.975
+  max_lat: 49.16
+  poi_tessellation: true
+  overture_release: "2026-05-20.0"
+  min_poi_count: 1
+  relevance_column: relevance
+  output: data/gparis_poi_tessellation.parquet
+
+simulation:
+  model: sts_epr
+  agents: 500
+  days: 7
+  output: data/gparis_sts_epr_trajectories.parquet
+  random_state: 42
+  relevance_column: relevance
+  granularity_minutes: 15   # schedule slot length (5, 15, or 60)
+  car_speed_kmh: 50.0       # car speed for the trip-duration heuristic
+
+llm:
+  base_url: "http://localhost:8080"
+  api_key: "none"
+  model: "Qwen/Qwen2.5-32B-Instruct-AWQ"
+  diary_count: 30
+  max_tokens: 768
+  cache_dir: data/llm_diaries_gparis
+  validated_diaries_path: data/llm_diaries_gparis/validated_diaries.json
+  training_path: data/llm_diaries_gparis/markov_training.parquet
+
+diaries:
+  city_profile: "Greater Paris metropolitan region, urban mobility with commuting, errands, leisure, healthcare, studies, and home routines."
+  city_profile_weekday: "Greater Paris weekday routines: commuting to work or studies, midday errands, evening leisure, and home."
+  city_profile_weekend: "Greater Paris weekend routines: later mornings at home, leisure, shopping, social visits, fewer work/study trips."
+  representative_day: "2026-01-01"
+  # Truncated rounded log-normal distribution of distinct daily locations,
+  # including HOME.
+  location_count_mu: 1.0
+  location_count_sigma: 0.5
+  max_locations: 6
+
+comparison:
+  path: data/gparis_visitation_df.parquet
+  label: gparis
+  html: data/gparis_sts_epr_comparison.html

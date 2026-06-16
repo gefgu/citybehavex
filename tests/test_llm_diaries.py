@@ -10,6 +10,7 @@ from citybehavex.diaries import diary_batch_to_markov_training
 from citybehavex.llm_diaries import (
     DiaryBatch,
     DiaryValidationError,
+    LLMStats,
     allocate_location_counts,
     build_single_diary_prompt,
     fetch_diary_batch,
@@ -195,13 +196,16 @@ def test_cache_fallback_after_llm_failure(monkeypatch, tmp_path):
         validated_diaries_path=str(valid_cache),
         diary_count=10,
     )
+    stats = LLMStats()
     batch = fetch_diary_batch(
         config,
         city_profile="test city",
         representative_day="2026-01-01",
         location_counts=DEFAULT_COUNTS,
+        stats=stats,
     )
     assert len(batch.diaries) == 10
+    assert stats.calls == 0
 
 
 def test_legacy_and_mismatched_caches_are_rejected(tmp_path):
@@ -261,15 +265,18 @@ def test_fetch_diary_batch_calls_llm_once_per_diary(monkeypatch, tmp_path):
         diary_count=10,
     )
 
+    stats = LLMStats()
     batch = fetch_diary_batch(
         config,
         city_profile="test city",
         representative_day="2026-01-01",
         location_counts=[2] * 10,
+        stats=stats,
     )
 
     assert len(batch.diaries) == 10
     assert len(calls) == 10
+    assert stats.calls == 10
     assert batch.target_location_counts == [2] * 10
     assert batch.location_count_distribution.model_dump() == {
         "mu": 1.0,
