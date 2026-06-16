@@ -117,13 +117,13 @@
         },
         {
           "start": "18:00",
-          "end": "19:30",
+          "end": "19:00",
           "duration_minutes": null,
           "purpose": "PURCHASE",
           "notes": null
         },
         {
-          "start": "19:30",
+          "start": "19:00",
           "end": "24:00",
           "duration_minutes": null,
           "purpose": "HOME",
@@ -137,13 +137,13 @@
       "episodes": [
         {
           "start": "00:00",
-          "end": "07:00",
+          "end": "07:30",
           "duration_minutes": null,
           "purpose": "HOME",
           "notes": null
         },
         {
-          "start": "07:00",
+          "start": "07:30",
           "end": "09:00",
           "duration_minutes": null,
           "purpose": "WORK",
@@ -199,13 +199,13 @@
         },
         {
           "start": "18:00",
-          "end": "19:00",
+          "end": "19:30",
           "duration_minutes": null,
           "purpose": "PURCHASE",
           "notes": null
         },
         {
-          "start": "19:00",
+          "start": "19:30",
           "end": "24:00",
           "duration_minutes": null,
           "purpose": "HOME",
@@ -281,13 +281,13 @@
         },
         {
           "start": "18:00",
-          "end": "19:00",
+          "end": "19:30",
           "duration_minutes": null,
           "purpose": "PURCHASE",
           "notes": null
         },
         {
-          "start": "19:00",
+          "start": "19:30",
           "end": "24:00",
           "duration_minutes": null,
           "purpose": "HOME",
@@ -342,13 +342,13 @@
       "episodes": [
         {
           "start": "00:00",
-          "end": "07:00",
+          "end": "07:30",
           "duration_minutes": null,
           "purpose": "HOME",
           "notes": null
         },
         {
-          "start": "07:00",
+          "start": "07:30",
           "end": "09:00",
           "duration_minutes": null,
           "purpose": "WORK",
@@ -363,13 +363,13 @@
         },
         {
           "start": "18:00",
-          "end": "19:00",
+          "end": "19:30",
           "duration_minutes": null,
           "purpose": "PURCHASE",
           "notes": null
         },
         {
-          "start": "19:00",
+          "start": "19:30",
           "end": "24:00",
           "duration_minutes": null,
           "purpose": "HOME",
@@ -383,13 +383,13 @@
       "episodes": [
         {
           "start": "00:00",
-          "end": "07:00",
+          "end": "07:30",
           "duration_minutes": null,
           "purpose": "HOME",
           "notes": null
         },
         {
-          "start": "07:00",
+          "start": "07:30",
           "end": "09:00",
           "duration_minutes": null,
           "purpose": "WORK",
@@ -404,13 +404,13 @@
         },
         {
           "start": "18:00",
-          "end": "19:00",
+          "end": "19:30",
           "duration_minutes": null,
           "purpose": "PURCHASE",
           "notes": null
         },
         {
-          "start": "19:00",
+          "start": "19:30",
           "end": "24:00",
           "duration_minutes": null,
           "purpose": "HOME",
@@ -486,13 +486,13 @@
         },
         {
           "start": "18:00",
-          "end": "19:30",
+          "end": "19:00",
           "duration_minutes": null,
           "purpose": "PURCHASE",
           "notes": null
         },
         {
-          "start": "19:30",
+          "start": "19:00",
           "end": "24:00",
           "duration_minutes": null,
           "purpose": "HOME",
@@ -520,6 +520,20 @@
         },
         {
           "start": "09:00",
+          "end": "12:00",
+          "duration_minutes": null,
+          "purpose": "PURCHASE",
+          "notes": null
+        },
+        {
+          "start": "12:00",
+          "end": "13:00",
+          "duration_minutes": null,
+          "purpose": "HOME",
+          "notes": null
+        },
+        {
+          "start": "13:00",
           "end": "18:00",
           "duration_minutes": null,
           "purpose": "WORK",
@@ -529,18 +543,11 @@
           "start": "18:00",
           "end": "19:30",
           "duration_minutes": null,
-          "purpose": "PURCHASE",
-          "notes": null
-        },
-        {
-          "start": "19:30",
-          "end": "22:00",
-          "duration_minutes": null,
           "purpose": "LEISURE",
           "notes": null
         },
         {
-          "start": "22:00",
+          "start": "19:30",
           "end": "24:00",
           "duration_minutes": null,
           "purpose": "HOME",
@@ -568,20 +575,6 @@
         },
         {
           "start": "09:00",
-          "end": "13:00",
-          "duration_minutes": null,
-          "purpose": "WORK",
-          "notes": null
-        },
-        {
-          "start": "13:00",
-          "end": "14:00",
-          "duration_minutes": null,
-          "purpose": "PURCHASE",
-          "notes": null
-        },
-        {
-          "start": "14:00",
           "end": "18:00",
           "duration_minutes": null,
           "purpose": "WORK",
@@ -589,13 +582,20 @@
         },
         {
           "start": "18:00",
-          "end": "20:00",
+          "end": "19:30",
+          "duration_minutes": null,
+          "purpose": "PURCHASE",
+          "notes": null
+        },
+        {
+          "start": "19:30",
+          "end": "22:00",
           "duration_minutes": null,
           "purpose": "LEISURE",
           "notes": null
         },
         {
-          "start": "20:00",
+          "start": "22:00",
           "end": "24:00",
           "duration_minutes": null,
           "purpose": "HOME",
@@ -623,16 +623,23 @@
         },
         {
           "start": "09:00",
-          "end": "13:00",
+          "end": "12:00",
           "duration_minutes": null,
           "purpose": "WORK",
+          "notes": null
+        },
+        {
+          "start": "12:00",
+          "end": "13:00",
+          "duration_minutes": null,
+          "purpose": "PURCHASE",
           "notes": null
         },
         {
           "start": "13:00",
           "end": "14:00",
           "duration_minutes": null,
-          "purpose": "PURCHASE",
+          "purpose": "HOME",
           "notes": null
         },
         {
@@ -644,13 +651,13 @@
         },
         {
           "start": "18:00",
-          "end": "20:00",
+          "end": "19:00",
           "duration_minutes": null,
           "purpose": "LEISURE",
           "notes": null
         },
         {
-          "start": "20:00",
+          "start": "19:00",
           "end": "24:00",
           "duration_minutes": null,
           "purpose": "HOME",
@@ -678,6 +685,20 @@
         },
         {
           "start": "09:00",
+          "end": "12:00",
+          "duration_minutes": null,
+          "purpose": "WORK",
+          "notes": null
+        },
+        {
+          "start": "12:00",
+          "end": "13:00",
+          "duration_minutes": null,
+          "purpose": "PURCHASE",
+          "notes": null
+        },
+        {
+          "start": "13:00",
           "end": "18:00",
           "duration_minutes": null,
           "purpose": "WORK",
@@ -687,18 +708,11 @@
           "start": "18:00",
           "end": "19:30",
           "duration_minutes": null,
-          "purpose": "PURCHASE",
-          "notes": null
-        },
-        {
-          "start": "19:30",
-          "end": "22:00",
-          "duration_minutes": null,
           "purpose": "LEISURE",
           "notes": null
         },
         {
-          "start": "22:00",
+          "start": "19:30",
           "end": "24:00",
           "duration_minutes": null,
           "purpose": "HOME",
@@ -726,6 +740,20 @@
         },
         {
           "start": "09:00",
+          "end": "12:00",
+          "duration_minutes": null,
+          "purpose": "PURCHASE",
+          "notes": null
+        },
+        {
+          "start": "12:00",
+          "end": "13:00",
+          "duration_minutes": null,
+          "purpose": "HOME",
+          "notes": null
+        },
+        {
+          "start": "13:00",
           "end": "18:00",
           "duration_minutes": null,
           "purpose": "WORK",
@@ -733,20 +761,13 @@
         },
         {
           "start": "18:00",
-          "end": "19:30",
-          "duration_minutes": null,
-          "purpose": "PURCHASE",
-          "notes": null
-        },
-        {
-          "start": "19:30",
-          "end": "22:00",
+          "end": "20:00",
           "duration_minutes": null,
           "purpose": "LEISURE",
           "notes": null
         },
         {
-          "start": "22:00",
+          "start": "20:00",
           "end": "24:00",
           "duration_minutes": null,
           "purpose": "HOME",
@@ -829,6 +850,61 @@
         },
         {
           "start": "09:00",
+          "end": "12:00",
+          "duration_minutes": null,
+          "purpose": "PURCHASE",
+          "notes": null
+        },
+        {
+          "start": "12:00",
+          "end": "13:00",
+          "duration_minutes": null,
+          "purpose": "HOME",
+          "notes": null
+        },
+        {
+          "start": "13:00",
+          "end": "18:00",
+          "duration_minutes": null,
+          "purpose": "WORK",
+          "notes": null
+        },
+        {
+          "start": "18:00",
+          "end": "20:00",
+          "duration_minutes": null,
+          "purpose": "LEISURE",
+          "notes": null
+        },
+        {
+          "start": "20:00",
+          "end": "24:00",
+          "duration_minutes": null,
+          "purpose": "HOME",
+          "notes": null
+        }
+      ]
+    },
+    {
+      "diary_id": "routine-022",
+      "description": null,
+      "episodes": [
+        {
+          "start": "00:00",
+          "end": "07:30",
+          "duration_minutes": null,
+          "purpose": "HOME",
+          "notes": null
+        },
+        {
+          "start": "07:30",
+          "end": "09:00",
+          "duration_minutes": null,
+          "purpose": "WORK",
+          "notes": null
+        },
+        {
+          "start": "09:00",
           "end": "18:00",
           "duration_minutes": null,
           "purpose": "WORK",
@@ -858,7 +934,7 @@
       ]
     },
     {
-      "diary_id": "routine-022",
+      "diary_id": "routine-023",
       "description": null,
       "episodes": [
         {
@@ -877,75 +953,20 @@
         },
         {
           "start": "09:00",
-          "end": "18:00",
-          "duration_minutes": null,
-          "purpose": "WORK",
-          "notes": null
-        },
-        {
-          "start": "18:00",
-          "end": "19:00",
-          "duration_minutes": null,
-          "purpose": "PURCHASE",
-          "notes": null
-        },
-        {
-          "start": "19:00",
-          "end": "22:00",
-          "duration_minutes": null,
-          "purpose": "LEISURE",
-          "notes": null
-        },
-        {
-          "start": "22:00",
-          "end": "24:00",
-          "duration_minutes": null,
-          "purpose": "HOME",
-          "notes": null
-        }
-      ]
-    },
-    {
-      "diary_id": "routine-023",
-      "description": null,
-      "episodes": [
-        {
-          "start": "00:00",
-          "end": "07:30",
-          "duration_minutes": null,
-          "purpose": "HOME",
-          "notes": null
-        },
-        {
-          "start": "07:30",
-          "end": "09:00",
-          "duration_minutes": null,
-          "purpose": "WORK",
-          "notes": null
-        },
-        {
-          "start": "09:00",
           "end": "12:00",
           "duration_minutes": null,
-          "purpose": "WORK",
+          "purpose": "PURCHASE",
           "notes": null
         },
         {
           "start": "12:00",
           "end": "13:00",
           "duration_minutes": null,
-          "purpose": "PURCHASE",
-          "notes": null
-        },
-        {
-          "start": "13:00",
-          "end": "14:00",
-          "duration_minutes": null,
           "purpose": "HOME",
           "notes": null
         },
         {
-          "start": "14:00",
+          "start": "13:00",
           "end": "18:00",
           "duration_minutes": null,
           "purpose": "WORK",
@@ -953,13 +974,13 @@
         },
         {
           "start": "18:00",
-          "end": "20:00",
+          "end": "19:30",
           "duration_minutes": null,
           "purpose": "LEISURE",
           "notes": null
         },
         {
-          "start": "20:00",
+          "start": "19:30",
           "end": "24:00",
           "duration_minutes": null,
           "purpose": "HOME",
@@ -987,20 +1008,20 @@
         },
         {
           "start": "09:00",
-          "end": "13:00",
-          "duration_minutes": null,
-          "purpose": "WORK",
-          "notes": null
-        },
-        {
-          "start": "13:00",
-          "end": "14:00",
+          "end": "12:00",
           "duration_minutes": null,
           "purpose": "PURCHASE",
           "notes": null
         },
         {
-          "start": "14:00",
+          "start": "12:00",
+          "end": "13:30",
+          "duration_minutes": null,
+          "purpose": "HOME",
+          "notes": null
+        },
+        {
+          "start": "13:30",
           "end": "18:00",
           "duration_minutes": null,
           "purpose": "WORK",
@@ -1028,13 +1049,13 @@
       "episodes": [
         {
           "start": "00:00",
-          "end": "07:30",
+          "end": "07:00",
           "duration_minutes": null,
           "purpose": "HOME",
           "notes": null
         },
         {
-          "start": "07:30",
+          "start": "07:00",
           "end": "09:00",
           "duration_minutes": null,
           "purpose": "WORK",
@@ -1044,25 +1065,18 @@
           "start": "09:00",
           "end": "12:00",
           "duration_minutes": null,
-          "purpose": "WORK",
+          "purpose": "PURCHASE",
           "notes": null
         },
         {
           "start": "12:00",
           "end": "13:00",
           "duration_minutes": null,
-          "purpose": "PURCHASE",
-          "notes": null
-        },
-        {
-          "start": "13:00",
-          "end": "14:00",
-          "duration_minutes": null,
           "purpose": "HOME",
           "notes": null
         },
         {
-          "start": "14:00",
+          "start": "13:00",
           "end": "18:00",
           "duration_minutes": null,
           "purpose": "WORK",
@@ -1070,13 +1084,13 @@
         },
         {
           "start": "18:00",
-          "end": "19:00",
+          "end": "20:00",
           "duration_minutes": null,
           "purpose": "LEISURE",
           "notes": null
         },
         {
-          "start": "19:00",
+          "start": "20:00",
           "end": "24:00",
           "duration_minutes": null,
           "purpose": "HOME",
@@ -1152,13 +1166,13 @@
         },
         {
           "start": "07:30",
-          "end": "08:30",
+          "end": "09:00",
           "duration_minutes": null,
           "purpose": "WORK",
           "notes": null
         },
         {
-          "start": "08:30",
+          "start": "09:00",
           "end": "12:00",
           "duration_minutes": null,
           "purpose": "WORK",
@@ -1187,13 +1201,13 @@
         },
         {
           "start": "18:00",
-          "end": "19:00",
+          "end": "19:30",
           "duration_minutes": null,
           "purpose": "LEISURE",
           "notes": null
         },
         {
-          "start": "19:00",
+          "start": "19:30",
           "end": "24:00",
           "duration_minutes": null,
           "purpose": "HOME",
@@ -1235,20 +1249,34 @@
         },
         {
           "start": "13:00",
-          "end": "18:00",
+          "end": "17:00",
           "duration_minutes": null,
           "purpose": "WORK",
+          "notes": null
+        },
+        {
+          "start": "17:00",
+          "end": "18:00",
+          "duration_minutes": null,
+          "purpose": "LEISURE",
           "notes": null
         },
         {
           "start": "18:00",
           "end": "19:00",
           "duration_minutes": null,
-          "purpose": "LEISURE",
+          "purpose": "HOME",
           "notes": null
         },
         {
           "start": "19:00",
+          "end": "21:00",
+          "duration_minutes": null,
+          "purpose": "HEALTH",
+          "notes": null
+        },
+        {
+          "start": "21:00",
           "end": "24:00",
           "duration_minutes": null,
           "purpose": "HOME",
@@ -1290,20 +1318,20 @@
         },
         {
           "start": "13:00",
-          "end": "17:00",
+          "end": "18:00",
           "duration_minutes": null,
           "purpose": "WORK",
           "notes": null
         },
         {
-          "start": "17:00",
-          "end": "18:30",
+          "start": "18:00",
+          "end": "20:00",
           "duration_minutes": null,
           "purpose": "LEISURE",
           "notes": null
         },
         {
-          "start": "18:30",
+          "start": "20:00",
           "end": "24:00",
           "duration_minutes": null,
           "purpose": "HOME",
@@ -1345,20 +1373,20 @@
         },
         {
           "start": "13:00",
-          "end": "17:00",
+          "end": "18:00",
           "duration_minutes": null,
           "purpose": "WORK",
           "notes": null
         },
         {
-          "start": "17:00",
-          "end": "19:00",
+          "start": "18:00",
+          "end": "19:30",
           "duration_minutes": null,
           "purpose": "LEISURE",
           "notes": null
         },
         {
-          "start": "19:00",
+          "start": "19:30",
           "end": "24:00",
           "duration_minutes": null,
           "purpose": "HOME",
