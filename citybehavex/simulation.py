@@ -5,16 +5,18 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional
 
+import numpy as np
 import pandas as pd
 import skmob2
 import typer
-from skmob2.models import DensityEPR, MarkovDiaryGenerator
+from skmob2.models import DensityEPR
 
 from .config import CityBehavExConfig
-from .diaries import annotate_trajectory_purposes, diary_batch_to_markov_training
+from .diaries import annotate_trajectory_purposes_ddcrp
 from .llm_diaries import DiaryBatch, LLMStats, allocate_location_counts, fetch_diary_batch
+from .schedule_ddcrp import DiaryBank, build_ddcrp_diary, build_diary_bank
 from .tessellation import build_poi_tessellation, build_tessellation, purpose_distribution
-from .trip_ditras import build_daily_diary, simulate_trip_ditras
+from .trip_ditras import simulate_trip_ditras
 from .trip_sts_epr import RustTiming, simulate_trip_sts_epr
 
 
@@ -164,38 +166,49 @@ def _run_density_epr(
     return traj, synth_activity_col
 
 
+def _build_schedule(
+    config: CityBehavExConfig,
+    diary_batches: dict[str, DiaryBatch],
+    start_date: pd.Timestamp,
+) -> tuple[DiaryBank, tuple, np.ndarray]:
+    """Build the diary bank and run ddCRP schedule selection for every agent/day."""
+    bank = build_diary_bank(
+        diary_batches,
+        config.embedding,
+        config.simulation.granularity_minutes,
+    )
+    typer.echo(
+        f"ddCRP schedule bank: {len(bank.diaries)} diaries "
+        f"({int((~bank.is_weekend).sum())} weekday / {int(bank.is_weekend.sum())} weekend), "
+        f"embeddings={'on' if bank.embedded else 'off (identity similarity)'}"
+    )
+    diary_arrays, chosen = build_ddcrp_diary(
+        bank,
+        start_date,
+        config.simulation.days,
+        config.simulation.agents,
+        config.simulation.random_state,
+        config.schedule,
+    )
+    return bank, diary_arrays, chosen
+
+
 def _run_trip_ditras(
     config: CityBehavExConfig,
     tessellation_df: pd.DataFrame,
     relevance_column: str,
     start_date: pd.Timestamp,
     end_date: pd.Timestamp,
-    diary_batches: dict[str, DiaryBatch],
+    bank: DiaryBank,
+    diary_arrays: tuple,
+    chosen: np.ndarray,
     timing: RustTiming,
 ) -> tuple[skmob2.TrajDataFrame, Optional[str]]:
     granularity = config.simulation.granularity_minutes
-    generators: dict[str, MarkovDiaryGenerator] = {}
-    for day_type, batch in diary_batches.items():
-        training = diary_batch_to_markov_training(
-            batch,
-            representative_day=config.diaries.representative_day,
-            granularity_minutes=granularity,
-        )
-        generator = MarkovDiaryGenerator(granularity_minutes=granularity)
-        generator.fit(training, len(batch.diaries), lid="location")
-        generators[day_type] = generator
-
     typer.echo(
         f"Running trip-DITRAS: {config.simulation.agents} agents x {config.simulation.days} days "
         f"@ {granularity}-min slots, {config.simulation.car_speed_kmh:.0f} km/h car "
         f"({start_date.date()} -> {end_date.date()})"
-    )
-    diary_arrays = build_daily_diary(
-        generators,
-        start_date,
-        config.simulation.days,
-        config.simulation.agents,
-        config.simulation.random_state,
     )
     df = simulate_trip_ditras(
         tessellation_df,
@@ -209,11 +222,7 @@ def _run_trip_ditras(
         random_state=config.simulation.random_state,
         timing=timing,
     )
-    df = annotate_trajectory_purposes(
-        df,
-        diary_batches["weekday"],
-        weekend_batch=diary_batches.get("weekend"),
-    )
+    df = annotate_trajectory_purposes_ddcrp(df, bank, chosen, start_date)
     traj = skmob2.TrajDataFrame(
         df, datetime_col="datetime", lat_col="lat", lng_col="lng", uid_col="uid"
     )
@@ -226,32 +235,16 @@ def _run_trip_sts_epr(
     relevance_column: str,
     start_date: pd.Timestamp,
     end_date: pd.Timestamp,
-    diary_batches: dict[str, DiaryBatch],
+    bank: DiaryBank,
+    diary_arrays: tuple,
+    chosen: np.ndarray,
     timing: RustTiming,
 ) -> tuple[skmob2.TrajDataFrame, Optional[str]]:
     granularity = config.simulation.granularity_minutes
-    generators: dict[str, MarkovDiaryGenerator] = {}
-    for day_type, batch in diary_batches.items():
-        training = diary_batch_to_markov_training(
-            batch,
-            representative_day=config.diaries.representative_day,
-            granularity_minutes=granularity,
-        )
-        generator = MarkovDiaryGenerator(granularity_minutes=granularity)
-        generator.fit(training, len(batch.diaries), lid="location")
-        generators[day_type] = generator
-
     typer.echo(
         f"Running trip-STS-EPR: {config.simulation.agents} agents x {config.simulation.days} days "
         f"@ {granularity}-min slots, {config.simulation.car_speed_kmh:.0f} km/h car "
         f"({start_date.date()} -> {end_date.date()})"
-    )
-    diary_arrays = build_daily_diary(
-        generators,
-        start_date,
-        config.simulation.days,
-        config.simulation.agents,
-        config.simulation.random_state,
     )
     df = simulate_trip_sts_epr(
         tessellation_df,
@@ -265,11 +258,7 @@ def _run_trip_sts_epr(
         random_state=config.simulation.random_state,
         timing=timing,
     )
-    df = annotate_trajectory_purposes(
-        df,
-        diary_batches["weekday"],
-        weekend_batch=diary_batches.get("weekend"),
-    )
+    df = annotate_trajectory_purposes_ddcrp(df, bank, chosen, start_date)
     traj = skmob2.TrajDataFrame(
         df, datetime_col="datetime", lat_col="lat", lng_col="lng", uid_col="uid"
     )
@@ -291,6 +280,7 @@ def run_simulation(config: CityBehavExConfig) -> skmob2.TrajDataFrame:
         typer.echo(
             f"LLM diary phase: {llm_seconds:.2f}s, {llm_stats.calls:,} chat completion calls"
         )
+        bank, diary_arrays, chosen = _build_schedule(config, diary_batches, start_date)
         if config.simulation.model == "ditras":
             traj, synth_activity_col = _run_trip_ditras(
                 config,
@@ -298,7 +288,9 @@ def run_simulation(config: CityBehavExConfig) -> skmob2.TrajDataFrame:
                 relevance_column,
                 start_date,
                 end_date,
-                diary_batches,
+                bank,
+                diary_arrays,
+                chosen,
                 rust_timing,
             )
         else:
@@ -308,7 +300,9 @@ def run_simulation(config: CityBehavExConfig) -> skmob2.TrajDataFrame:
                 relevance_column,
                 start_date,
                 end_date,
-                diary_batches,
+                bank,
+                diary_arrays,
+                chosen,
                 rust_timing,
             )
         typer.echo(f"Rust simulation phase: {rust_timing.seconds:.2f}s")

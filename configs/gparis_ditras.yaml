@@ -26,7 +26,6 @@ llm:
   max_tokens: 768
   cache_dir: data/llm_diaries_gparis
   validated_diaries_path: data/llm_diaries_gparis/validated_diaries.json
-  training_path: data/llm_diaries_gparis/markov_training.parquet
 
 diaries:
   city_profile: "Greater Paris metropolitan region, urban mobility with commuting, errands, leisure, healthcare, studies, and home routines."

@@ -21,3 +21,6 @@ gparis_sample_trip_with_lengths.parquet
 data/llm_diaries_gparis/prompt*.txt
 data/llm_diaries_gparis/raw_response*.json
 data/llm_diaries_gparis/markov_training.parquet
+
+# Default ddCRP embedding cache + vLLM logs
+.citybehavex/
