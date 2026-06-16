@@ -65,6 +65,22 @@ uv run citybehavex report \
   --output data/gparis_sts_epr_comparison.html
 ```
 
+### Embedding model (ddCRP schedule selection)
+
+Schedule selection embeds each diary with `nomic-embed-text-v2-moe`. With
+`embedding.auto_launch: true` (the default) citybehavex starts the server below on
+demand and shuts it down afterwards, caching vectors so it rarely reruns. To run it
+yourself and reuse it (set `embedding.auto_launch: false` and point
+`embedding.base_url` at it), serve the model with vLLM:
+
+```bash
+uv run --extra embeddings vllm serve nomic-ai/nomic-embed-text-v2-moe \
+  --task embed --trust-remote-code --port 8001
+```
+
+The `embeddings` extra (vLLM) is required only for serving; without a GPU set
+`embedding.enabled: false` to fall back to identity similarity.
+
 ## Updating local skmob2
 
 Rebuild the sibling `../skmob2` Rust extension into this project's `.venv`:
