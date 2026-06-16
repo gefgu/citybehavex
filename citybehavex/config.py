@@ -100,7 +100,6 @@ class LLMConfig(BaseModel):
     prompt_path: Optional[str] = None
     raw_response_path: Optional[str] = None
     validated_diaries_path: Optional[str] = None
-    training_path: Optional[str] = None
 
     @model_validator(mode="after")
     def validate_client_fields(self) -> LLMConfig:
@@ -140,6 +139,55 @@ class DiariesConfig(BaseModel):
         return specific or self.city_profile
 
 
+class EmbeddingConfig(BaseModel):
+    """Diary-embedding backend for the ddCRP schedule selector.
+
+    Embeddings are served over an OpenAI-compatible ``/v1/embeddings`` endpoint.
+    If ``base_url`` is unset and ``auto_launch`` is true, a local vLLM server is
+    spawned on demand (only when uncached diaries need embedding) and shut down
+    afterwards. Computed vectors are cached to ``cache_path`` so the server runs
+    rarely. When ``enabled`` is false (or every backend fails), the selector falls
+    back to identity similarity (exact preferential return, no semantic smoothing).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = True
+    model: str = "nomic-ai/nomic-embed-text-v2-moe"
+    base_url: Optional[str] = None
+    api_key: Optional[str] = None
+    task_prefix: str = "clustering: "
+    dimensions: int = Field(default=768, gt=0)
+    timeout_seconds: float = 120.0
+    auto_launch: bool = True
+    vllm_port: int = 8001
+    vllm_startup_timeout_seconds: float = 600.0
+    vllm_extra_args: list[str] = Field(default_factory=list)
+    cache_dir: str = ".citybehavex/embeddings"
+    cache_path: Optional[str] = None
+
+    def resolved_cache_path(self) -> str:
+        return self.cache_path or str(Path(self.cache_dir) / "diary_embeddings.npz")
+
+
+class ScheduleConfig(BaseModel):
+    """Distance-dependent Chinese Restaurant Process (ddCRP) schedule selection.
+
+    Each simulated day an agent picks one whole LLM diary, weighted by calendar
+    recency (habit) and the semantic similarity of candidate diaries to the diaries
+    it used on past same-type days. Weekday/weekend are hard-separated banks.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    lam: float = Field(default=0.15, ge=0)  # recency decay per day
+    rho: float = Field(default=0.6, ge=0)  # exploration coefficient
+    gamma: float = Field(default=0.21, ge=0)  # exploration decay exponent
+    memory_window_days: int = Field(default=60, ge=1)  # memory truncation
+    implant_memory: bool = True  # seed cold-start memory per agent
+    semantic_temperature: float = Field(default=1.0, gt=0)  # scales similarity
+
+
 class ComparisonConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -155,6 +203,8 @@ class CityBehavExConfig(BaseModel):
     simulation: SimulationConfig = Field(default_factory=SimulationConfig)
     llm: LLMConfig = Field(default_factory=LLMConfig)
     diaries: DiariesConfig = Field(default_factory=DiariesConfig)
+    embedding: EmbeddingConfig = Field(default_factory=EmbeddingConfig)
+    schedule: ScheduleConfig = Field(default_factory=ScheduleConfig)
     comparison: ComparisonConfig = Field(default_factory=ComparisonConfig)
 
 

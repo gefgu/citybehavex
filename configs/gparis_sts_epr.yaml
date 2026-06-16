@@ -27,7 +27,6 @@ llm:
   max_tokens: 768
   cache_dir: data/llm_diaries_gparis
   validated_diaries_path: data/llm_diaries_gparis/validated_diaries.json
-  training_path: data/llm_diaries_gparis/markov_training.parquet
 
 diaries:
   city_profile: "Greater Paris metropolitan region, urban mobility with commuting, errands, leisure, healthcare, studies, and home routines."
@@ -39,6 +38,30 @@ diaries:
   location_count_mu: 1.0
   location_count_sigma: 0.5
   max_locations: 6
+
+embedding:
+  # Diary embeddings drive the ddCRP schedule selector. With auto_launch, a local
+  # vLLM server is spawned only when uncached diaries need embedding, then stopped;
+  # vectors are cached to cache_path so it rarely runs. Set base_url to reuse a
+  # running server, or enabled: false to fall back to identity similarity.
+  enabled: true
+  model: "nomic-ai/nomic-embed-text-v2-moe"
+  task_prefix: "clustering: "
+  dimensions: 768
+  auto_launch: true
+  vllm_port: 8001
+  cache_dir: data/llm_diaries_gparis
+  cache_path: data/llm_diaries_gparis/diary_embeddings.npz
+
+schedule:
+  # ddCRP: each day an agent picks one whole diary, weighted by calendar recency
+  # (habit) and semantic similarity to diaries used on past same-type days.
+  lam: 0.15               # recency decay per day
+  rho: 0.6                # exploration coefficient (rho * S^-gamma)
+  gamma: 0.21             # exploration decay exponent
+  memory_window_days: 60  # how far back the agent remembers
+  implant_memory: true    # seed each agent with a cold-start weekday + weekend diary
+  semantic_temperature: 1.0
 
 comparison:
   path: data/gparis_visitation_df.parquet

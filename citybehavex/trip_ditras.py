@@ -1,8 +1,8 @@
 """Trip-duration-aware DITRAS driver for citybehavex.
 
-Builds a multi-day mobility diary by stitching per-day Markov diaries (selecting a
-weekday or weekend chain per calendar day) and feeds it to the citybehavex Rust
-extension (`citybehavex._core.trip_ditras_simulate_agents`), which assigns physical
+Feeds a multi-day mobility diary (built by the ddCRP schedule selector in
+`citybehavex.schedule_ddcrp`) to the citybehavex Rust extension
+(`citybehavex._core.trip_ditras_simulate_agents`), which assigns physical
 locations via the same gravity/EPR mechanism as skmob2's DITRAS but additionally
 derives a car trip duration per leg and shifts arrival/departure off the slot grid.
 """
@@ -10,98 +10,16 @@ derives a car trip duration per leg and shifts arrival/departure off the slot gr
 from __future__ import annotations
 
 import time
-from typing import Any, Mapping
+from typing import Any
 
 import numpy as np
 import pandas as pd
 
 import citybehavex._core as _cbx_core
-from skmob2 import _core as _skmob_core
 from skmob2.models.gravity import Gravity
-from skmob2.models.markov_diary_generator import MarkovDiaryGenerator
 
 
 DiaryArrays = tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]
-
-
-def _day_seed(random_state: int, day_index: int) -> int:
-    return (int(random_state) * 1_000_003 + day_index) & 0x7FFFFFFF
-
-
-def build_daily_diary(
-    generators: Mapping[str, MarkovDiaryGenerator],
-    start_date: pd.Timestamp,
-    days: int,
-    n_agents: int,
-    random_state: int,
-) -> DiaryArrays:
-    """Generate and stitch per-day diaries into flat per-agent arrays.
-
-    For each calendar day, the weekend chain is used on Sat/Sun and the weekday
-    chain otherwise (falling back to the weekday chain if no weekend one exists).
-    Abstract location ids only signal home (0) vs away (non-zero), so per-day
-    restarts stitch cleanly: the agent returns home at each midnight.
-    """
-    weekday_gen = generators["weekday"]
-    slots_per_day = weekday_gen._slots_per_day
-
-    per_ts: list[list[np.ndarray]] = [[] for _ in range(n_agents)]
-    per_loc: list[list[np.ndarray]] = [[] for _ in range(n_agents)]
-
-    for day_index in range(days):
-        day = pd.Timestamp(start_date) + pd.Timedelta(days=day_index)
-        day_type = "weekend" if day.dayofweek >= 5 else "weekday"
-        gen = generators.get(day_type, weekday_gen)
-        day_ts = int(day.timestamp())
-        seed = _day_seed(random_state, day_index)
-        ts, locs, starts, ends = _skmob_core.markov_diary_batch_generate(
-            gen._cdf_matrix_flat,
-            slots_per_day,
-            day_ts,
-            n_agents,
-            seed,
-            slots_per_day,
-        )
-        ts = np.asarray(ts, dtype=np.int64)
-        locs = np.asarray(locs, dtype=np.int32)
-        for agent in range(n_agents):
-            per_ts[agent].append(ts[starts[agent] : ends[agent]])
-            per_loc[agent].append(locs[starts[agent] : ends[agent]])
-
-    flat_ts: list[np.ndarray] = []
-    flat_loc: list[np.ndarray] = []
-    d_starts: list[int] = []
-    d_ends: list[int] = []
-    offset = 0
-    for agent in range(n_agents):
-        ts_a = (
-            np.concatenate(per_ts[agent])
-            if per_ts[agent]
-            else np.empty(0, dtype=np.int64)
-        )
-        loc_a = (
-            np.concatenate(per_loc[agent])
-            if per_loc[agent]
-            else np.empty(0, dtype=np.int32)
-        )
-        d_starts.append(offset)
-        offset += len(ts_a)
-        d_ends.append(offset)
-        flat_ts.append(ts_a)
-        flat_loc.append(loc_a)
-
-    diary_timestamps = (
-        np.concatenate(flat_ts) if flat_ts else np.empty(0, dtype=np.int64)
-    ).astype(np.int64)
-    diary_abs_locs = (
-        np.concatenate(flat_loc) if flat_loc else np.empty(0, dtype=np.int32)
-    ).astype(np.int32)
-    return (
-        diary_timestamps,
-        diary_abs_locs,
-        np.asarray(d_starts, dtype=np.int64),
-        np.asarray(d_ends, dtype=np.int64),
-    )
 
 
 def simulate_trip_ditras(

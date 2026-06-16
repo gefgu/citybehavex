@@ -1,11 +1,15 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
+import numpy as np
 import pandas as pd
 
 from .llm_diaries import DiaryBatch
+
+if TYPE_CHECKING:
+    from .schedule_ddcrp import DiaryBank
 
 
 def diary_batch_to_markov_training(
@@ -56,41 +60,37 @@ def diary_batch_to_markov_training(
     return training
 
 
-def annotate_trajectory_purposes(
+def annotate_trajectory_purposes_ddcrp(
     traj_df: pd.DataFrame,
-    batch: DiaryBatch,
+    bank: "DiaryBank",
+    chosen: np.ndarray,
+    start_date: pd.Timestamp,
     *,
     uid_col: str = "uid",
     datetime_col: str = "datetime",
-    weekend_batch: Optional[DiaryBatch] = None,
 ) -> pd.DataFrame:
-    """Assign a purpose to each trajectory record from the diary episode active at
-    that clock time. When ``weekend_batch`` is given, weekend rows (Sat/Sun) are
-    labelled from it and weekday rows from ``batch``.
+    """Assign a purpose to each trajectory record from the diary that the agent
+    actually used that day under ddCRP selection.
+
+    ``chosen[agent, day_index]`` is the global bank index of the diary used by the
+    agent (1-based ``uid``) on ``day_index = (date - start_date).days``.
     """
     out = traj_df.copy()
     if uid_col not in out.columns or datetime_col not in out.columns:
         return out
 
-    def diary_lookup(b: DiaryBatch) -> dict[int, object]:
-        return {index + 1: diary for index, diary in enumerate(b.diaries)}
-
-    weekday_by_uid = diary_lookup(batch)
-    weekend_by_uid = diary_lookup(weekend_batch) if weekend_batch is not None else weekday_by_uid
-    n_weekday = len(batch.diaries)
-    n_weekend = len(weekend_batch.diaries) if weekend_batch is not None else n_weekday
+    start_day = pd.Timestamp(start_date).normalize()
+    n_agents, n_days = chosen.shape
 
     purposes: list[str] = []
     for _, row in out.iterrows():
-        uid = int(row[uid_col])
         ts = pd.Timestamp(row[datetime_col])
-        if ts.dayofweek >= 5:
-            diary = weekend_by_uid.get(((uid - 1) % n_weekend) + 1)
-        else:
-            diary = weekday_by_uid.get(((uid - 1) % n_weekday) + 1)
-        minute = ts.hour * 60 + ts.minute
+        agent = int(row[uid_col]) - 1
+        day_index = (ts.normalize() - start_day).days
         purpose = "OTHER"
-        if diary is not None:
+        if 0 <= agent < n_agents and 0 <= day_index < n_days:
+            diary = bank.diaries[int(chosen[agent, day_index])]
+            minute = ts.hour * 60 + ts.minute
             for episode in diary.episodes:
                 if episode.start_minutes <= minute < episode.end_minutes:
                     purpose = episode.purpose
