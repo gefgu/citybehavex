@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import math
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal, Optional
 
@@ -15,6 +16,11 @@ Purpose = Literal["HOME", "WORK", "STUDIES", "PURCHASE", "LEISURE", "HEALTH", "O
 
 class DiaryValidationError(ValueError):
     """Raised when an LLM response or diary artifact fails validation."""
+
+
+@dataclass
+class LLMStats:
+    calls: int = 0
 
 
 class ChatMessage(BaseModel):
@@ -435,6 +441,7 @@ def fetch_diary_batch(
     location_count_sigma: float = 0.5,
     max_locations: int = 6,
     variant: str = "",
+    stats: Optional[LLMStats] = None,
 ) -> DiaryBatch:
     base_prompt_path, base_raw_path, base_valid_path = _cache_paths(config)
     prompt_path = _apply_variant(base_prompt_path, variant)
@@ -532,6 +539,8 @@ def fetch_diary_batch(
         diary: Diary | None = None
         for _ in range(max(config.retries, 1)):
             try:
+                if stats is not None:
+                    stats.calls += 1
                 response = requests.post(
                     url,
                     headers=headers,

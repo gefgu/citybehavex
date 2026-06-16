@@ -148,6 +148,11 @@ def simulate(
     tessellation: Optional[str] = typer.Option(
         None, help="Path to an existing tessellation parquet. Mutually exclusive with bbox options."
     ),
+    ditras: Optional[bool] = typer.Option(
+        None,
+        "--ditras/--sts-epr",
+        help="Use trip-DITRAS instead of the default trip-aware STS-EPR.",
+    ),
     min_lon: Optional[float] = typer.Option(None, help="Bounding box west longitude"),
     min_lat: Optional[float] = typer.Option(None, help="Bounding box south latitude"),
     max_lon: Optional[float] = typer.Option(None, help="Bounding box east longitude"),
@@ -203,6 +208,7 @@ def simulate(
         loaded.simulation,
         {
             "tessellation": tessellation,
+            "model": "ditras" if ditras is True else "sts_epr" if ditras is False else None,
             "min_lon": min_lon,
             "min_lat": min_lat,
             "max_lon": max_lon,

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Literal, Optional
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -38,6 +38,7 @@ class SimulationConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     tessellation: Optional[str] = None
+    model: Literal["sts_epr", "ditras"] = "sts_epr"
     min_lon: Optional[float] = None
     min_lat: Optional[float] = None
     max_lon: Optional[float] = None

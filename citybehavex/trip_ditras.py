@@ -9,7 +9,8 @@ derives a car trip duration per leg and shifts arrival/departure off the slot gr
 
 from __future__ import annotations
 
-from typing import Mapping
+import time
+from typing import Any, Mapping
 
 import numpy as np
 import pandas as pd
@@ -18,6 +19,7 @@ import citybehavex._core as _cbx_core
 from skmob2 import _core as _skmob_core
 from skmob2.models.gravity import Gravity
 from skmob2.models.markov_diary_generator import MarkovDiaryGenerator
+
 
 DiaryArrays = tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]
 
@@ -115,6 +117,7 @@ def simulate_trip_ditras(
     random_state: int,
     rho: float = 0.3,
     gamma: float = 0.21,
+    timing: Any | None = None,
 ) -> pd.DataFrame:
     """Run the trip-duration-aware DITRAS and return a record-per-stay DataFrame.
 
@@ -134,6 +137,7 @@ def simulate_trip_ditras(
     diary_timestamps, diary_abs_locs, diary_starts, diary_ends = diary_arrays
     gravity = Gravity(gravity_type="singly constrained")
 
+    start = time.perf_counter()
     agent_ids, out_lats, out_lngs, arrival, departure, trip_dur = (
         _cbx_core.trip_ditras_simulate_agents(
             lats,
@@ -158,6 +162,9 @@ def simulate_trip_ditras(
             None,
         )
     )
+    elapsed = time.perf_counter() - start
+    if timing is not None:
+        timing.seconds += elapsed
 
     arrival = np.asarray(arrival, dtype=np.int64)
     departure = np.asarray(departure, dtype=np.int64)
