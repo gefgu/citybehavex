@@ -96,6 +96,9 @@ class LLMConfig(BaseModel):
     timeout_seconds: float = 60.0
     retries: int = 1
     diary_count: int = Field(default=30, ge=10, le=30)
+    # Reuse a previously generated, config-matching diary cache instead of
+    # re-querying the LLM on every run. Set false to force regeneration.
+    reuse_cache: bool = True
     cache_dir: str = ".citybehavex/llm_diaries"
     prompt_path: Optional[str] = None
     raw_response_path: Optional[str] = None

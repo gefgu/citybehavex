@@ -518,6 +518,20 @@ def fetch_diary_batch(
             expected_location_counts=expected_location_counts,
         )
 
+    # Cache-first: with a chat client configured we would otherwise re-query the
+    # LLM on every run. Reuse a config-matching cache when present so the same
+    # config reuses its diaries instead of regenerating them.
+    if config.reuse_cache:
+        try:
+            return _load_cache_with_fallback(
+                valid_path,
+                base_valid_path,
+                expected_distribution=distribution_metadata,
+                expected_location_counts=expected_location_counts,
+            )
+        except DiaryValidationError:
+            pass  # No usable cache (missing or config changed) -> generate below.
+
     url = config.base_url.rstrip("/") + "/v1/chat/completions"
     headers = {"Authorization": f"Bearer {config.api_key}", "Content-Type": "application/json"}
 

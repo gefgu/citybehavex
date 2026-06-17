@@ -244,6 +244,8 @@ def simulate(
         simulation=sim,
         llm=llm,
         diaries=loaded.diaries,
+        embedding=loaded.embedding,
+        schedule=loaded.schedule,
         comparison=comp,
     )
     try:
