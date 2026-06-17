@@ -45,10 +45,11 @@ embedding:
   # vectors are cached to cache_path so it rarely runs. Set base_url to reuse a
   # running server, or enabled: false to fall back to identity similarity.
   enabled: true
-  model: "nomic-ai/nomic-embed-text-v2-moe"
+  model: "nomic-ai/nomic-embed-text-v1.5"
+  base_url: "http://localhost:8001"   # reuse an already-running vLLM embed server
   task_prefix: "clustering: "
   dimensions: 768
-  auto_launch: true
+  auto_launch: false
   vllm_port: 8001
   cache_dir: data/llm_diaries_gparis
   cache_path: data/llm_diaries_gparis/diary_embeddings.npz
