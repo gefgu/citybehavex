@@ -34,7 +34,9 @@ from skmob_vis import (
     plot_dwell_time_ecdf,
     plot_jump_lengths_ecdf,
     plot_lognormal_fits,
+    plot_mobility_profiles,
     plot_motif_literature_comparison,
+    plot_profile_metrics,
     plot_radius_of_gyration_ecdf,
     plot_stvd_comparison,
     plot_trip_duration_ecdf,
@@ -42,6 +44,8 @@ from skmob_vis import (
     plot_visit_purpose_comparison,
     plot_visits_frequency_ecdf,
 )
+
+from .profiles import PROFILE_METRICS, compute_profiles
 
 _DATETIME_CANDIDATES = [
     "datetime", "start_timestamp", "timestamp", "check-in_time",
@@ -218,6 +222,30 @@ def _visits_for_comparison(
             visits["start_timestamp"].dt.normalize() + pd.Timedelta(days=1)
         )
     return visits
+
+
+def _collapse_to_stays(
+    df: pd.DataFrame,
+    *,
+    uid_col: str,
+    lat_col: str,
+    lng_col: str,
+    datetime_col: str,
+) -> pd.DataFrame:
+    """Collapse a slot-by-slot trajectory into one row per stay episode.
+
+    The synthetic trajectory emits a record per time slot, so consecutive slots
+    at the same location are the same visit. Keeping only the first row of each
+    maximal same-location run per user makes "visits per user" count distinct
+    stays, comparable to the observed stay-event table instead of slot density.
+    """
+    ordered = df.sort_values([uid_col, datetime_col])
+    same_user = ordered[uid_col].eq(ordered[uid_col].shift())
+    same_loc = ordered[lat_col].eq(ordered[lat_col].shift()) & ordered[lng_col].eq(
+        ordered[lng_col].shift()
+    )
+    new_stay = ~(same_user & same_loc)
+    return ordered[new_stay].reset_index(drop=True)
 
 
 def _motif_visits(visits: pd.DataFrame) -> pd.DataFrame:
@@ -683,10 +711,20 @@ def generate_comparison_report(
     real_jumps = real_traj.jump_lengths(merge=True)
     w_jump = wasserstein_distance(synth_jumps, real_jumps)
 
-    synth_visits = traj.df[traj.uid_col].value_counts().to_list()
+    # Collapse the slot-by-slot synthetic trajectory into distinct stay episodes
+    # so visits-per-user counts visits (not 15-min slots), comparable to the
+    # observed stay-event table.
+    synth_stays = _collapse_to_stays(
+        traj.df,
+        uid_col=traj.uid_col,
+        lat_col=traj.lat_col,
+        lng_col=traj.lng_col,
+        datetime_col=traj.datetime_col,
+    )
+    synth_visits = synth_stays[traj.uid_col].value_counts().to_list()
     real_visits = real_traj.df[real_traj.uid_col].value_counts().to_list()
     w_visits, _ = visits_per_user_wasserstein_distance(
-        traj.df,
+        synth_stays,
         real_df,
         user_id_col1=traj.uid_col,
         user_id_col2=real_traj.uid_col,
@@ -916,6 +954,32 @@ def generate_comparison_report(
         except Exception as exc:
             typer.echo(f"Warning: STVD chart skipped: {exc}", err=True)
 
+    profiles_section_html = ""
+    if observed_visits is not None and synthetic_visits is not None:
+        try:
+            typer.echo("Rendering mobility profiles ...")
+            obs_profiles = compute_profiles(observed_visits)
+            synth_profiles = compute_profiles(synthetic_visits)
+            fig_profiles_obs = plot_mobility_profiles(
+                obs_profiles, title=observed_label, bundle_libs=False
+            )
+            fig_profiles_synth = plot_mobility_profiles(
+                synth_profiles, title="synthetic", bundle_libs=False
+            )
+            fig_profile_metrics = plot_profile_metrics(
+                {"synthetic": synth_profiles, observed_label: obs_profiles},
+                metrics=PROFILE_METRICS,
+                bundle_libs=False,
+            )
+            profiles_section_html = f"""
+  <div class="section-header">
+    <span>Mobility profiles &mdash; {observed_label} vs synthetic</span>
+  </div>
+  <div class="charts">{fig_profiles_obs._repr_html_()}{fig_profiles_synth._repr_html_()}</div>
+  <div class="charts">{fig_profile_metrics._repr_html_()}</div>"""
+        except Exception as exc:
+            typer.echo(f"Warning: mobility profiles skipped: {exc}", err=True)
+
     w_rows = [
         ("Jump lengths", f"{w_jump:.4f}", "km"),
         ("Visits per user", f"{w_visits:.4f}", "visits"),
@@ -963,7 +1027,7 @@ def generate_comparison_report(
     <p>Generated {generated_at}</p>
   </div>{metrics_html}
   <div class="section-header">Distribution comparisons</div>
-  <div class="charts">{ecdf_charts_html}</div>{mobility_laws_section_html}{activity_section_html}{motif_section_html}{stvd_section_html}
+  <div class="charts">{ecdf_charts_html}</div>{mobility_laws_section_html}{activity_section_html}{profiles_section_html}{motif_section_html}{stvd_section_html}
 </body>
 </html>
 """

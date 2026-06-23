@@ -30,7 +30,7 @@ dependencies = [
     "seaborn>=0.13.2",
     "shapely>=2.1.2",
     "skmob-vis",
-    "skmob2[data,generation,tessellation]",
+    "skmob2[data,generation,tessellation,diversity]",
     "tqdm>=4.67.3",
     "typer>=0.12.0",
 ]
@@ -40,7 +40,13 @@ dependencies = [
 # (heavy, GPU). Without this extra, set `embedding.base_url` to a running server,
 # rely on cached `diary_embeddings.npz`, or set `embedding.enabled: false` to fall
 # back to identity similarity (exact preferential return).
-embeddings = ["vllm>=0.6.0"]
+embeddings = [
+    # Keep vLLM on the CUDA 12.4/PyTorch 2.6 line for compatibility with
+    # systems whose NVIDIA driver reports CUDA driver API 12040.
+    "vllm>=0.8.5,<0.9.0",
+    "torch==2.6.0",
+    "transformers>=4.51.1,<5.0.0",
+]
 
 [project.scripts]
 citybehavex = "citybehavex.cli:app"
