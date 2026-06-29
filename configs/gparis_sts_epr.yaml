@@ -63,6 +63,10 @@ schedule:
   alpha_beta_a: 2.0         # Beta shape a for per-agent exploration alpha
   alpha_beta_b: 5.0         # Beta shape b for per-agent exploration alpha
 
+profiles:
+  enabled: true
+  output: data/gparis_agent_profiles.parquet
+
 comparison:
   path: data/gparis_visitation_df.parquet
   label: gparis
