@@ -74,7 +74,7 @@ yourself and reuse it (set `embedding.auto_launch: false` and point
 `embedding.base_url` at it), serve the model with vLLM:
 
 ```bash
-uv run --extra embeddings vllm serve nomic-ai/nomic-embed-text-v2-moe \
+uv run --extra embeddings vllm serve nomic-ai/nomic-embed-text-v1.5 \
   --task embed --trust-remote-code --port 8001
 ```
 

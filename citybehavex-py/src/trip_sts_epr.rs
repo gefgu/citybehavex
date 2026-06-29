@@ -10,12 +10,19 @@ use rand::{Rng, SeedableRng};
 use rand_xoshiro::Xoshiro256PlusPlus;
 use rayon::prelude::*;
 
-use skmob2_core::models::od::{CachedGravityOdRows, validate_equal_lengths};
+use skmob2_core::models::od::{validate_equal_lengths, CachedGravityOdRows};
 use skmob2_core::models::shared::{cdf_choice, derive_agent_seed};
 use skmob2_core::utils::haversine::haversine_km;
 
-type TripStsEprResult =
-    Result<(Vec<i64>, Vec<f64>, Vec<f64>, Vec<i64>, Vec<i64>, Vec<f64>), String>;
+// (agents, lats, lngs, arrival, departure, duration, enc_agent, enc_contact, enc_tile, enc_ts, activity)
+type TripStsEprResult = Result<
+    (
+        Vec<i64>, Vec<f64>, Vec<f64>, Vec<i64>, Vec<i64>, Vec<f64>,
+        Vec<i64>, Vec<i64>, Vec<i64>, Vec<i64>,
+        Vec<i64>,
+    ),
+    String,
+>;
 
 const GRAVITY_REJECTION_ATTEMPTS: usize = 16;
 
@@ -50,9 +57,13 @@ impl DiaryState {
     }
 }
 
+/// Abstract location code reserved for WORK episodes (matches diary_to_abs_locs fixed map).
+const WORK_CODE: i32 = 1;
+
 struct AgentState {
     current_location: usize,
     home_location: usize,
+    work_location: Option<usize>,
     visited_locs: Vec<usize>,
     visit_counts: Vec<u32>,
     total_visits: f64,
@@ -64,6 +75,7 @@ impl AgentState {
         Self {
             current_location: 0,
             home_location: 0,
+            work_location: None,
             visited_locs: Vec::with_capacity(200),
             visit_counts: vec![0u32; n_locations],
             total_visits: 0.0,
@@ -97,14 +109,30 @@ impl Scratch {
     }
 }
 
+/// An encounter recorded when a social action selects a contact's location.
+#[derive(Clone)]
+struct Encounter {
+    agent: usize,
+    contact: usize,
+    tile: usize,
+    ts: i64,
+}
+
 struct AgentParData {
     rng: Xoshiro256PlusPlus,
     diary: DiaryState,
     scratch: Scratch,
-    moves: Vec<(usize, i64)>,
+    moves: Vec<(usize, i64, i32)>,  // (loc, ts, abstract_loc)
+    active_day: i64,
+    active_abs_loc: i32,
+    abstract_loc_cache: Vec<(i32, usize)>,
     neighbor_indices: Vec<usize>,
     edge_sim: Vec<f64>,
     edge_upd: Vec<i64>,
+    encounters: Vec<Encounter>,
+    activity_counts: Vec<u32>,
+    pending_departure: i64,  // 0 = use normal timing
+    pending_activity: i64,   // activity index for current location
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -147,6 +175,83 @@ fn cdf_sample(rng: &mut impl Rng, candidates: &[usize], cdf: &[f64]) -> usize {
         .partition_point(|&v| v <= threshold)
         .min(candidates.len() - 1);
     candidates[idx]
+}
+
+fn sample_standard_normal(rng: &mut impl Rng) -> f64 {
+    let u1: f64 = rng.gen_range(f64::MIN_POSITIVE..1.0);
+    let u2: f64 = rng.gen_range(0.0..1.0);
+    (-2.0 * u1.ln()).sqrt() * (2.0 * std::f64::consts::PI * u2).cos()
+}
+
+#[allow(clippy::too_many_arguments)]
+fn sample_activity_and_duration(
+    agent: usize,
+    abstract_loc: i32,
+    activity_counts: &mut Vec<u32>,
+    rng: &mut impl Rng,
+    act_embs: &[f64],
+    act_dur_mu: &[f64],
+    act_dur_sigma: &[f64],
+    purpose_act_starts: &[usize],
+    purpose_acts: &[usize],
+    profile_embs: &[f64],
+    emb_dim: usize,
+    kappa: f64,
+    temperature: f64,
+) -> (i64, i64) {
+    let n_acts = act_dur_mu.len();
+    if n_acts == 0 || purpose_act_starts.len() < 2 {
+        return (0, 3600);
+    }
+    let purpose = abstract_loc.clamp(0, 6) as usize;
+    if purpose + 1 >= purpose_act_starts.len() {
+        return (0, 3600);
+    }
+    let act_start = purpose_act_starts[purpose];
+    let act_end = purpose_act_starts[purpose + 1];
+    if act_start >= act_end {
+        return (0, 3600);
+    }
+    let eligible = &purpose_acts[act_start..act_end];
+
+    let has_embs = emb_dim > 0
+        && !act_embs.is_empty()
+        && !profile_embs.is_empty()
+        && (agent + 1) * emb_dim <= profile_embs.len();
+    let prof_slice = if has_embs { &profile_embs[agent * emb_dim..(agent + 1) * emb_dim] } else { &[] };
+
+    let mut cdf: Vec<f64> = Vec::with_capacity(eligible.len());
+    let mut cumsum = 0.0_f64;
+    for &a in eligible {
+        let count = if a < activity_counts.len() { activity_counts[a] } else { 0 };
+        let base = if count > 0 { count as f64 } else { kappa };
+        let w = if has_embs && a * emb_dim + emb_dim <= act_embs.len() {
+            let act_emb = &act_embs[a * emb_dim..(a + 1) * emb_dim];
+            let sim: f64 = prof_slice.iter().zip(act_emb.iter()).map(|(p, q)| p * q).sum();
+            base * (sim.clamp(-1.0, 1.0) / temperature).exp()
+        } else {
+            base
+        };
+        cumsum += w;
+        cdf.push(cumsum);
+    }
+
+    let threshold = rng.gen_range(0.0..1.0) * cumsum;
+    let idx = cdf.partition_point(|&v| v <= threshold).min(eligible.len() - 1);
+    let chosen = eligible[idx];
+
+    if chosen >= activity_counts.len() {
+        activity_counts.resize(chosen + 1, 0);
+    }
+    activity_counts[chosen] += 1;
+
+    let mu = if chosen < act_dur_mu.len() { act_dur_mu[chosen] } else { 0.0 };
+    let sigma = if chosen < act_dur_sigma.len() { act_dur_sigma[chosen] } else { 0.5 };
+    let z = sample_standard_normal(rng);
+    let dur_hours = (mu + sigma * z).exp().max(1.0 / 60.0);
+    let dur_secs = (dur_hours * 3600.0).round() as i64;
+
+    (chosen as i64, dur_secs)
 }
 
 fn make_individual_return(
@@ -285,7 +390,8 @@ fn make_social_action_local(
     current_ts: i64,
     dt_update_s: i64,
     scratch: &mut Scratch,
-) -> Option<usize> {
+) -> Option<(usize, usize)> {
+    // Returns (location, contact_agent_idx) or None.
     if neighbor_indices.is_empty() {
         return None;
     }
@@ -353,7 +459,8 @@ fn make_social_action_local(
     if scratch.candidates.is_empty() || scratch.cdf.last().copied().unwrap_or(0.0) <= 0.0 {
         None
     } else {
-        Some(cdf_sample(rng, &scratch.candidates, &scratch.cdf))
+        let loc = cdf_sample(rng, &scratch.candidates, &scratch.cdf);
+        Some((loc, contact))
     }
 }
 
@@ -377,10 +484,16 @@ fn choose_location_local(
     relevances: &[f64],
     diary_abs_locs: &[i32],
     scratch: &mut Scratch,
+    encounters: &mut Vec<Encounter>,
 ) -> usize {
     let abstract_location = diary.current_abstract_location(diary_abs_locs);
     if abstract_location == 0 {
         return agents[agent].home_location;
+    }
+    if abstract_location == WORK_CODE {
+        if let Some(wl) = agents[agent].work_location {
+            return wl;
+        }
     }
 
     let s = agents[agent].s.max(1.0);
@@ -388,113 +501,51 @@ fn choose_location_local(
     let explore = rng.gen_range(0.0_f64..1.0) < p_explore;
     let social = rng.gen_range(0.0_f64..1.0) < alpha;
 
-    let location = if explore {
-        if social {
+    // Helper: attempt a social action and record the encounter if successful.
+    macro_rules! social_action {
+        ($mode:expr) => {{
             make_social_action_local(
                 agent,
                 agents,
                 neighbor_indices,
                 edge_sim,
                 edge_upd,
-                SocialMode::Exploration,
+                $mode,
                 rng,
                 current_ts,
                 dt_update_s,
                 scratch,
             )
-            .or_else(|| {
-                sts_epr_exploration(
-                    agent,
-                    agents,
-                    distances,
-                    od_rows,
-                    relevances,
-                    n_locations,
-                    rng,
-                    scratch,
-                )
+            .map(|(loc, contact)| {
+                encounters.push(Encounter { agent, contact, tile: loc, ts: current_ts });
+                loc
             })
-            .or_else(|| make_individual_return(agent, agents, rng, scratch))
+        }};
+    }
+
+    let location = if explore {
+        if social {
+            social_action!(SocialMode::Exploration)
+                .or_else(|| {
+                    sts_epr_exploration(agent, agents, distances, od_rows, relevances, n_locations, rng, scratch)
+                })
+                .or_else(|| make_individual_return(agent, agents, rng, scratch))
         } else {
-            sts_epr_exploration(
-                agent,
-                agents,
-                distances,
-                od_rows,
-                relevances,
-                n_locations,
-                rng,
-                scratch,
-            )
-            .or_else(|| {
-                make_social_action_local(
-                    agent,
-                    agents,
-                    neighbor_indices,
-                    edge_sim,
-                    edge_upd,
-                    SocialMode::Exploration,
-                    rng,
-                    current_ts,
-                    dt_update_s,
-                    scratch,
-                )
-            })
-            .or_else(|| make_individual_return(agent, agents, rng, scratch))
+            sts_epr_exploration(agent, agents, distances, od_rows, relevances, n_locations, rng, scratch)
+                .or_else(|| social_action!(SocialMode::Exploration))
+                .or_else(|| make_individual_return(agent, agents, rng, scratch))
         }
     } else if social {
-        make_social_action_local(
-            agent,
-            agents,
-            neighbor_indices,
-            edge_sim,
-            edge_upd,
-            SocialMode::Return,
-            rng,
-            current_ts,
-            dt_update_s,
-            scratch,
-        )
-        .or_else(|| make_individual_return(agent, agents, rng, scratch))
-        .or_else(|| {
-            sts_epr_exploration(
-                agent,
-                agents,
-                distances,
-                od_rows,
-                relevances,
-                n_locations,
-                rng,
-                scratch,
-            )
-        })
+        social_action!(SocialMode::Return)
+            .or_else(|| make_individual_return(agent, agents, rng, scratch))
+            .or_else(|| {
+                sts_epr_exploration(agent, agents, distances, od_rows, relevances, n_locations, rng, scratch)
+            })
     } else {
         make_individual_return(agent, agents, rng, scratch)
+            .or_else(|| social_action!(SocialMode::Return))
             .or_else(|| {
-                make_social_action_local(
-                    agent,
-                    agents,
-                    neighbor_indices,
-                    edge_sim,
-                    edge_upd,
-                    SocialMode::Return,
-                    rng,
-                    current_ts,
-                    dt_update_s,
-                    scratch,
-                )
-            })
-            .or_else(|| {
-                sts_epr_exploration(
-                    agent,
-                    agents,
-                    distances,
-                    od_rows,
-                    relevances,
-                    n_locations,
-                    rng,
-                    scratch,
-                )
+                sts_epr_exploration(agent, agents, distances, od_rows, relevances, n_locations, rng, scratch)
             })
     };
 
@@ -530,12 +581,14 @@ fn append_trip_record(
     lngs: &[f64],
     car_speed_kmh: f64,
     slot_seconds: i64,
+    pending_dep: i64,
     out_agents: &mut Vec<i64>,
     out_lats: &mut Vec<f64>,
     out_lngs: &mut Vec<f64>,
     out_arr: &mut Vec<i64>,
     out_dep: &mut Vec<i64>,
     out_dur: &mut Vec<f64>,
+    out_activity: &mut Vec<i64>,
     last_output_idx: &mut [usize],
     agents: &mut [AgentState],
 ) {
@@ -552,13 +605,16 @@ fn append_trip_record(
         }
     };
 
-    let mut departure = if dur_s <= slot_seconds {
+    let prev_idx = last_output_idx[agent_idx];
+    let prev_arrival = out_arr[prev_idx];
+    // Use activity-sampled departure when set; normal timing otherwise.
+    let mut departure = if pending_dep > 0 {
+        pending_dep.clamp(prev_arrival, t + slot_seconds)
+    } else if dur_s <= slot_seconds {
         t
     } else {
         t - dur_s / 2
     };
-    let prev_idx = last_output_idx[agent_idx];
-    let prev_arrival = out_arr[prev_idx];
     if departure < prev_arrival {
         departure = prev_arrival;
     }
@@ -575,6 +631,7 @@ fn append_trip_record(
     out_arr.push(arrival);
     out_dep.push(arrival);
     out_dur.push(dur_s as f64);
+    out_activity.push(0);  // placeholder; caller updates after activity sampling
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -585,6 +642,7 @@ fn simulate_trip_sts_epr_impl(
     distances: &[f64],
     neighbor_starts: &[usize],
     neighbors: &[usize],
+    edge_profile_sim: &[f64],
     diary_timestamps: &[i64],
     diary_abs_locs: &[i32],
     diary_starts: &[usize],
@@ -602,6 +660,16 @@ fn simulate_trip_sts_epr_impl(
     master_seed: Option<u64>,
     starting_locs: Option<&[usize]>,
     starting_locs_mode_relevance: bool,
+    work_tiles: &[usize],
+    act_embs: &[f64],
+    act_dur_mu: &[f64],
+    act_dur_sigma: &[f64],
+    purpose_act_starts: &[usize],
+    purpose_acts: &[usize],
+    profile_embs: &[f64],
+    emb_dim: usize,
+    act_kappa: f64,
+    act_temp: f64,
 ) -> TripStsEprResult {
     let n_locations = validate_equal_lengths(&[
         ("latitudes", lats.len()),
@@ -664,14 +732,13 @@ fn simulate_trip_sts_epr_impl(
     }
     if n_agents == 0 {
         return Ok((
-            Vec::new(),
-            Vec::new(),
-            Vec::new(),
-            Vec::new(),
-            Vec::new(),
+            Vec::new(), Vec::new(), Vec::new(),
+            Vec::new(), Vec::new(), Vec::new(),
+            Vec::new(), Vec::new(), Vec::new(), Vec::new(),
             Vec::new(),
         ));
     }
+    let activities_on = !act_dur_mu.is_empty();
 
     let master_seed = master_seed.unwrap_or_else(rand::random);
     let od_rows = if distances.is_empty() {
@@ -696,6 +763,13 @@ fn simulate_trip_sts_epr_impl(
         .map(|i| {
             let edge_start = neighbor_starts[i];
             let edge_end = neighbor_starts[i + 1];
+            let n_edges = edge_end - edge_start;
+            // Seed edge_sim from profile similarity if available, else 0.
+            let initial_edge_sim: Vec<f64> = if edge_profile_sim.len() == neighbors.len() {
+                edge_profile_sim[edge_start..edge_end].to_vec()
+            } else {
+                vec![0.0_f64; n_edges]
+            };
             AgentParData {
                 rng: Xoshiro256PlusPlus::seed_from_u64(derive_agent_seed(master_seed, i, 0)),
                 diary: DiaryState {
@@ -705,9 +779,16 @@ fn simulate_trip_sts_epr_impl(
                 },
                 scratch: Scratch::new(),
                 moves: Vec::with_capacity(32),
+                active_day: 0,
+                active_abs_loc: 0,
+                abstract_loc_cache: Vec::with_capacity(16),
                 neighbor_indices: neighbors[edge_start..edge_end].to_vec(),
-                edge_sim: vec![0.0_f64; edge_end - edge_start],
+                edge_sim: initial_edge_sim,
                 edge_upd: init_ts_edges[edge_start..edge_end].to_vec(),
+                encounters: Vec::new(),
+                activity_counts: vec![0u32; act_dur_mu.len()],
+                pending_departure: 0,
+                pending_activity: 0,
             }
         })
         .collect();
@@ -724,6 +805,9 @@ fn simulate_trip_sts_epr_impl(
         };
         agent.current_location = loc;
         agent.home_location = loc;
+        if i < work_tiles.len() {
+            agent.work_location = Some(work_tiles[i].min(n_locations - 1));
+        }
         agent.visit(loc);
     }
 
@@ -733,6 +817,7 @@ fn simulate_trip_sts_epr_impl(
     let mut out_arr: Vec<i64> = Vec::with_capacity(n_agents);
     let mut out_dep: Vec<i64> = Vec::with_capacity(n_agents);
     let mut out_dur: Vec<f64> = Vec::with_capacity(n_agents);
+    let mut out_activity: Vec<i64> = Vec::with_capacity(n_agents);
     let mut last_output_idx: Vec<usize> = Vec::with_capacity(n_agents);
     for (i, agent) in agents.iter().enumerate() {
         last_output_idx.push(out_agents.len());
@@ -742,9 +827,26 @@ fn simulate_trip_sts_epr_impl(
         out_arr.push(start_ts);
         out_dep.push(start_ts);
         out_dur.push(0.0);
+        out_activity.push(0);  // placeholder for initial home activity
+    }
+    // Sample initial activity at HOME for each agent.
+    if activities_on {
+        for i in 0..n_agents {
+            let AgentParData { ref mut activity_counts, ref mut rng, ref mut pending_departure, ref mut pending_activity, .. } = par_data[i];
+            let (act_idx, dur) = sample_activity_and_duration(
+                i, 0, // HOME = abstract code 0
+                activity_counts, rng,
+                act_embs, act_dur_mu, act_dur_sigma,
+                purpose_act_starts, purpose_acts,
+                profile_embs, emb_dim, act_kappa, act_temp,
+            );
+            out_activity[last_output_idx[i]] = act_idx;
+            *pending_departure = start_ts + dur;
+            *pending_activity = act_idx;
+        }
     }
 
-    let mut commit_buf: Vec<(i64, usize, usize)> = Vec::new();
+    let mut commit_buf: Vec<(i64, usize, usize, i32)> = Vec::new();
     let mut window_start = start_ts;
     while window_start < end_ts {
         let window_end = (window_start + indipendency_window_s).min(end_ts);
@@ -754,40 +856,68 @@ fn simulate_trip_sts_epr_impl(
                 if ts >= window_end {
                     break;
                 }
-                let loc = choose_location_local(
-                    a,
-                    &agents,
-                    &data.diary,
-                    &data.neighbor_indices,
-                    &mut data.edge_sim,
-                    &mut data.edge_upd,
-                    &mut data.rng,
-                    rho,
-                    gamma,
-                    alpha,
-                    n_locations,
-                    ts,
-                    dt_update_mob_sim_s,
-                    distances,
-                    od_rows.as_ref(),
-                    relevances,
-                    diary_abs_locs,
-                    &mut data.scratch,
-                );
-                data.moves.push((loc, ts));
+                let day = (ts - start_ts).div_euclid(86_400);
+                if day != data.active_day {
+                    data.active_day = day;
+                    data.abstract_loc_cache.clear();
+                    if data.active_abs_loc != 0 {
+                        data.active_abs_loc = i32::MIN;
+                    }
+                }
+
+                let abstract_loc = data.diary.current_abstract_location(diary_abs_locs);
+                if abstract_loc != data.active_abs_loc {
+                    let loc = if abstract_loc == 0 {
+                        agents[a].home_location
+                    } else if let Some((_, loc)) = data
+                        .abstract_loc_cache
+                        .iter()
+                        .find(|&&(cached_abs, _)| cached_abs == abstract_loc)
+                    {
+                        *loc
+                    } else {
+                        let loc = choose_location_local(
+                            a,
+                            &agents,
+                            &data.diary,
+                            &data.neighbor_indices,
+                            &mut data.edge_sim,
+                            &mut data.edge_upd,
+                            &mut data.rng,
+                            rho,
+                            gamma,
+                            alpha,
+                            n_locations,
+                            ts,
+                            dt_update_mob_sim_s,
+                            distances,
+                            od_rows.as_ref(),
+                            relevances,
+                            diary_abs_locs,
+                            &mut data.scratch,
+                            &mut data.encounters,
+                        );
+                        data.abstract_loc_cache.push((abstract_loc, loc));
+                        loc
+                    };
+                    data.active_abs_loc = abstract_loc;
+                    data.moves.push((loc, ts, abstract_loc));
+                }
                 data.diary.advance(diary_timestamps, end_ts);
             }
         });
 
         commit_buf.clear();
         for (a, data) in par_data.iter_mut().enumerate() {
-            for &(loc, ts) in &data.moves {
-                commit_buf.push((ts, a, loc));
+            for &(loc, ts, abs_loc) in &data.moves {
+                commit_buf.push((ts, a, loc, abs_loc));
             }
             data.moves.clear();
         }
-        commit_buf.sort_unstable_by_key(|&(ts, a, _)| (ts, a));
-        for &(ts, a, loc) in &commit_buf {
+        commit_buf.sort_unstable_by_key(|&(ts, a, _, _)| (ts, a));
+        for &(ts, a, loc, abstract_loc) in &commit_buf {
+            let pend_dep = if activities_on { par_data[a].pending_departure } else { 0 };
+            par_data[a].pending_departure = 0;
             append_trip_record(
                 a,
                 loc,
@@ -796,15 +926,32 @@ fn simulate_trip_sts_epr_impl(
                 lngs,
                 car_speed_kmh,
                 slot_seconds,
+                pend_dep,
                 &mut out_agents,
                 &mut out_lats,
                 &mut out_lngs,
                 &mut out_arr,
                 &mut out_dep,
                 &mut out_dur,
+                &mut out_activity,
                 &mut last_output_idx,
                 &mut agents,
             );
+            if activities_on {
+                let new_arr = out_arr[last_output_idx[a]];
+                let new_idx = last_output_idx[a];
+                let AgentParData { ref mut activity_counts, ref mut rng, ref mut pending_departure, ref mut pending_activity, .. } = par_data[a];
+                let (act_idx, dur) = sample_activity_and_duration(
+                    a, abstract_loc,
+                    activity_counts, rng,
+                    act_embs, act_dur_mu, act_dur_sigma,
+                    purpose_act_starts, purpose_acts,
+                    profile_embs, emb_dim, act_kappa, act_temp,
+                );
+                out_activity[new_idx] = act_idx;
+                *pending_departure = new_arr + dur;
+                *pending_activity = act_idx;
+            }
         }
 
         window_start = window_end;
@@ -814,7 +961,23 @@ fn simulate_trip_sts_epr_impl(
         out_dep[idx] = end_ts.max(out_arr[idx]);
     }
 
-    Ok((out_agents, out_lats, out_lngs, out_arr, out_dep, out_dur))
+    // Collect encounters from all agents.
+    let mut enc_agent: Vec<i64> = Vec::new();
+    let mut enc_contact: Vec<i64> = Vec::new();
+    let mut enc_tile: Vec<i64> = Vec::new();
+    let mut enc_ts: Vec<i64> = Vec::new();
+    for data in &par_data {
+        for e in &data.encounters {
+            enc_agent.push(e.agent as i64 + 1);
+            enc_contact.push(e.contact as i64 + 1);
+            enc_tile.push(e.tile as i64);
+            enc_ts.push(e.ts);
+        }
+    }
+
+    Ok((out_agents, out_lats, out_lngs, out_arr, out_dep, out_dur,
+        enc_agent, enc_contact, enc_tile, enc_ts,
+        out_activity))
 }
 
 #[pyfunction]
@@ -827,7 +990,13 @@ fn simulate_trip_sts_epr_impl(
     start_ts, end_ts, indipendency_window_s, dt_update_mob_sim_s,
     slot_seconds, car_speed_kmh,
     n_agents, master_seed=None, starting_locs=None,
-    starting_locs_mode_relevance=false
+    starting_locs_mode_relevance=false,
+    work_tiles=None,
+    edge_profile_sim=None,
+    act_embs=None, act_dur_mu=None, act_dur_sigma=None,
+    purpose_act_starts=None, purpose_acts=None,
+    profile_embs=None, emb_dim=0usize,
+    act_kappa=1.0f64, act_temp=0.5f64
 ))]
 pub fn trip_sts_epr_simulate_agents<'py>(
     py: Python<'py>,
@@ -854,6 +1023,17 @@ pub fn trip_sts_epr_simulate_agents<'py>(
     master_seed: Option<u64>,
     starting_locs: Option<PyReadonlyArray1<'py, i64>>,
     starting_locs_mode_relevance: bool,
+    work_tiles: Option<PyReadonlyArray1<'py, i64>>,
+    edge_profile_sim: Option<PyReadonlyArray1<'py, f64>>,
+    act_embs: Option<PyReadonlyArray1<'py, f64>>,
+    act_dur_mu: Option<PyReadonlyArray1<'py, f64>>,
+    act_dur_sigma: Option<PyReadonlyArray1<'py, f64>>,
+    purpose_act_starts: Option<PyReadonlyArray1<'py, i64>>,
+    purpose_acts: Option<PyReadonlyArray1<'py, i64>>,
+    profile_embs: Option<PyReadonlyArray1<'py, f64>>,
+    emb_dim: usize,
+    act_kappa: f64,
+    act_temp: f64,
 ) -> PyResult<(
     Bound<'py, PyArray1<i64>>,
     Bound<'py, PyArray1<f64>>,
@@ -861,6 +1041,11 @@ pub fn trip_sts_epr_simulate_agents<'py>(
     Bound<'py, PyArray1<i64>>,
     Bound<'py, PyArray1<i64>>,
     Bound<'py, PyArray1<f64>>,
+    Bound<'py, PyArray1<i64>>,
+    Bound<'py, PyArray1<i64>>,
+    Bound<'py, PyArray1<i64>>,
+    Bound<'py, PyArray1<i64>>,
+    Bound<'py, PyArray1<i64>>,
 )> {
     let lats = latitudes.as_slice()?;
     let lngs = longitudes.as_slice()?;
@@ -887,32 +1072,64 @@ pub fn trip_sts_epr_simulate_agents<'py>(
         None => None,
     };
 
-    let (out_agents, out_lats, out_lngs, out_arr, out_dep, out_dur) = simulate_trip_sts_epr_impl(
-        lats,
-        lngs,
-        rels,
-        dists,
-        &ns,
-        &nb,
-        dt_raw,
-        da_raw,
-        &ds,
-        &de,
-        rho,
-        gamma,
-        alpha,
-        start_ts,
-        end_ts,
-        indipendency_window_s,
-        dt_update_mob_sim_s,
-        slot_seconds,
-        car_speed_kmh,
-        n_agents,
-        master_seed,
-        sl,
-        starting_locs_mode_relevance,
-    )
-    .map_err(PyValueError::new_err)?;
+    let wt_buf: Vec<usize>;
+    let wt_empty: &[usize] = &[];
+    let wt: &[usize] = match &work_tiles {
+        Some(v) => {
+            wt_buf = v.as_slice()?.iter().map(|&x| x.max(0) as usize).collect();
+            &wt_buf
+        }
+        None => wt_empty,
+    };
+
+    macro_rules! opt_f64_slice {
+        ($opt:expr) => {{
+            static EMPTY_F64: &[f64] = &[];
+            match &$opt {
+                Some(v) => v.as_slice()?,
+                None => EMPTY_F64,
+            }
+        }};
+    }
+    macro_rules! opt_usize_vec {
+        ($opt:expr) => {{
+            match &$opt {
+                Some(v) => v.as_slice()?.iter().map(|&x| x.max(0) as usize).collect::<Vec<_>>(),
+                None => Vec::new(),
+            }
+        }};
+    }
+
+    let eps_buf: Vec<f64>;
+    let eps_empty: &[f64] = &[];
+    let eps: &[f64] = match &edge_profile_sim {
+        Some(v) => { eps_buf = v.as_slice()?.to_vec(); &eps_buf }
+        None => eps_empty,
+    };
+
+    let act_embs_s = opt_f64_slice!(act_embs);
+    let act_dur_mu_s = opt_f64_slice!(act_dur_mu);
+    let act_dur_sigma_s = opt_f64_slice!(act_dur_sigma);
+    let purpose_act_starts_v = opt_usize_vec!(purpose_act_starts);
+    let purpose_acts_v = opt_usize_vec!(purpose_acts);
+    let profile_embs_s = opt_f64_slice!(profile_embs);
+
+    let (out_agents, out_lats, out_lngs, out_arr, out_dep, out_dur,
+         enc_agent, enc_contact, enc_tile, enc_ts, out_activity) =
+        simulate_trip_sts_epr_impl(
+            lats, lngs, rels, dists,
+            &ns, &nb, eps,
+            dt_raw, da_raw, &ds, &de,
+            rho, gamma, alpha,
+            start_ts, end_ts,
+            indipendency_window_s, dt_update_mob_sim_s,
+            slot_seconds, car_speed_kmh,
+            n_agents, master_seed, sl, starting_locs_mode_relevance, wt,
+            act_embs_s, act_dur_mu_s, act_dur_sigma_s,
+            &purpose_act_starts_v, &purpose_acts_v,
+            profile_embs_s, emb_dim, act_kappa, act_temp,
+        )
+        .map_err(PyValueError::new_err)?;
 
     Ok((
         out_agents.into_pyarray(py),
@@ -921,5 +1138,10 @@ pub fn trip_sts_epr_simulate_agents<'py>(
         out_arr.into_pyarray(py),
         out_dep.into_pyarray(py),
         out_dur.into_pyarray(py),
+        enc_agent.into_pyarray(py),
+        enc_contact.into_pyarray(py),
+        enc_tile.into_pyarray(py),
+        enc_ts.into_pyarray(py),
+        out_activity.into_pyarray(py),
     ))
 }

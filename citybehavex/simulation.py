@@ -11,7 +11,10 @@ import skmob2
 import typer
 from skmob2.models import DensityEPR
 
+from .activities import activity_descriptions, activity_duration_arrays, build_eligibility_csr
+from .agent_profiles import AgentProfile, generate_profiles, load_profiles, profile_to_narrative, profiles_to_frame
 from .config import CityBehavExConfig
+from .embeddings import embed_profiles, embed_texts
 from .diaries import annotate_trajectory_purposes_ddcrp
 from .llm_diaries import DiaryBatch, LLMStats, allocate_location_counts, fetch_diary_batch
 from .schedule_ddcrp import DiaryBank, build_ddcrp_diary, build_diary_bank
@@ -170,8 +173,13 @@ def _build_schedule(
     config: CityBehavExConfig,
     diary_batches: dict[str, DiaryBatch],
     start_date: pd.Timestamp,
-) -> tuple[DiaryBank, tuple, np.ndarray]:
-    """Build the diary bank and run ddCRP schedule selection for every agent/day."""
+    profiles: Optional[list[AgentProfile]] = None,
+) -> tuple[DiaryBank, tuple, np.ndarray, Optional[np.ndarray]]:
+    """Build the diary bank and run profile-driven CRP schedule selection.
+
+    Returns (bank, diary_arrays, chosen, profile_embeddings).
+    profile_embeddings is None when embeddings are disabled or unavailable.
+    """
     bank = build_diary_bank(
         diary_batches,
         config.embedding,
@@ -180,8 +188,18 @@ def _build_schedule(
     typer.echo(
         f"ddCRP schedule bank: {len(bank.diaries)} diaries "
         f"({int((~bank.is_weekend).sum())} weekday / {int(bank.is_weekend.sum())} weekend), "
-        f"embeddings={'on' if bank.embedded else 'off (identity similarity)'}"
+        f"embeddings={'on' if bank.embedded else 'off (popularity CRP, no profile similarity)'}"
     )
+
+    profile_embeddings = None
+    if profiles is not None:
+        narratives = [profile_to_narrative(p) for p in profiles]
+        profile_embeddings = embed_profiles(narratives, config.embedding)
+        if profile_embeddings is not None:
+            typer.echo(f"Profile embeddings: {profile_embeddings.shape}")
+        else:
+            typer.echo("Profile embeddings unavailable — falling back to popularity CRP")
+
     diary_arrays, chosen = build_ddcrp_diary(
         bank,
         start_date,
@@ -189,8 +207,9 @@ def _build_schedule(
         config.simulation.agents,
         config.simulation.random_state,
         config.schedule,
+        profile_embeddings=profile_embeddings,
     )
-    return bank, diary_arrays, chosen
+    return bank, diary_arrays, chosen, profile_embeddings
 
 
 def _run_trip_ditras(
@@ -203,6 +222,7 @@ def _run_trip_ditras(
     diary_arrays: tuple,
     chosen: np.ndarray,
     timing: RustTiming,
+    profiles: Optional[list[AgentProfile]] = None,
 ) -> tuple[skmob2.TrajDataFrame, Optional[str]]:
     granularity = config.simulation.granularity_minutes
     typer.echo(
@@ -229,6 +249,26 @@ def _run_trip_ditras(
     return traj, "purpose"
 
 
+def _build_activity_data(
+    config: CityBehavExConfig,
+) -> tuple[Optional[np.ndarray], Optional[np.ndarray], Optional[np.ndarray], Optional[np.ndarray], Optional[np.ndarray]]:
+    """Return (act_embs, act_dur_mu, act_dur_sigma, purpose_act_starts, purpose_acts) when enabled."""
+    if not config.activities.enabled:
+        return None, None, None, None, None
+    act_dur_mu, act_dur_sigma = activity_duration_arrays()
+    purpose_act_starts, purpose_acts = build_eligibility_csr()
+    act_embs = None
+    if config.activities.embed_activities:
+        descriptions = activity_descriptions()
+        act_embs = embed_texts(descriptions, config.embedding)
+        if act_embs is not None:
+            typer.echo(f"Activity embeddings: {act_embs.shape}")
+        else:
+            typer.echo("Activity embeddings unavailable — using count-only CRP")
+    typer.echo(f"Activities enabled: {len(act_dur_mu)} activities, kappa={config.activities.kappa}, T={config.activities.temperature}")
+    return act_embs, act_dur_mu, act_dur_sigma, purpose_act_starts, purpose_acts
+
+
 def _run_trip_sts_epr(
     config: CityBehavExConfig,
     tessellation_df: pd.DataFrame,
@@ -239,6 +279,8 @@ def _run_trip_sts_epr(
     diary_arrays: tuple,
     chosen: np.ndarray,
     timing: RustTiming,
+    profiles: Optional[list[AgentProfile]] = None,
+    profile_embeddings: Optional[np.ndarray] = None,
 ) -> tuple[skmob2.TrajDataFrame, Optional[str]]:
     granularity = config.simulation.granularity_minutes
     typer.echo(
@@ -246,7 +288,18 @@ def _run_trip_sts_epr(
         f"@ {granularity}-min slots, {config.simulation.car_speed_kmh:.0f} km/h car "
         f"({start_date.date()} -> {end_date.date()})"
     )
-    df = simulate_trip_sts_epr(
+    home_tiles = (
+        np.array([p.home_tile for p in profiles], dtype=np.int64)
+        if profiles is not None
+        else None
+    )
+    work_tiles = (
+        np.array([p.work_tile for p in profiles], dtype=np.int64)
+        if profiles is not None
+        else None
+    )
+    act_embs, act_dur_mu, act_dur_sigma, purpose_act_starts, purpose_acts = _build_activity_data(config)
+    df, encounters = simulate_trip_sts_epr(
         tessellation_df,
         relevance_column,
         diary_arrays,
@@ -257,7 +310,21 @@ def _run_trip_sts_epr(
         n_agents=config.simulation.agents,
         random_state=config.simulation.random_state,
         timing=timing,
+        starting_locs=home_tiles,
+        work_tiles=work_tiles,
+        profile_embeddings=profile_embeddings,
+        act_embs=act_embs,
+        act_dur_mu=act_dur_mu,
+        act_dur_sigma=act_dur_sigma,
+        purpose_act_starts=purpose_act_starts,
+        purpose_acts=purpose_acts,
+        act_kappa=config.activities.kappa,
+        act_temp=config.activities.temperature,
     )
+    if len(encounters) > 0:
+        enc_path = config.simulation.output.replace(".parquet", "_encounters.parquet")
+        encounters.to_parquet(enc_path, index=False)
+        typer.echo(f"Saved {len(encounters):,} encounters -> {enc_path}")
     df = annotate_trajectory_purposes_ddcrp(df, bank, chosen, start_date)
     traj = skmob2.TrajDataFrame(
         df, datetime_col="datetime", lat_col="lat", lng_col="lng", uid_col="uid"
@@ -265,9 +332,38 @@ def _run_trip_sts_epr(
     return traj, "purpose"
 
 
+def maybe_build_profiles(
+    config: CityBehavExConfig,
+    tessellation_df: pd.DataFrame,
+    relevance_column: str,
+) -> Optional[list[AgentProfile]]:
+    """Generate or load agent profiles when ``profiles.enabled`` is true."""
+    if not config.profiles.enabled:
+        return None
+    n = config.simulation.agents
+    pc = config.profiles
+    if pc.profiles_path:
+        loaded = load_profiles(pc.profiles_path, n)
+        if loaded is not None:
+            typer.echo(f"Loaded {len(loaded)} agent profiles from {pc.profiles_path}")
+            return loaded
+        typer.echo(f"Warning: profiles_path {pc.profiles_path!r} not usable — generating")
+    rng = np.random.default_rng(config.simulation.random_state)
+    profiles = generate_profiles(n, pc, rng, tessellation_df, relevance_column)
+    typer.echo(f"Generated {len(profiles)} agent profiles")
+    if pc.output:
+        from pathlib import Path
+        out = Path(pc.output)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        profiles_to_frame(profiles).to_parquet(str(out), index=False)
+        typer.echo(f"Saved agent profiles -> {pc.output}")
+    return profiles
+
+
 def run_simulation(config: CityBehavExConfig) -> skmob2.TrajDataFrame:
     tessellation_df, relevance_column = load_or_build_tessellation(config)
     start_date, end_date = simulation_dates(config)
+    profiles = maybe_build_profiles(config, tessellation_df, relevance_column)
     diary_result = maybe_build_diaries(config, tessellation_df)
     rust_timing = RustTiming()
 
@@ -280,7 +376,9 @@ def run_simulation(config: CityBehavExConfig) -> skmob2.TrajDataFrame:
         typer.echo(
             f"LLM diary phase: {llm_seconds:.2f}s, {llm_stats.calls:,} chat completion calls"
         )
-        bank, diary_arrays, chosen = _build_schedule(config, diary_batches, start_date)
+        bank, diary_arrays, chosen, profile_embeddings = _build_schedule(
+            config, diary_batches, start_date, profiles=profiles
+        )
         if config.simulation.model == "ditras":
             traj, synth_activity_col = _run_trip_ditras(
                 config,
@@ -292,6 +390,7 @@ def run_simulation(config: CityBehavExConfig) -> skmob2.TrajDataFrame:
                 diary_arrays,
                 chosen,
                 rust_timing,
+                profiles=profiles,
             )
         else:
             traj, synth_activity_col = _run_trip_sts_epr(
@@ -304,6 +403,8 @@ def run_simulation(config: CityBehavExConfig) -> skmob2.TrajDataFrame:
                 diary_arrays,
                 chosen,
                 rust_timing,
+                profiles=profiles,
+                profile_embeddings=profile_embeddings,
             )
         typer.echo(f"Rust simulation phase: {rust_timing.seconds:.2f}s")
 

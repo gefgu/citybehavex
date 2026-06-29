@@ -1,21 +1,25 @@
-"""Distance-dependent Chinese Restaurant Process (ddCRP) schedule selection.
+"""Profile-driven CRP schedule selection.
 
 Customers = days, tables = whole LLM diaries. Each simulated day an agent selects
-one entire diary from a bank, weighted by:
+one diary from a bank, weighted by:
 
-* **calendar recency** -- ``exp(-lam * (t - t'))`` over past same-type days (habit), and
-* **semantic similarity** -- cosine similarity between candidate diaries and the
-  diaries the agent used on those past days (cross-schedule generalization + cold
-  start), from ``nomic-embed-text-v2-moe`` embeddings.
+* **popularity** — how many times this agent has already used that diary (n_k)
+* **profile similarity** — cosine(profile_embedding, diary_embedding)
 
-Weekday and weekend are **hard-separated**: a weekday only draws from the weekday
-bank and a weekend only from the weekend bank. An exploration mass ``rho * S^-gamma``
-(``S`` = distinct schedules adopted of that type) is spread over not-yet-used
-candidates, so new-but-similar diaries are reachable.
+The weight for candidate k is: ``w_k = count_k * exp(s_k / T)``
 
-The output is the same ``DiaryArrays`` tuple the Rust core consumes (a per-slot
-home(0)/away(non-zero) mask), plus a ``[n_agents, days]`` map of the diary each
-agent used each day for purpose annotation.
+where:
+- ``count_k = n_k`` if the agent has used diary k before, else ``alpha``
+- ``s_k = cosine(agent_profile_embedding, diary_embedding[k])``
+- ``T`` and ``alpha`` are drawn per-agent from Beta distributions
+
+This is a Chinese Restaurant Process with semantic smoothing. Weekday and weekend
+are **hard-separated**: a weekday only draws from the weekday bank and vice versa.
+
+Fixed purpose→code map in ``diary_to_abs_locs``:
+  HOME=0, WORK=1, STUDIES=2, PURCHASE=3, LEISURE=4, HEALTH=5, OTHER=6
+This allows Rust to short-circuit WORK episodes to a per-agent persistent work
+tile, mirroring the HOME short-circuit.
 """
 
 from __future__ import annotations
@@ -26,49 +30,52 @@ import numpy as np
 import pandas as pd
 
 from .config import EmbeddingConfig, ScheduleConfig
-from .embeddings import cosine_sim_matrix, embed_diaries
+from .embeddings import embed_diaries
 from .llm_diaries import Diary, DiaryBatch
 from .trip_ditras import DiaryArrays
 
+# Fixed purpose→code map. HOME always stays 0 (Rust invariant).
+# WORK = 1 is reserved so Rust can pin WORK episodes to a persistent work tile.
+_PURPOSE_CODE: dict[str, int] = {
+    "HOME": 0,
+    "WORK": 1,
+    "STUDIES": 2,
+    "PURCHASE": 3,
+    "LEISURE": 4,
+    "HEALTH": 5,
+    "OTHER": 6,
+}
+
 
 def diary_to_abs_locs(diary: Diary, slots_per_day: int, granularity_minutes: int) -> np.ndarray:
-    """Per-slot abstract-location mask for one diary.
+    """Per-slot abstract-location mask for one diary using a **fixed** purpose→code map.
 
-    HOME slots are ``0`` (home); each distinct non-HOME purpose gets a distinct
-    positive code. Both Rust cores treat the array purely as a home/away mask (only
-    ``== 0`` is tested), so the exact positive value is informational; physical
-    location persistence across slots/days is the EPR's job.
+    HOME slots are ``0``; WORK slots are ``1`` (so Rust can pin them to a
+    per-agent work tile); other purposes get stable codes 2–6.
     """
     locs = np.zeros(slots_per_day, dtype=np.int32)
-    purpose_code: dict[str, int] = {}
     episodes = diary.episodes
     ep_i = 0
     for slot in range(slots_per_day):
         minute = slot * granularity_minutes
-        # Episodes are ordered and gap-free; advance to the one covering `minute`.
         while ep_i < len(episodes) and episodes[ep_i].end_minutes <= minute:
             ep_i += 1
         if ep_i >= len(episodes):
             break
         purpose = episodes[ep_i].purpose
-        if purpose == "HOME":
-            continue
-        code = purpose_code.get(purpose)
-        if code is None:
-            code = len(purpose_code) + 1
-            purpose_code[purpose] = code
+        code = _PURPOSE_CODE.get(purpose, 6)
         locs[slot] = code
     return locs
 
 
 @dataclass
 class DiaryBank:
-    """Combined weekday+weekend diary bank with precomputed similarity and slots."""
+    """Combined weekday+weekend diary bank with embeddings and slot masks."""
 
     diaries: list[Diary]
-    is_weekend: np.ndarray  # bool[K]
-    sim: np.ndarray  # float[K, K] cosine similarity (identity if no embeddings)
-    slot_locs: np.ndarray  # int32[K, slots_per_day]
+    is_weekend: np.ndarray          # bool[K]
+    embeddings: np.ndarray | None   # float32[K, dim] or None (fallback: identity)
+    slot_locs: np.ndarray           # int32[K, slots_per_day]
     slots_per_day: int
     granularity_minutes: int
     embedded: bool
@@ -97,12 +104,7 @@ def build_diary_bank(
         raise ValueError("diary bank is empty")
 
     embeddings = embed_diaries(diaries, embedding_config)
-    if embeddings is not None:
-        sim = cosine_sim_matrix(embeddings)
-        embedded = True
-    else:
-        sim = np.eye(len(diaries), dtype=np.float32)
-        embedded = False
+    embedded = embeddings is not None
 
     slot_locs = np.stack(
         [diary_to_abs_locs(d, slots_per_day, granularity_minutes) for d in diaries]
@@ -111,7 +113,7 @@ def build_diary_bank(
     return DiaryBank(
         diaries=diaries,
         is_weekend=np.asarray(is_weekend, dtype=bool),
-        sim=sim,
+        embeddings=embeddings,
         slot_locs=slot_locs,
         slots_per_day=slots_per_day,
         granularity_minutes=granularity_minutes,
@@ -126,8 +128,18 @@ def build_ddcrp_diary(
     n_agents: int,
     random_state: int,
     params: ScheduleConfig,
+    profile_embeddings: np.ndarray | None = None,
 ) -> tuple[DiaryArrays, np.ndarray]:
-    """Run ddCRP schedule selection for every agent and day.
+    """Run profile-driven CRP schedule selection for every agent and day.
+
+    Weight formula per candidate k on day t for agent a:
+      ``w_k = count_k * exp(s_k / T_a)``
+    where ``count_k = n_k`` (times used so far) for previously-used diaries,
+    ``count_k = alpha_a`` for new ones, and ``s_k`` is the cosine similarity
+    between the agent's profile embedding and diary k's embedding.
+
+    When ``profile_embeddings`` is ``None`` (embeddings off), ``s_k`` is treated
+    as a constant → weights reduce to pure popularity-weighted CRP.
 
     Returns ``(diary_arrays, chosen)`` where ``chosen[agent, day]`` is the global
     bank index of the diary that agent used that day.
@@ -136,7 +148,7 @@ def build_ddcrp_diary(
     slot_seconds = bank.granularity_minutes * 60
     slot_offsets = np.arange(slots_per_day, dtype=np.int64) * slot_seconds
 
-    # Day metadata, computed once.
+    # Day metadata.
     day_ts = np.empty(days, dtype=np.int64)
     day_is_weekend = np.empty(days, dtype=bool)
     for d in range(days):
@@ -146,7 +158,18 @@ def build_ddcrp_diary(
 
     weekday_idx = np.flatnonzero(~bank.is_weekend)
     weekend_idx = np.flatnonzero(bank.is_weekend)
-    sim_t = bank.sim.astype(np.float64)
+
+    # Pre-compute per-agent profile↔diary similarities [n_agents, K].
+    # Falls back to zeros (constant) when embeddings are unavailable.
+    K = len(bank.diaries)
+    if profile_embeddings is not None and bank.embeddings is not None:
+        # Both are L2-normalized: dot product = cosine similarity.
+        agent_diary_sim = np.clip(
+            profile_embeddings.astype(np.float64) @ bank.embeddings.astype(np.float64).T,
+            0.0, 1.0,
+        )  # [n_agents, K]
+    else:
+        agent_diary_sim = np.zeros((n_agents, K), dtype=np.float64)
 
     chosen = np.empty((n_agents, days), dtype=np.int64)
 
@@ -156,26 +179,18 @@ def build_ddcrp_diary(
     d_ends = np.empty(n_agents, dtype=np.int64)
     offset = 0
 
-    sem_exp = 1.0 / params.semantic_temperature
-
     for agent in range(n_agents):
         rng = np.random.default_rng(np.random.SeedSequence([int(random_state), agent]))
 
-        # memory: parallel arrays of (day_index, diary_idx); used_* track distinct
-        # schedules for the exploration decay.
-        mem_days: list[int] = []
-        mem_diaries: list[int] = []
-        used_weekday: set[int] = set()
-        used_weekend: set[int] = set()
+        # Per-agent T and alpha drawn from Beta distributions.
+        T_a = float(rng.beta(params.temperature_beta_a, params.temperature_beta_b))
+        T_a = max(T_a, 1e-6)  # guard against exact 0
+        alpha_a = float(rng.beta(params.alpha_beta_a, params.alpha_beta_b))
+        alpha_a = max(alpha_a, 1e-6)
 
-        if params.implant_memory:
-            wd = int(weekday_idx[rng.integers(len(weekday_idx))]) if len(weekday_idx) else None
-            we = int(weekend_idx[rng.integers(len(weekend_idx))]) if len(weekend_idx) else None
-            for imp in (wd, we):
-                if imp is not None:
-                    mem_days.append(-1)  # "yesterday": mild discount on day 0
-                    mem_diaries.append(imp)
-                    (used_weekend if bank.is_weekend[imp] else used_weekday).add(imp)
+        # Per-diary usage count for this agent (n_k in the formula).
+        usage_counts = np.zeros(K, dtype=np.float64)
+        agent_sims = agent_diary_sim[agent]  # [K]
 
         agent_locs = np.empty(days * slots_per_day, dtype=np.int32)
         agent_ts = np.empty(days * slots_per_day, dtype=np.int64)
@@ -183,47 +198,23 @@ def build_ddcrp_diary(
         for d in range(days):
             is_we = bool(day_is_weekend[d])
             candidates = weekend_idx if is_we else weekday_idx
-            used = used_weekend if is_we else used_weekday
 
-            # Same-type, in-window memory entries.
-            rel_k: list[int] = []
-            rel_w: list[float] = []
-            for md, mk in zip(mem_days, mem_diaries):
-                if bank.is_weekend[mk] != is_we:
-                    continue
-                age = d - md
-                if age > params.memory_window_days:
-                    continue
-                rel_k.append(mk)
-                rel_w.append(np.exp(-params.lam * age))
+            sims_k = agent_sims[candidates]  # [n_candidates]
+            counts_k = usage_counts[candidates]
 
-            # Preferential-return weight per candidate (semantic x recency).
-            if rel_k:
-                sim_block = sim_t[np.ix_(candidates, rel_k)]
-                sim_block = np.clip(sim_block, 0.0, 1.0) ** sem_exp
-                w_ret = sim_block @ np.asarray(rel_w, dtype=np.float64)
-            else:
-                w_ret = np.zeros(len(candidates), dtype=np.float64)
+            # count_k = n_k if used, else alpha_a.
+            effective_counts = np.where(counts_k > 0, counts_k, alpha_a)
+            # w_k = count_k * exp(s_k / T_a)
+            w = effective_counts * np.exp(sims_k / T_a)
 
-            # Exploration mass spread over not-yet-used candidates.
-            s_tau = max(len(used), 1)
-            w_new = params.rho * (s_tau ** (-params.gamma))
-            unused_mask = np.array([int(c) not in used for c in candidates])
-            n_unused = int(unused_mask.sum())
-            weight = w_ret.copy()
-            if n_unused > 0:
-                weight[unused_mask] += w_new / n_unused
-
-            total = weight.sum()
+            total = w.sum()
             if not np.isfinite(total) or total <= 0:
                 pick = int(candidates[rng.integers(len(candidates))])
             else:
-                pick = int(candidates[rng.choice(len(candidates), p=weight / total)])
+                pick = int(candidates[rng.choice(len(candidates), p=w / total)])
 
             chosen[agent, d] = pick
-            mem_days.append(d)
-            mem_diaries.append(pick)
-            used.add(pick)
+            usage_counts[pick] += 1.0
 
             base = d * slots_per_day
             agent_locs[base : base + slots_per_day] = bank.slot_locs[pick]
