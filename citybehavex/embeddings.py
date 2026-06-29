@@ -1,17 +1,19 @@
-"""Diary embeddings for the ddCRP schedule selector.
+"""Text embeddings for the ddCRP schedule selector and profile similarity graph.
 
-Serves one vector per whole LLM diary via an OpenAI-compatible ``/v1/embeddings``
-endpoint (``nomic-embed-text-v2-moe`` by default). Behaviour, in order:
+All text types (diary schedules, agent profile narratives, activity descriptions)
+are embedded by a single shared model via an OpenAI-compatible ``/v1/embeddings``
+endpoint (``nomic-embed-text-v2-moe`` by default). The shared cache and endpoint
+keep the embedding space consistent so cross-cosine comparisons are meaningful.
 
+Behaviour, in order:
 1. Load any cached vectors from ``config.embedding.cache_path``.
 2. For cache misses: if a server is reachable at ``base_url`` use it; otherwise, if
    ``auto_launch`` is set, spawn a local vLLM ``--task embed`` server on demand and
    shut it down afterwards.
 3. Persist freshly computed vectors back to the cache.
 
-If embeddings are disabled or every backend fails, :func:`embed_diaries` returns
-``None`` and the caller falls back to identity similarity (exact preferential
-return, no semantic smoothing).
+If embeddings are disabled or every backend fails, :func:`embed_texts` returns
+``None`` and callers fall back to identity / uniform similarity.
 """
 
 from __future__ import annotations
@@ -42,6 +44,28 @@ def diary_to_text(diary: Diary) -> str:
         for ep in diary.episodes
     ]
     return " | ".join(parts)
+
+
+def diary_to_prose(diary: Diary) -> str:
+    """Natural-language prose description of a diary for richer cross-embedding.
+
+    Profiles are described as prose; matching diaries as prose too makes
+    profile↔schedule cosine more discriminative than raw time-codes.
+    """
+    home_minutes = sum(
+        ep.end_minutes - ep.start_minutes
+        for ep in diary.episodes
+        if ep.purpose == "HOME"
+    )
+    away_episodes = [ep for ep in diary.episodes if ep.purpose != "HOME"]
+    away_parts = [
+        f"{ep.purpose.lower()} from {ep.start} to {ep.end if ep.end is not None else f'+{ep.duration_minutes}m'}"
+        for ep in away_episodes
+    ]
+    home_hours = home_minutes // 60
+    if away_parts:
+        return f"Spends {home_hours} hours at home; {', '.join(away_parts)}."
+    return f"Stays at home the entire day ({home_hours} hours)."
 
 
 def _cache_key(text: str, model: str, dim: int) -> str:
@@ -160,26 +184,30 @@ def _finalize(vectors: np.ndarray, dim: int) -> np.ndarray:
     return (vectors / norms).astype(np.float32)
 
 
-def embed_diaries(
-    diaries: Sequence[Diary], config: EmbeddingConfig
+def embed_texts(
+    texts: Sequence[str], config: EmbeddingConfig
 ) -> Optional[np.ndarray]:
-    """Return an ``[K, dim]`` L2-normalized embedding matrix, or ``None`` on failure.
+    """Return an ``[N, dim]`` L2-normalized embedding matrix for ``texts``, or ``None``.
 
-    Cache-first; computes only the misses, optionally auto-launching vLLM. A return
-    value of ``None`` signals the caller to fall back to identity similarity.
+    Cache-first: only missing texts are sent to the embedding server. Vectors are
+    keyed by SHA256(model, dim, text) so the shared cache is safe across call sites
+    (diaries, profiles, activities all share one cache file).
+
+    Returns ``None`` when embeddings are disabled or every backend fails; callers
+    should fall back to identity / uniform similarity.
     """
-    if not config.enabled or not diaries:
+    if not config.enabled or not texts:
         return None
 
-    texts = [config.task_prefix + diary_to_text(d) for d in diaries]
-    keys = [_cache_key(t, config.model, config.dimensions) for t in texts]
+    prefixed = [config.task_prefix + t for t in texts]
+    keys = [_cache_key(t, config.model, config.dimensions) for t in prefixed]
 
     cache_path = Path(config.resolved_cache_path())
     cache = _load_cache(cache_path)
 
     missing_idx = [i for i, k in enumerate(keys) if k not in cache]
     if missing_idx:
-        missing_texts = [texts[i] for i in missing_idx]
+        missing_texts = [prefixed[i] for i in missing_idx]
         computed: Optional[np.ndarray] = None
         try:
             if config.base_url and _server_reachable(config.base_url, timeout=5.0):
@@ -199,7 +227,7 @@ def embed_diaries(
                         api_key=config.api_key,
                         timeout=config.timeout_seconds,
                     )
-        except Exception:  # noqa: BLE001 - any failure falls back to identity sim.
+        except Exception:  # noqa: BLE001 - any failure falls back to caller default.
             return None
         if computed is None:
             return None
@@ -211,6 +239,25 @@ def embed_diaries(
     return np.stack([cache[k] for k in keys]).astype(np.float32)
 
 
+def embed_diaries(
+    diaries: Sequence[Diary], config: EmbeddingConfig
+) -> Optional[np.ndarray]:
+    """Embed diary schedules as prose for cross-modal similarity with profiles."""
+    return embed_texts([diary_to_prose(d) for d in diaries], config)
+
+
+def embed_profiles(
+    narratives: Sequence[str], config: EmbeddingConfig
+) -> Optional[np.ndarray]:
+    """Embed agent profile narratives (output of ``profile_to_narrative``)."""
+    return embed_texts(list(narratives), config)
+
+
 def cosine_sim_matrix(embeddings: np.ndarray) -> np.ndarray:
     """Cosine-similarity matrix for already-L2-normalized row vectors."""
     return np.clip(embeddings @ embeddings.T, -1.0, 1.0)
+
+
+def cross_cosine(a: np.ndarray, b: np.ndarray) -> np.ndarray:
+    """Cross-cosine similarity: ``[M, N]`` matrix, ``a`` is ``[M,d]``, ``b`` is ``[N,d]``."""
+    return np.clip(a @ b.T, -1.0, 1.0)

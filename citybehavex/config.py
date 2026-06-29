@@ -95,7 +95,7 @@ class LLMConfig(BaseModel):
     max_tokens: Optional[int] = None
     timeout_seconds: float = 60.0
     retries: int = 1
-    diary_count: int = Field(default=30, ge=10, le=30)
+    diary_count: int = Field(default=30, ge=10, le=50)
     # Reuse a previously generated, config-matching diary cache instead of
     # re-querying the LLM on every run. Set false to force regeneration.
     reuse_cache: bool = True
@@ -174,21 +174,135 @@ class EmbeddingConfig(BaseModel):
 
 
 class ScheduleConfig(BaseModel):
-    """Distance-dependent Chinese Restaurant Process (ddCRP) schedule selection.
+    """Profile-driven CRP schedule selection.
 
-    Each simulated day an agent picks one whole LLM diary, weighted by calendar
-    recency (habit) and the semantic similarity of candidate diaries to the diaries
-    it used on past same-type days. Weekday/weekend are hard-separated banks.
+    Each simulated day an agent picks one whole LLM diary, weighted by:
+      * popularity  — how often this agent has already used that diary
+      * profile similarity — cosine(profile_embedding, diary_embedding)
+
+    The weight formula is: ``w_k = count_k * exp(s_k / T)`` where
+    ``count_k = n_k`` for previously-used diaries and ``count_k = alpha`` for
+    new ones (standard Chinese Restaurant Process with semantic smoothing).
+
+    T (temperature) and alpha (exploration) are drawn per-agent from Beta
+    distributions so agents have different schedule preferences.
+    Weekday/weekend banks remain hard-separated.
     """
 
     model_config = ConfigDict(extra="forbid")
 
-    lam: float = Field(default=0.15, ge=0)  # recency decay per day
-    rho: float = Field(default=0.6, ge=0)  # exploration coefficient
-    gamma: float = Field(default=0.21, ge=0)  # exploration decay exponent
-    memory_window_days: int = Field(default=60, ge=1)  # memory truncation
-    implant_memory: bool = True  # seed cold-start memory per agent
-    semantic_temperature: float = Field(default=1.0, gt=0)  # scales similarity
+    # Per-agent temperature T ~ Beta(a, b): low T → sharp similarity preference,
+    # high T → near-uniform selection. Values in (0, 1).
+    temperature_beta_a: float = Field(default=2.0, gt=0)
+    temperature_beta_b: float = Field(default=5.0, gt=0)
+    # Per-agent exploration alpha ~ Beta(a, b): acts as the pseudo-count for new
+    # schedules. Low alpha → quickly locks into familiar schedules.
+    alpha_beta_a: float = Field(default=2.0, gt=0)
+    alpha_beta_b: float = Field(default=5.0, gt=0)
+
+
+class AgentProfilesConfig(BaseModel):
+    """Configuration for agent demographic profile generation.
+
+    When ``enabled`` is true, each agent gets a richly-attributed persona (gender,
+    age, education, job, transport modes, home/work tile) before the simulation runs.
+    Profile narratives are embedded and used to drive schedule selection (ddCRP) and
+    the social friendship graph. When ``enabled`` is false, the simulation falls back
+    to anonymous numeric agents (DITRAS only; STS-EPR requires profiles).
+
+    Distributions default to generic Western-European-city values. Set
+    ``llm_override: true`` to have the LLM derive job/education weights from city POI
+    data (requires ``llm`` client to be configured).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = False
+    # JSON file of hand-authored profiles (list of AgentProfile dicts). When
+    # provided and the list has at least n_agents entries, generation is skipped.
+    profiles_path: Optional[str] = None
+    output: str = "agent_profiles.parquet"
+    # Use LLM to derive job / education probabilities from city context.
+    llm_override: bool = False
+
+    # --- Age: Beta(a, b) scaled to [age_min, age_max] ----------------------
+    age_beta_a: float = Field(default=2.0, gt=0)
+    age_beta_b: float = Field(default=5.0, gt=0)
+    age_min: int = Field(default=16, ge=0)
+    age_max: int = Field(default=80, ge=0)
+
+    # --- Education: 5 categories -------------------------------------------
+    # No diploma | Secondary or less | Vocational/technical | Bachelor | Master+
+    education_weights: list[float] = Field(
+        default_factory=lambda: [0.08, 0.32, 0.23, 0.27, 0.10]
+    )
+
+    # --- Health: 5-point Likert scale (1=very poor … 5=very good) ----------
+    health_weights: list[float] = Field(
+        default_factory=lambda: [0.02, 0.07, 0.21, 0.45, 0.25]
+    )
+
+    # --- Household composition: 7 categories --------------------------------
+    # Shared | Couple+children | Couple no-children | Other family | Single
+    # parent | With parents | Living alone
+    household_weights: list[float] = Field(
+        default_factory=lambda: [0.08, 0.21, 0.14, 0.05, 0.06, 0.12, 0.34]
+    )
+
+    # --- Job: ILOSTAT ISCO-08 major groups (9 categories) ------------------
+    # Managers | Professionals | Technicians | Clerical | Service/Sales |
+    # Agricultural | Craft | Machine operators | Elementary
+    job_weights: list[float] = Field(
+        default_factory=lambda: [0.10, 0.22, 0.16, 0.12, 0.18, 0.03, 0.08, 0.06, 0.05]
+    )
+
+    # --- Transport modes: baseline probabilities ---------------------------
+    car_probability: float = Field(default=0.55, ge=0.0, le=1.0)
+    bike_probability: float = Field(default=0.35, ge=0.0, le=1.0)
+
+    # --- Name pools --------------------------------------------------------
+    male_names: list[str] = Field(
+        default_factory=lambda: [
+            "James", "John", "Robert", "Michael", "William", "David",
+            "Richard", "Joseph", "Thomas", "Charles", "Daniel", "Matthew",
+            "Lucas", "Hugo", "Théo", "Nathan", "Maxime", "Pierre", "Antoine",
+            "Louis", "Julien", "Nicolas", "Clément", "Alexandre", "Thomas",
+        ]
+    )
+    female_names: list[str] = Field(
+        default_factory=lambda: [
+            "Mary", "Patricia", "Jennifer", "Linda", "Barbara", "Susan",
+            "Jessica", "Sarah", "Karen", "Emma", "Léa", "Clara", "Chloé",
+            "Camille", "Manon", "Inès", "Lucie", "Anaïs", "Juliette", "Marie",
+            "Zoé", "Alice", "Océane", "Pauline", "Charlotte",
+        ]
+    )
+
+    @field_validator("education_weights", "health_weights", "household_weights", "job_weights")
+    @classmethod
+    def positive_weights(cls, v: list[float]) -> list[float]:
+        if not v:
+            raise ValueError("weights list must not be empty")
+        if any(w < 0 for w in v):
+            raise ValueError("weights must be non-negative")
+        if sum(v) <= 0:
+            raise ValueError("weights must sum to a positive value")
+        return v
+
+    @model_validator(mode="after")
+    def validate_age_range(self) -> AgentProfilesConfig:
+        if self.age_min >= self.age_max:
+            raise ValueError("age_min must be less than age_max")
+        return self
+
+
+class ActivitiesConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = False
+    kappa: float = Field(default=1.0, gt=0)
+    temperature: float = Field(default=0.5, gt=0)
+    embed_activities: bool = False
 
 
 class ComparisonConfig(BaseModel):
@@ -208,6 +322,8 @@ class CityBehavExConfig(BaseModel):
     diaries: DiariesConfig = Field(default_factory=DiariesConfig)
     embedding: EmbeddingConfig = Field(default_factory=EmbeddingConfig)
     schedule: ScheduleConfig = Field(default_factory=ScheduleConfig)
+    profiles: AgentProfilesConfig = Field(default_factory=AgentProfilesConfig)
+    activities: ActivitiesConfig = Field(default_factory=ActivitiesConfig)
     comparison: ComparisonConfig = Field(default_factory=ComparisonConfig)
 
 

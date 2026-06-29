@@ -55,14 +55,13 @@ embedding:
   cache_path: data/llm_diaries_gparis/diary_embeddings.npz
 
 schedule:
-  # ddCRP: each day an agent picks one whole diary, weighted by calendar recency
-  # (habit) and semantic similarity to diaries used on past same-type days.
-  lam: 0.15               # recency decay per day
-  rho: 0.6                # exploration coefficient (rho * S^-gamma)
-  gamma: 0.21             # exploration decay exponent
-  memory_window_days: 60  # how far back the agent remembers
-  implant_memory: true    # seed each agent with a cold-start weekday + weekend diary
-  semantic_temperature: 1.0
+  # Profile-driven CRP: w_k = count_k * exp(s_k / T) where s_k is
+  # cosine(profile_embedding, diary_embedding). T and alpha are drawn per-agent
+  # from Beta distributions to produce heterogeneous schedule preferences.
+  temperature_beta_a: 2.0   # Beta shape a for per-agent temperature T
+  temperature_beta_b: 5.0   # Beta shape b for per-agent temperature T
+  alpha_beta_a: 2.0         # Beta shape a for per-agent exploration alpha
+  alpha_beta_b: 5.0         # Beta shape b for per-agent exploration alpha
 
 comparison:
   path: data/gparis_visitation_df.parquet
