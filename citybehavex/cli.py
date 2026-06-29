@@ -246,6 +246,8 @@ def simulate(
         diaries=loaded.diaries,
         embedding=loaded.embedding,
         schedule=loaded.schedule,
+        profiles=loaded.profiles,
+        activities=loaded.activities,
         comparison=comp,
     )
     try:
