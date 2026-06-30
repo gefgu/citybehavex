@@ -16,6 +16,7 @@ class DiaryValidationError(ValueError):
 @dataclass
 class LLMStats:
     calls: int = 0
+    cache_hits: int = 0
 
 
 class ChatMessage(BaseModel):
