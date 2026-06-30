@@ -57,36 +57,22 @@ def parse_clock_minutes(value: str) -> int:
 
 
 class DiaryEpisode(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="ignore")
 
     start: str
-    end: Optional[str] = None
-    duration_minutes: Optional[int] = None
+    end: str
     purpose: Purpose
-    notes: Optional[str] = None
 
     @field_validator("start", "end")
     @classmethod
-    def validate_clock(cls, value: Optional[str]) -> Optional[str]:
-        if value is not None:
-            parse_clock_minutes(value)
-        return value
-
-    @field_validator("duration_minutes")
-    @classmethod
-    def validate_duration(cls, value: Optional[int]) -> Optional[int]:
-        if value is not None and value <= 0:
-            raise ValueError("duration_minutes must be positive")
+    def validate_clock(cls, value: str) -> str:
+        parse_clock_minutes(value)
         return value
 
     @model_validator(mode="after")
-    def validate_end_or_duration(self) -> DiaryEpisode:
-        if (self.end is None) == (self.duration_minutes is None):
-            raise ValueError("provide exactly one of end or duration_minutes")
-        if self.end is not None and self.end_minutes <= self.start_minutes:
+    def validate_end(self) -> DiaryEpisode:
+        if self.end_minutes <= self.start_minutes:
             raise ValueError("episode end must be after start")
-        if self.duration_minutes is not None and self.start_minutes + self.duration_minutes > 24 * 60:
-            raise ValueError("episode duration exceeds representative day")
         return self
 
     @property
@@ -95,18 +81,13 @@ class DiaryEpisode(BaseModel):
 
     @property
     def end_minutes(self) -> int:
-        if self.end is not None:
-            return parse_clock_minutes(self.end)
-        if self.duration_minutes is None:
-            raise ValueError("episode has no end or duration")
-        return self.start_minutes + self.duration_minutes
+        return parse_clock_minutes(self.end)
 
 
 class Diary(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     diary_id: str
-    description: Optional[str] = None
     episodes: list[DiaryEpisode] = Field(min_length=1)
 
     @model_validator(mode="after")
@@ -234,36 +215,9 @@ def _loads_model_json(content: str) -> Any:
     return json.loads(text)
 
 
-def build_diary_prompt(
-    *,
-    city_profile: str,
-    diary_count: int,
-    representative_day: str,
-    purpose_distribution: Optional[dict[str, float]] = None,
-) -> str:
-    distribution = purpose_distribution or {}
-    return (
-        "Return JSON only for synthetic daily mobility diaries.\n"
-        "Shape: {\"representative_day\":\"YYYY-MM-DD\",\"diaries\":[{\"diary_id\":\"d1\","
-        "\"episodes\":[{\"start\":\"00:00\",\"end\":\"07:00\",\"purpose\":\"HOME\"}]}]}.\n"
-        f"Representative day: {representative_day}\n"
-        f"Number of diaries: {diary_count}\n"
-        f"City profile: {city_profile or 'No additional city profile provided.'}\n"
-        f"Purpose distribution hints: {json.dumps(distribution, sort_keys=True)}\n"
-        "Allowed purposes: HOME, WORK, STUDIES, PURCHASE, LEISURE, HEALTH, OTHER.\n"
-        "Rules: each diary starts at 00:00, ends at 24:00, has contiguous non-overlapping "
-        "episodes, includes HOME, and uses only start/end times in HH:MM.\n"
-        "Keep descriptions and notes out of the JSON.\n"
-    )
-
-
 def diary_episode_summary(diary: Diary) -> str:
     """Compact one-line ``HH:MM-HH:MM PURPOSE | ...`` summary of a diary."""
-    return " | ".join(
-        f"{ep.start}-{ep.end if ep.end is not None else f'+{ep.duration_minutes}m'} "
-        f"{ep.purpose}"
-        for ep in diary.episodes
-    )
+    return " | ".join(f"{ep.start}-{ep.end} {ep.purpose}" for ep in diary.episodes)
 
 
 # Cap how many prior schedules are echoed back into a prompt (token budget).
@@ -384,20 +338,14 @@ def allocate_location_counts(
     return out
 
 
-def _cache_paths(config: LLMConfig) -> tuple[Path, Path, Path]:
+def _cache_paths(config: LLMConfig) -> Path:
     cache_dir = Path(config.cache_dir)
-    prompt_path = Path(config.prompt_path) if config.prompt_path else cache_dir / "prompt.txt"
-    raw_path = Path(config.raw_response_path) if config.raw_response_path else cache_dir / "raw_response.json"
     valid_path = (
         Path(config.validated_diaries_path)
         if config.validated_diaries_path
         else cache_dir / "validated_diaries.json"
     )
-    return prompt_path, raw_path, valid_path
-
-
-def _numbered_path(path: Path, number: int) -> Path:
-    return path.with_name(f"{path.stem}_{number:03d}{path.suffix}")
+    return valid_path
 
 
 def _apply_variant(path: Path, variant: str) -> Path:
@@ -475,18 +423,8 @@ def fetch_diary_batch(
     variant: str = "",
     stats: Optional[LLMStats] = None,
 ) -> DiaryBatch:
-    base_prompt_path, base_raw_path, base_valid_path = _cache_paths(config)
-    prompt_path = _apply_variant(base_prompt_path, variant)
-    raw_path = _apply_variant(base_raw_path, variant)
+    base_valid_path = _cache_paths(config)
     valid_path = _apply_variant(base_valid_path, variant)
-    batch_prompt = build_diary_prompt(
-        city_profile=city_profile,
-        diary_count=config.diary_count,
-        representative_day=representative_day,
-        purpose_distribution=purpose_distribution,
-    )
-    prompt_path.parent.mkdir(parents=True, exist_ok=True)
-    prompt_path.write_text(batch_prompt, encoding="utf-8")
 
     distribution_metadata = LocationCountDistribution(
         mu=location_count_mu,
@@ -574,7 +512,6 @@ def fetch_diary_batch(
             location_count=diary_location_count,
             previous_diaries=generated_by_count.get(diary_location_count),
         )
-        _numbered_path(prompt_path, diary_number).write_text(prompt, encoding="utf-8")
         request_payload = {
             "model": config.model,
             "temperature": config.temperature,
@@ -613,11 +550,6 @@ def fetch_diary_batch(
                         "one-location diary must contain only HOME episodes"
                     )
                 diary.diary_id = f"routine-{diary_number:03d}"
-                # Persist only the parsed diary, not the raw HTTP envelope.
-                raw_path.parent.mkdir(parents=True, exist_ok=True)
-                _numbered_path(raw_path, diary_number).write_text(
-                    diary.model_dump_json(indent=2), encoding="utf-8"
-                )
                 break
             except Exception as exc:  # noqa: BLE001 - converted to cache fallback or domain error.
                 last_error = exc
@@ -639,8 +571,6 @@ def fetch_diary_batch(
         except ValidationError as exc:
             last_error = DiaryValidationError(f"invalid combined diary batch: {exc}")
         else:
-            # raw_response.json holds the parsed batch (no raw HTTP envelope).
-            save_validated_diary_cache(batch, raw_path)
             save_validated_diary_cache(batch, valid_path)
             return batch
 
