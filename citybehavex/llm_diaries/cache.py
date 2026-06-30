@@ -6,7 +6,7 @@ from typing import Optional
 
 from pydantic import ValidationError
 
-from citybehavex.config import LLMConfig
+from citybehavex.llm.config import LLMConfig
 
 from .models import DiaryBatch, DiaryValidationError, LocationCountDistribution
 

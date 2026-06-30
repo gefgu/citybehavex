@@ -45,7 +45,7 @@ from skmob_vis import (
     plot_visits_frequency_ecdf,
 )
 
-from .profiles import PROFILE_METRICS, compute_profiles
+from citybehavex.profiles import PROFILE_METRICS, compute_profiles
 
 _DATETIME_CANDIDATES = [
     "datetime", "start_timestamp", "timestamp", "check-in_time",

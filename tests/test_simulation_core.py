@@ -9,7 +9,7 @@ from citybehavex.activities import (
     activity_duration_arrays,
     build_eligibility_csr,
 )
-from citybehavex.simulation_core import simulate_agents
+from citybehavex.simulation.core import simulate_agents
 
 _SLOT = 900
 _SPEED = 50.0

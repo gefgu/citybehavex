@@ -2,13 +2,10 @@ from __future__ import annotations
 
 import pytest
 
-from citybehavex.config import (
-    DiariesConfig,
-    LLMConfig,
-    SimulationConfig,
-    apply_overrides,
-    load_config,
-)
+from citybehavex.config import apply_overrides, load_config
+from citybehavex.llm import LLMConfig
+from citybehavex.llm_diaries import DiariesConfig
+from citybehavex.simulation import SimulationConfig
 
 
 def test_load_config_expands_environment(monkeypatch, tmp_path):

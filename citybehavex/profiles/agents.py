@@ -19,8 +19,8 @@ import numpy as np
 import pandas as pd
 from pydantic import BaseModel, ConfigDict
 
-from .config import AgentProfilesConfig
-from .math import sample_beta_scaled_ints, sample_multinomial_index, sample_weighted_indices
+from citybehavex.math import sample_beta_scaled_ints, sample_multinomial_index, sample_weighted_indices
+from citybehavex.profiles.config import AgentProfilesConfig
 
 # ---------------------------------------------------------------------------
 # Category labels (ordered to match config weight lists)

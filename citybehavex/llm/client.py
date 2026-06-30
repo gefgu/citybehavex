@@ -4,7 +4,7 @@ from typing import Any
 
 import requests
 
-from citybehavex.config import LLMConfig
+from citybehavex.llm.config import LLMConfig
 from citybehavex.llm_diaries.models import DiaryValidationError, LLMStats
 
 

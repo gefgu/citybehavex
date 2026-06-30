@@ -123,7 +123,7 @@ def test_common_part_of_commuters_uses_labeled_od_matrices(monkeypatch):
         return 0.75
 
     monkeypatch.setattr(
-        "citybehavex.reports.od_matrix_common_part_of_commuters",
+        "citybehavex.reports.comparison.od_matrix_common_part_of_commuters",
         cpc,
     )
 
@@ -200,13 +200,13 @@ def test_activity_comparison_section_uses_comparison_plots(monkeypatch):
         calls.append(("daily", first, second, labels))
         return Figure("daily")
 
-    monkeypatch.setattr("citybehavex.reports.plot_visit_purpose_comparison", purpose)
+    monkeypatch.setattr("citybehavex.reports.comparison.plot_visit_purpose_comparison", purpose)
     monkeypatch.setattr(
-        "citybehavex.reports.plot_activity_transition_difference",
+        "citybehavex.reports.comparison.plot_activity_transition_difference",
         transition,
     )
     monkeypatch.setattr(
-        "citybehavex.reports.plot_daily_activity_difference",
+        "citybehavex.reports.comparison.plot_daily_activity_difference",
         daily,
     )
 
@@ -317,15 +317,15 @@ def test_mobility_laws_section_renders_all_four_charts(monkeypatch):
             return f"<iframe>{self.name}</iframe>"
 
     monkeypatch.setattr(
-        "citybehavex.reports._truncated_powerlaw_dataset",
+        "citybehavex.reports.comparison._truncated_powerlaw_dataset",
         lambda values, label: ((1.0, 2.0, 3.0, 4.0), [1.0], [0.5], label),
     )
     monkeypatch.setattr(
-        "citybehavex.reports._daily_location_lognormal_dataset",
+        "citybehavex.reports.comparison._daily_location_lognormal_dataset",
         lambda visits, label: ([1.0], [0.5], 0.6, 0.7, label),
     )
     monkeypatch.setattr(
-        "citybehavex.reports._distance_frequency_dataset",
+        "citybehavex.reports.comparison._distance_frequency_dataset",
         lambda visits, label: ([1.0], [0.5], 1.8, 2.5, label),
     )
 
@@ -342,12 +342,12 @@ def test_mobility_laws_section_renders_all_four_charts(monkeypatch):
         return Figure("distance-frequency")
 
     monkeypatch.setattr(
-        "citybehavex.reports.plot_truncated_powerlaw_fits",
+        "citybehavex.reports.comparison.plot_truncated_powerlaw_fits",
         truncated,
     )
-    monkeypatch.setattr("citybehavex.reports.plot_lognormal_fits", lognormal)
+    monkeypatch.setattr("citybehavex.reports.comparison.plot_lognormal_fits", lognormal)
     monkeypatch.setattr(
-        "citybehavex.reports.plot_distance_frequency_law",
+        "citybehavex.reports.comparison.plot_distance_frequency_law",
         distance_frequency,
     )
 
@@ -391,15 +391,15 @@ def test_mobility_laws_section_skips_only_failed_chart(monkeypatch):
             return "<iframe>chart</iframe>"
 
     monkeypatch.setattr(
-        "citybehavex.reports._truncated_powerlaw_dataset",
+        "citybehavex.reports.comparison._truncated_powerlaw_dataset",
         lambda values, label: ((1.0, 2.0, 3.0, 4.0), [1.0], [0.5], label),
     )
     monkeypatch.setattr(
-        "citybehavex.reports._daily_location_lognormal_dataset",
+        "citybehavex.reports.comparison._daily_location_lognormal_dataset",
         lambda visits, label: ([1.0], [0.5], 0.6, 0.7, label),
     )
     monkeypatch.setattr(
-        "citybehavex.reports._distance_frequency_dataset",
+        "citybehavex.reports.comparison._distance_frequency_dataset",
         lambda visits, label: ([1.0], [0.5], 1.8, 2.5, label),
     )
 
@@ -413,15 +413,15 @@ def test_mobility_laws_section_skips_only_failed_chart(monkeypatch):
         return Figure()
 
     monkeypatch.setattr(
-        "citybehavex.reports.plot_truncated_powerlaw_fits",
+        "citybehavex.reports.comparison.plot_truncated_powerlaw_fits",
         truncated,
     )
     monkeypatch.setattr(
-        "citybehavex.reports.plot_lognormal_fits",
+        "citybehavex.reports.comparison.plot_lognormal_fits",
         lambda *datasets, **kwargs: Figure(),
     )
     monkeypatch.setattr(
-        "citybehavex.reports.plot_distance_frequency_law",
+        "citybehavex.reports.comparison.plot_distance_frequency_law",
         lambda *datasets, **kwargs: Figure(),
     )
 

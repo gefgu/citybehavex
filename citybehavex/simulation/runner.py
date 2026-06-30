@@ -11,15 +11,15 @@ import skmob2
 import typer
 from skmob2.models import DensityEPR
 
-from .activities import activity_descriptions, activity_duration_arrays, build_eligibility_csr
-from .agent_profiles import AgentProfile, generate_profiles, load_profiles, profile_to_narrative, profiles_to_frame
-from .config import CityBehavExConfig
-from .embeddings import embed_profiles, embed_texts
-from .diaries import annotate_trajectory_purposes_ddcrp
-from .llm_diaries import DiaryBatch, LLMStats, allocate_location_counts, fetch_diary_batch
-from .schedule_ddcrp import DiaryBank, build_ddcrp_diary, build_diary_bank
-from .simulation_core import CoreTiming, simulate_agents
-from .tessellation import build_poi_tessellation, build_tessellation, purpose_distribution
+from citybehavex.activities import activity_descriptions, activity_duration_arrays, build_eligibility_csr
+from citybehavex.config import CityBehavExConfig
+from citybehavex.embedding import embed_profiles, embed_texts
+from citybehavex.llm_diaries import DiaryBatch, LLMStats, allocate_location_counts, fetch_diary_batch
+from citybehavex.llm_diaries.training import annotate_trajectory_purposes_ddcrp
+from citybehavex.profiles import AgentProfile, generate_profiles, load_profiles, profile_to_narrative, profiles_to_frame
+from citybehavex.schedules import DiaryBank, build_ddcrp_diary, build_diary_bank
+from citybehavex.simulation.core import CoreTiming, simulate_agents
+from citybehavex.tessellation import build_poi_tessellation, build_tessellation, purpose_distribution
 
 
 def load_or_build_tessellation(config: CityBehavExConfig) -> tuple[pd.DataFrame, str]:
@@ -363,7 +363,7 @@ def run_simulation(config: CityBehavExConfig) -> skmob2.TrajDataFrame:
     )
 
     if config.comparison.path:
-        from .reports import generate_comparison_report
+        from citybehavex.reports import generate_comparison_report
 
         generate_comparison_report(
             traj=traj,

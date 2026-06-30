@@ -6,7 +6,7 @@ import duckdb
 import pandas as pd
 import typer
 
-_CATEGORY_CSV = Path(__file__).parent / "category" / "unique_categories.csv"
+_CATEGORY_CSV = Path(__file__).parents[1] / "category" / "unique_categories.csv"
 
 
 def load_category_mapping() -> dict[str, str]:

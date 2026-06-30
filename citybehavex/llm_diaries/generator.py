@@ -5,7 +5,7 @@ from typing import Optional
 import requests
 from pydantic import ValidationError
 
-from citybehavex.config import LLMConfig
+from citybehavex.llm.config import LLMConfig
 from citybehavex.math import allocate_location_counts
 
 from .cache import apply_variant, cache_path, load_cache_with_fallback, save_validated_diary_cache

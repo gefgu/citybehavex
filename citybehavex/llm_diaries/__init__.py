@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import requests
 
+from .config import DiariesConfig
 from .cache import (
     apply_variant,
     cache_path,
@@ -57,6 +58,7 @@ __all__ = [
     "ChatChoice",
     "ChatCompletionResponse",
     "ChatMessage",
+    "DiariesConfig",
     "Diary",
     "DiaryBatch",
     "DiaryEpisode",

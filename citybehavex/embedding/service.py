@@ -28,8 +28,8 @@ from typing import Iterator, Optional, Sequence
 import numpy as np
 import requests
 
-from .config import EmbeddingConfig
-from .llm_diaries import Diary
+from citybehavex.embedding.config import EmbeddingConfig
+from citybehavex.llm_diaries import Diary
 
 
 def diary_to_text(diary: Diary) -> str:

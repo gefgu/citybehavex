@@ -29,9 +29,10 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 
-from .config import EmbeddingConfig, ScheduleConfig
-from .embeddings import embed_diaries
-from .llm_diaries import Diary, DiaryBatch
+from citybehavex.embedding import embed_diaries
+from citybehavex.embedding.config import EmbeddingConfig
+from citybehavex.llm_diaries import Diary, DiaryBatch
+from citybehavex.schedules.config import ScheduleConfig
 
 DiaryArrays = tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]
 

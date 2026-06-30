@@ -6,10 +6,10 @@ from typing import TYPE_CHECKING, Optional
 import numpy as np
 import pandas as pd
 
-from .llm_diaries import DiaryBatch
+from .models import DiaryBatch
 
 if TYPE_CHECKING:
-    from .schedule_ddcrp import DiaryBank
+    from citybehavex.schedules import DiaryBank
 
 
 def diary_batch_to_markov_training(
