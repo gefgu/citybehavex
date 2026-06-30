@@ -1,0 +1,62 @@
+tessellation:
+  min_lon: 136.5
+  min_lat: 34.6
+  max_lon: 137.7
+  max_lat: 35.75
+  resolution: 8
+  enrich_overture: True
+  output: data/yjmob/yjmob_h3_tessellation.parquet
+
+simulation:
+  agents: 100000
+  days: 75
+  start_date: "2019-09-15"
+  output: data/yjmob/yjmob_simulation_trajectories.parquet
+  random_state: 42
+  relevance_column: total_poi_count
+  granularity_minutes: 30
+  car_speed_kmh: 40.0       # urban Japan average (mix of city and suburban roads)
+
+llm:
+  base_url: "http://localhost:8080"
+  api_key: "none"
+  model: "Qwen/Qwen2.5-32B-Instruct-AWQ"
+  diary_count: 30
+  max_tokens: 768
+  cache_dir: data/llm_diaries_yjmob
+  validated_diaries_path: data/llm_diaries_yjmob/validated_diaries.json
+
+diaries:
+  city_profile: "Nagoya / Aichi Prefecture, Japan — dense urban core with surrounding suburban towns, heavy reliance on trains and cars, manufacturing industry workers, students, and families."
+  city_profile_weekday: "Aichi weekday routines: early morning commutes by train or car to factories, offices, or schools; midday breaks near workplaces; evening returns home with occasional shopping."
+  city_profile_weekend: "Aichi weekend routines: later mornings at home, family outings to shopping malls or parks, leisure trips by car, reduced industry activity."
+  representative_day: "2019-09-15"
+  location_count_mu: 1.0
+  location_count_sigma: 0.5
+  max_locations: 6
+
+embedding:
+  enabled: true
+  model: "nomic-ai/nomic-embed-text-v1.5"
+  base_url: "http://localhost:8001"
+  task_prefix: "clustering: "
+  dimensions: 768
+  auto_launch: false
+  vllm_port: 8001
+  cache_dir: data/llm_diaries_yjmob
+  cache_path: data/llm_diaries_yjmob/diary_embeddings.npz
+
+schedule:
+  temperature_beta_a: 2.0
+  temperature_beta_b: 5.0
+  alpha_beta_a: 2.0
+  alpha_beta_b: 5.0
+
+profiles:
+  enabled: true
+  output: data/yjmob/yjmob_agent_profiles.parquet
+
+comparison:
+  path: data/yjmob/yjmob_wgs84_simple.parquet
+  label: yjmob100k
+  html: data/yjmob/yjmob_simulation_comparison.html
