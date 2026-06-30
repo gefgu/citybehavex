@@ -1,0 +1,64 @@
+tessellation:
+  min_lon: 120.8
+  min_lat: 30.7
+  max_lon: 122.1
+  max_lat: 31.9
+  resolution: 8
+  enrich_overture: true
+  overture_release: "2026-05-20.0"
+  min_poi_count: 1
+  output: data/shanghai/shanghai_h3_tessellation.parquet
+
+simulation:
+  agents: 58501
+  days: 10
+  start_date: "2015-12-27"
+  output: data/shanghai/shanghai_simulation_trajectories.parquet
+  random_state: 42
+  relevance_column: relevance
+  granularity_minutes: 60
+  car_speed_kmh: 35.0        # dense Shanghai urban average
+
+llm:
+  base_url: "http://localhost:8080"
+  api_key: "none"
+  model: "Qwen/Qwen2.5-32B-Instruct-AWQ"
+  diary_count: 30
+  max_tokens: 768
+  cache_dir: data/llm_diaries_shanghai
+  validated_diaries_path: data/llm_diaries_shanghai/validated_diaries.json
+
+diaries:
+  city_profile: "Shanghai, China — one of the world's densest megacities, with extensive metro and bus networks, high-rise residential clusters, commercial districts, industrial zones, and mixed-use neighborhoods."
+  city_profile_weekday: "Shanghai weekday routines: early metro/bus commutes to offices, factories, or universities; midday meals near workplaces; evening shopping or leisure along commercial streets; late returns home."
+  city_profile_weekend: "Shanghai weekend routines: later mornings at home, family outings to malls, parks, or restaurants, leisure trips by metro or car, tourism in central districts."
+  representative_day: "2015-12-27"
+  location_count_mu: 1.0
+  location_count_sigma: 0.5
+  max_locations: 6
+
+embedding:
+  enabled: true
+  model: "nomic-ai/nomic-embed-text-v1.5"
+  base_url: "http://localhost:8001"
+  task_prefix: "clustering: "
+  dimensions: 768
+  auto_launch: false
+  vllm_port: 8001
+  cache_dir: data/llm_diaries_shanghai
+  cache_path: data/llm_diaries_shanghai/diary_embeddings.npz
+
+schedule:
+  temperature_beta_a: 2.0
+  temperature_beta_b: 5.0
+  alpha_beta_a: 2.0
+  alpha_beta_b: 5.0
+
+profiles:
+  enabled: true
+  output: data/shanghai/shanghai_agent_profiles.parquet
+
+comparison:
+  path: data/shanghai/shanghai_data_raw.parquet
+  label: shanghai
+  html: data/shanghai/shanghai_simulation_comparison.html

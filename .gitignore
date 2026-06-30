@@ -24,3 +24,10 @@ data/llm_diaries_gparis/markov_training.parquet
 
 # Default ddCRP embedding cache + vLLM logs
 .citybehavex/
+
+
+notebooks/02_shanghai
+
+*.npz
+**/diary_embeddings.npz
+data/**/*.npz
