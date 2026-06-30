@@ -50,22 +50,23 @@ def fetch_diary_batch(
     ):
         raise ValueError("location_counts must be within the configured range")
 
-    if not all([config.base_url, config.api_key, config.model]):
-        return load_cache_with_fallback(
+    def load_cached_batch() -> DiaryBatch:
+        batch = load_cache_with_fallback(
             valid_path,
             base_valid_path,
             expected_distribution=distribution_metadata,
             expected_location_counts=expected_location_counts,
         )
+        if stats is not None:
+            stats.cache_hits += 1
+        return batch
+
+    if not all([config.base_url, config.api_key, config.model]):
+        return load_cached_batch()
 
     if config.reuse_cache:
         try:
-            return load_cache_with_fallback(
-                valid_path,
-                base_valid_path,
-                expected_distribution=distribution_metadata,
-                expected_location_counts=expected_location_counts,
-            )
+            return load_cached_batch()
         except DiaryValidationError:
             pass  # No usable cache (missing or config changed) -> generate below.
 
@@ -76,12 +77,7 @@ def fetch_diary_batch(
         client.preflight()
     except DiaryValidationError as exc:
         try:
-            return load_cache_with_fallback(
-                valid_path,
-                base_valid_path,
-                expected_distribution=distribution_metadata,
-                expected_location_counts=expected_location_counts,
-            )
+            return load_cached_batch()
         except DiaryValidationError as cache_error:
             raise DiaryValidationError(
                 f"LLM diary generation failed and no valid cache was available: {exc}"
@@ -137,12 +133,7 @@ def fetch_diary_batch(
             return batch
 
     try:
-        return load_cache_with_fallback(
-            valid_path,
-            base_valid_path,
-            expected_distribution=distribution_metadata,
-            expected_location_counts=expected_location_counts,
-        )
+        return load_cached_batch()
     except DiaryValidationError as cache_error:
         raise DiaryValidationError(
             f"LLM diary generation failed and no valid cache was available: {last_error}"

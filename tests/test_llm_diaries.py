@@ -250,6 +250,7 @@ def test_cache_fallback_after_llm_failure(monkeypatch, tmp_path):
     )
     assert len(batch.diaries) == 10
     assert stats.calls == 0
+    assert stats.cache_hits == 1
 
 
 def test_legacy_and_mismatched_caches_are_rejected(tmp_path):

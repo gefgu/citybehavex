@@ -335,8 +335,14 @@ def run_simulation(config: CityBehavExConfig) -> skmob2.TrajDataFrame:
         )
     else:
         diary_batches, llm_stats, llm_seconds = diary_result
+        cache_text = (
+            f", {llm_stats.cache_hits:,} cached diary batches"
+            if llm_stats.cache_hits
+            else ""
+        )
         typer.echo(
             f"LLM diary phase: {llm_seconds:.2f}s, {llm_stats.calls:,} chat completion calls"
+            f"{cache_text}"
         )
         bank, diary_arrays, chosen, profile_embeddings = _build_schedule(
             config, diary_batches, start_date, profiles=profiles
