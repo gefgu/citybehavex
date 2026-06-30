@@ -1,0 +1,384 @@
+use rand::SeedableRng;
+use rand_xoshiro::Xoshiro256PlusPlus;
+use rayon::prelude::*;
+use skmob2_core::models::od::{CachedGravityOdRows, validate_equal_lengths};
+use skmob2_core::models::shared::derive_agent_seed;
+use skmob2_core::utils::haversine::haversine_km;
+
+use crate::simulation_core::activity::sample_activity_and_duration;
+use crate::simulation_core::inputs::CoreInputs;
+use crate::simulation_core::outputs::{SimulationOutput, TripOutputBuffers};
+use crate::simulation_core::social::{
+    LocationChoiceContext, choose_location_local, pick_starting_loc,
+};
+use crate::simulation_core::types::{AgentParData, AgentState, DiaryState, Scratch};
+
+struct TripAppendContext<'a> {
+    agent_idx: usize,
+    next_loc: usize,
+    ts: i64,
+    lats: &'a [f64],
+    lngs: &'a [f64],
+    car_speed_kmh: f64,
+    slot_seconds: i64,
+    pending_departure: i64,
+}
+
+fn append_trip_record(
+    ctx: TripAppendContext<'_>,
+    output: &mut TripOutputBuffers,
+    agents: &mut [AgentState],
+) {
+    let cur_loc = agents[ctx.agent_idx].current_location;
+    let dur_s: i64 = if ctx.next_loc == cur_loc {
+        0
+    } else {
+        let d_km = haversine_km(
+            ctx.lats[cur_loc],
+            ctx.lngs[cur_loc],
+            ctx.lats[ctx.next_loc],
+            ctx.lngs[ctx.next_loc],
+        );
+        let secs = (d_km / ctx.car_speed_kmh) * 3600.0;
+        if secs.is_finite() && secs > 0.0 {
+            secs.round() as i64
+        } else {
+            0
+        }
+    };
+
+    let prev_idx = output.last_output_idx[ctx.agent_idx];
+    let prev_arrival = output.arrival[prev_idx];
+    let mut departure = if ctx.pending_departure > 0 {
+        ctx.pending_departure
+            .clamp(prev_arrival, ctx.ts + ctx.slot_seconds)
+    } else if dur_s <= ctx.slot_seconds {
+        ctx.ts
+    } else {
+        ctx.ts - dur_s / 2
+    };
+    if departure < prev_arrival {
+        departure = prev_arrival;
+    }
+    let arrival = departure + dur_s;
+    output.departure[prev_idx] = departure;
+
+    agents[ctx.agent_idx].visit(ctx.next_loc);
+    agents[ctx.agent_idx].current_location = ctx.next_loc;
+
+    output.last_output_idx[ctx.agent_idx] = output.agents.len();
+    output.agents.push(ctx.agent_idx as i64 + 1);
+    output.lats.push(ctx.lats[ctx.next_loc]);
+    output.lngs.push(ctx.lngs[ctx.next_loc]);
+    output.arrival.push(arrival);
+    output.departure.push(arrival);
+    output.duration.push(dur_s as f64);
+    output.activity.push(0);
+}
+
+fn validate_inputs(inputs: &CoreInputs<'_>) -> Result<usize, String> {
+    let n_locations = validate_equal_lengths(&[
+        ("latitudes", inputs.locations.lats.len()),
+        ("longitudes", inputs.locations.lngs.len()),
+        ("relevances", inputs.locations.relevances.len()),
+    ])?;
+    if n_locations < 2 {
+        return Err("need at least 2 locations".to_string());
+    }
+    if !inputs.locations.distances.is_empty()
+        && inputs.locations.distances.len() != n_locations * n_locations
+    {
+        return Err(format!(
+            "distances must be empty or have length n_locations*n_locations={}, got {}",
+            n_locations * n_locations,
+            inputs.locations.distances.len()
+        ));
+    }
+    if inputs.social_graph.neighbor_starts.len() != inputs.params.n_agents + 1 {
+        return Err(format!(
+            "neighbor_starts must have length n_agents+1={}, got {}",
+            inputs.params.n_agents + 1,
+            inputs.social_graph.neighbor_starts.len()
+        ));
+    }
+    if inputs.diary.starts.len() < inputs.params.n_agents
+        || inputs.diary.ends.len() < inputs.params.n_agents
+    {
+        return Err(format!(
+            "diary_starts/diary_ends must have at least {} entries",
+            inputs.params.n_agents
+        ));
+    }
+    if inputs.params.slot_seconds <= 0 {
+        return Err("slot_seconds must be positive".to_string());
+    }
+    if inputs.params.indipendency_window_s <= 0 {
+        return Err("indipendency_window_s must be positive".to_string());
+    }
+    if inputs.params.dt_update_mob_sim_s <= 0 {
+        return Err("dt_update_mob_sim_s must be positive".to_string());
+    }
+    if !(inputs.params.car_speed_kmh.is_finite() && inputs.params.car_speed_kmh > 0.0) {
+        return Err("car_speed_kmh must be positive".to_string());
+    }
+    if let Some(starts) = inputs.initial_locations.starting_locs
+        && starts.len() < inputs.params.n_agents
+    {
+        return Err(format!(
+            "starting_locs must have at least {} entries",
+            inputs.params.n_agents
+        ));
+    }
+    for agent in 0..inputs.params.n_agents {
+        if inputs.diary.starts[agent] > inputs.diary.ends[agent]
+            || inputs.diary.ends[agent] > inputs.diary.timestamps.len()
+        {
+            return Err("diary ranges must be ordered and within diary_timestamps".to_string());
+        }
+        if inputs.diary.ends[agent] > inputs.diary.abstract_locations.len() {
+            return Err("diary ranges must be within diary_abs_locs".to_string());
+        }
+        if inputs.social_graph.neighbor_starts[agent]
+            > inputs.social_graph.neighbor_starts[agent + 1]
+            || inputs.social_graph.neighbor_starts[agent + 1] > inputs.social_graph.neighbors.len()
+        {
+            return Err("neighbor_starts must be ordered and within neighbors".to_string());
+        }
+    }
+
+    Ok(n_locations)
+}
+
+pub(crate) fn simulate(inputs: CoreInputs<'_>) -> Result<SimulationOutput, String> {
+    let n_locations = validate_inputs(&inputs)?;
+    if inputs.params.n_agents == 0 {
+        return Ok(SimulationOutput::empty());
+    }
+    let activities_on = inputs.activities.enabled();
+
+    let master_seed = inputs.params.master_seed.unwrap_or_else(rand::random);
+    let od_rows = if inputs.locations.distances.is_empty() {
+        Some(CachedGravityOdRows::new(
+            inputs.locations.lats,
+            inputs.locations.lngs,
+            inputs.locations.relevances,
+            "power_law",
+            -2.0,
+            1.0,
+            1.0,
+        ))
+    } else {
+        None
+    };
+
+    let mut agents: Vec<AgentState> = (0..inputs.params.n_agents)
+        .map(|_| AgentState::new(n_locations))
+        .collect();
+    let init_ts_edges = vec![inputs.params.start_ts; inputs.social_graph.neighbors.len()];
+    let mut par_data: Vec<AgentParData> = (0..inputs.params.n_agents)
+        .map(|i| {
+            let edge_start = inputs.social_graph.neighbor_starts[i];
+            let edge_end = inputs.social_graph.neighbor_starts[i + 1];
+            let n_edges = edge_end - edge_start;
+            let initial_edge_sim: Vec<f64> = if inputs.social_graph.edge_profile_sim.len()
+                == inputs.social_graph.neighbors.len()
+            {
+                inputs.social_graph.edge_profile_sim[edge_start..edge_end].to_vec()
+            } else {
+                vec![0.0_f64; n_edges]
+            };
+            AgentParData {
+                rng: Xoshiro256PlusPlus::seed_from_u64(derive_agent_seed(master_seed, i, 0)),
+                diary: DiaryState {
+                    diary_start: inputs.diary.starts[i],
+                    diary_end: inputs.diary.ends[i],
+                    diary_idx: 1,
+                },
+                scratch: Scratch::new(),
+                moves: Vec::with_capacity(32),
+                active_day: 0,
+                active_abs_loc: 0,
+                abstract_loc_cache: Vec::with_capacity(16),
+                neighbor_indices: inputs.social_graph.neighbors[edge_start..edge_end].to_vec(),
+                edge_sim: initial_edge_sim,
+                edge_upd: init_ts_edges[edge_start..edge_end].to_vec(),
+                encounters: Vec::new(),
+                activity_counts: vec![0u32; inputs.activities.act_dur_mu.len()],
+                pending_departure: 0,
+            }
+        })
+        .collect();
+
+    for (i, agent) in agents.iter_mut().enumerate() {
+        let loc = if let Some(sl) = inputs.initial_locations.starting_locs {
+            sl[i].min(n_locations - 1)
+        } else {
+            pick_starting_loc(
+                inputs.locations.relevances,
+                &mut par_data[i].rng,
+                inputs.initial_locations.starting_locs_mode_relevance,
+            )
+        };
+        agent.current_location = loc;
+        agent.home_location = loc;
+        if i < inputs.initial_locations.work_tiles.len() {
+            agent.work_location = Some(inputs.initial_locations.work_tiles[i].min(n_locations - 1));
+        }
+        agent.visit(loc);
+    }
+
+    let mut output = TripOutputBuffers::with_initial_agents(
+        &agents,
+        inputs.locations.lats,
+        inputs.locations.lngs,
+        inputs.params.start_ts,
+    );
+
+    if activities_on {
+        for (i, data) in par_data.iter_mut().enumerate().take(inputs.params.n_agents) {
+            let AgentParData {
+                activity_counts,
+                rng,
+                pending_departure,
+                ..
+            } = data;
+            let (act_idx, dur) =
+                sample_activity_and_duration(i, 0, activity_counts, rng, &inputs.activities);
+            output.activity[output.last_output_idx[i]] = act_idx;
+            *pending_departure = inputs.params.start_ts + dur;
+        }
+    }
+
+    let mut commit_buf: Vec<(i64, usize, usize, i32)> = Vec::new();
+    let mut window_start = inputs.params.start_ts;
+    while window_start < inputs.params.end_ts {
+        let window_end =
+            (window_start + inputs.params.indipendency_window_s).min(inputs.params.end_ts);
+
+        par_data.par_iter_mut().enumerate().for_each(|(a, data)| {
+            while let Some(ts) = data.diary.current_ts(inputs.diary.timestamps) {
+                if ts >= window_end {
+                    break;
+                }
+                let day = (ts - inputs.params.start_ts).div_euclid(86_400);
+                if day != data.active_day {
+                    data.active_day = day;
+                    data.abstract_loc_cache.clear();
+                    if data.active_abs_loc != 0 {
+                        data.active_abs_loc = i32::MIN;
+                    }
+                }
+
+                let abstract_loc = data
+                    .diary
+                    .current_abstract_location(inputs.diary.abstract_locations);
+                if abstract_loc != data.active_abs_loc {
+                    let loc = if abstract_loc == 0 {
+                        agents[a].home_location
+                    } else if let Some((_, loc)) = data
+                        .abstract_loc_cache
+                        .iter()
+                        .find(|&&(cached_abs, _)| cached_abs == abstract_loc)
+                    {
+                        *loc
+                    } else {
+                        let loc = choose_location_local(LocationChoiceContext {
+                            agent: a,
+                            agents: &agents,
+                            diary: &data.diary,
+                            neighbor_indices: &data.neighbor_indices,
+                            edge_sim: &mut data.edge_sim,
+                            edge_upd: &mut data.edge_upd,
+                            rng: &mut data.rng,
+                            params: &inputs.params,
+                            n_locations,
+                            current_ts: ts,
+                            locations: &inputs.locations,
+                            od_rows: od_rows.as_ref(),
+                            diary_abs_locs: inputs.diary.abstract_locations,
+                            scratch: &mut data.scratch,
+                            encounters: &mut data.encounters,
+                        });
+                        data.abstract_loc_cache.push((abstract_loc, loc));
+                        loc
+                    };
+                    data.active_abs_loc = abstract_loc;
+                    data.moves.push((loc, ts, abstract_loc));
+                }
+                data.diary
+                    .advance(inputs.diary.timestamps, inputs.params.end_ts);
+            }
+        });
+
+        commit_buf.clear();
+        for (a, data) in par_data.iter_mut().enumerate() {
+            for &(loc, ts, abs_loc) in &data.moves {
+                commit_buf.push((ts, a, loc, abs_loc));
+            }
+            data.moves.clear();
+        }
+        commit_buf.sort_unstable_by_key(|&(ts, a, _, _)| (ts, a));
+        for &(ts, a, loc, abstract_loc) in &commit_buf {
+            let pending_departure = if activities_on {
+                par_data[a].pending_departure
+            } else {
+                0
+            };
+            par_data[a].pending_departure = 0;
+            append_trip_record(
+                TripAppendContext {
+                    agent_idx: a,
+                    next_loc: loc,
+                    ts,
+                    lats: inputs.locations.lats,
+                    lngs: inputs.locations.lngs,
+                    car_speed_kmh: inputs.params.car_speed_kmh,
+                    slot_seconds: inputs.params.slot_seconds,
+                    pending_departure,
+                },
+                &mut output,
+                &mut agents,
+            );
+            if activities_on {
+                let new_arr = output.arrival[output.last_output_idx[a]];
+                let new_idx = output.last_output_idx[a];
+                let AgentParData {
+                    ref mut activity_counts,
+                    ref mut rng,
+                    ref mut pending_departure,
+                    ..
+                } = par_data[a];
+                let (act_idx, dur) = sample_activity_and_duration(
+                    a,
+                    abstract_loc,
+                    activity_counts,
+                    rng,
+                    &inputs.activities,
+                );
+                output.activity[new_idx] = act_idx;
+                *pending_departure = new_arr + dur;
+            }
+        }
+
+        window_start = window_end;
+    }
+
+    for &idx in &output.last_output_idx {
+        output.departure[idx] = inputs.params.end_ts.max(output.arrival[idx]);
+    }
+
+    let mut enc_agent: Vec<i64> = Vec::new();
+    let mut enc_contact: Vec<i64> = Vec::new();
+    let mut enc_tile: Vec<i64> = Vec::new();
+    let mut enc_ts: Vec<i64> = Vec::new();
+    for data in &par_data {
+        for e in &data.encounters {
+            enc_agent.push(e.agent as i64 + 1);
+            enc_contact.push(e.contact as i64 + 1);
+            enc_tile.push(e.tile as i64);
+            enc_ts.push(e.ts);
+        }
+    }
+
+    Ok(output.into_output(enc_agent, enc_contact, enc_tile, enc_ts))
+}
