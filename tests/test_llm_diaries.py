@@ -83,6 +83,20 @@ def test_parse_valid_openai_compatible_response():
     assert batch.diaries[0].episodes[0].purpose == "HOME"
 
 
+def test_obsolete_diary_fields_are_ignored_and_not_serialized():
+    payload = _batch()
+    payload["diaries"][0]["description"] = "obsolete top-level diary text"
+    payload["diaries"][0]["episodes"][0]["duration_minutes"] = None
+    payload["diaries"][0]["episodes"][0]["notes"] = "obsolete episode text"
+
+    batch = parse_diary_response(_chat(payload))
+    dumped = batch.model_dump()
+
+    assert "description" not in dumped["diaries"][0]
+    assert "duration_minutes" not in dumped["diaries"][0]["episodes"][0]
+    assert "notes" not in dumped["diaries"][0]["episodes"][0]
+
+
 def test_parse_single_diary_response_accepts_fenced_json():
     payload = {
         "choices": [
@@ -313,8 +327,11 @@ def test_fetch_diary_batch_calls_llm_once_per_diary(monkeypatch, tmp_path):
         "sigma": 0.5,
         "max_locations": 6,
     }
-    assert (tmp_path / "raw_response_001.json").exists()
-    assert (tmp_path / "prompt_001.txt").exists()
+    assert not (tmp_path / "raw_response.json").exists()
+    assert not (tmp_path / "raw_response_001.json").exists()
+    assert not (tmp_path / "prompt.txt").exists()
+    assert not (tmp_path / "prompt_001.txt").exists()
+    assert (tmp_path / "validated_diaries.json").exists()
 
 
 def test_one_location_diary_retries_until_home_only(monkeypatch, tmp_path):

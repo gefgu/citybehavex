@@ -39,10 +39,7 @@ def diary_to_text(diary: Diary) -> str:
     Episodes are already validated to be ordered and gap-free, so the natural
     order is stable and a good basis for a content-addressed cache key.
     """
-    parts = [
-        f"{ep.start}-{ep.end if ep.end is not None else f'+{ep.duration_minutes}m'} {ep.purpose}"
-        for ep in diary.episodes
-    ]
+    parts = [f"{ep.start}-{ep.end} {ep.purpose}" for ep in diary.episodes]
     return " | ".join(parts)
 
 
@@ -59,7 +56,7 @@ def diary_to_prose(diary: Diary) -> str:
     )
     away_episodes = [ep for ep in diary.episodes if ep.purpose != "HOME"]
     away_parts = [
-        f"{ep.purpose.lower()} from {ep.start} to {ep.end if ep.end is not None else f'+{ep.duration_minutes}m'}"
+        f"{ep.purpose.lower()} from {ep.start} to {ep.end}"
         for ep in away_episodes
     ]
     home_hours = home_minutes // 60
