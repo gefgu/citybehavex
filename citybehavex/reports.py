@@ -737,7 +737,7 @@ def generate_comparison_report(
     typer.echo("Computing Common Part of Commuters ...")
     cpc_rows = _common_part_of_commuters(traj, real_traj)
 
-    # Dwell time = time spent at a location. The synthetic trip-DITRAS records this
+    # Dwell time = time spent at a location. The synthetic simulation records this
     # directly as departure - arrival (`dwell_minutes`); otherwise fall back to
     # inter-event gaps. The observed side uses the real stay-duration column when
     # present (NOT inter-event gaps, which on a sparse visit table span days).

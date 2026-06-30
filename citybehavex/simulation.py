@@ -18,9 +18,8 @@ from .embeddings import embed_profiles, embed_texts
 from .diaries import annotate_trajectory_purposes_ddcrp
 from .llm_diaries import DiaryBatch, LLMStats, allocate_location_counts, fetch_diary_batch
 from .schedule_ddcrp import DiaryBank, build_ddcrp_diary, build_diary_bank
+from .simulation_core import CoreTiming, simulate_agents
 from .tessellation import build_poi_tessellation, build_tessellation, purpose_distribution
-from .trip_ditras import simulate_trip_ditras
-from .trip_sts_epr import RustTiming, simulate_trip_sts_epr
 
 
 def load_or_build_tessellation(config: CityBehavExConfig) -> tuple[pd.DataFrame, str]:
@@ -212,43 +211,6 @@ def _build_schedule(
     return bank, diary_arrays, chosen, profile_embeddings
 
 
-def _run_trip_ditras(
-    config: CityBehavExConfig,
-    tessellation_df: pd.DataFrame,
-    relevance_column: str,
-    start_date: pd.Timestamp,
-    end_date: pd.Timestamp,
-    bank: DiaryBank,
-    diary_arrays: tuple,
-    chosen: np.ndarray,
-    timing: RustTiming,
-    profiles: Optional[list[AgentProfile]] = None,
-) -> tuple[skmob2.TrajDataFrame, Optional[str]]:
-    granularity = config.simulation.granularity_minutes
-    typer.echo(
-        f"Running trip-DITRAS: {config.simulation.agents} agents x {config.simulation.days} days "
-        f"@ {granularity}-min slots, {config.simulation.car_speed_kmh:.0f} km/h car "
-        f"({start_date.date()} -> {end_date.date()})"
-    )
-    df = simulate_trip_ditras(
-        tessellation_df,
-        relevance_column,
-        diary_arrays,
-        start_ts=int(start_date.timestamp()),
-        end_ts=int(end_date.timestamp()),
-        slot_seconds=granularity * 60,
-        car_speed_kmh=config.simulation.car_speed_kmh,
-        n_agents=config.simulation.agents,
-        random_state=config.simulation.random_state,
-        timing=timing,
-    )
-    df = annotate_trajectory_purposes_ddcrp(df, bank, chosen, start_date)
-    traj = skmob2.TrajDataFrame(
-        df, datetime_col="datetime", lat_col="lat", lng_col="lng", uid_col="uid"
-    )
-    return traj, "purpose"
-
-
 def _build_activity_data(
     config: CityBehavExConfig,
 ) -> tuple[Optional[np.ndarray], Optional[np.ndarray], Optional[np.ndarray], Optional[np.ndarray], Optional[np.ndarray]]:
@@ -269,7 +231,7 @@ def _build_activity_data(
     return act_embs, act_dur_mu, act_dur_sigma, purpose_act_starts, purpose_acts
 
 
-def _run_trip_sts_epr(
+def _run_simulation_core(
     config: CityBehavExConfig,
     tessellation_df: pd.DataFrame,
     relevance_column: str,
@@ -278,13 +240,13 @@ def _run_trip_sts_epr(
     bank: DiaryBank,
     diary_arrays: tuple,
     chosen: np.ndarray,
-    timing: RustTiming,
+    timing: CoreTiming,
     profiles: Optional[list[AgentProfile]] = None,
     profile_embeddings: Optional[np.ndarray] = None,
 ) -> tuple[skmob2.TrajDataFrame, Optional[str]]:
     granularity = config.simulation.granularity_minutes
     typer.echo(
-        f"Running trip-STS-EPR: {config.simulation.agents} agents x {config.simulation.days} days "
+        f"Running simulation core: {config.simulation.agents} agents x {config.simulation.days} days "
         f"@ {granularity}-min slots, {config.simulation.car_speed_kmh:.0f} km/h car "
         f"({start_date.date()} -> {end_date.date()})"
     )
@@ -299,7 +261,7 @@ def _run_trip_sts_epr(
         else None
     )
     act_embs, act_dur_mu, act_dur_sigma, purpose_act_starts, purpose_acts = _build_activity_data(config)
-    df, encounters = simulate_trip_sts_epr(
+    df, encounters = simulate_agents(
         tessellation_df,
         relevance_column,
         diary_arrays,
@@ -365,7 +327,7 @@ def run_simulation(config: CityBehavExConfig) -> skmob2.TrajDataFrame:
     start_date, end_date = simulation_dates(config)
     profiles = maybe_build_profiles(config, tessellation_df, relevance_column)
     diary_result = maybe_build_diaries(config, tessellation_df)
-    rust_timing = RustTiming()
+    core_timing = CoreTiming()
 
     if diary_result is None:
         traj, synth_activity_col = _run_density_epr(
@@ -379,34 +341,20 @@ def run_simulation(config: CityBehavExConfig) -> skmob2.TrajDataFrame:
         bank, diary_arrays, chosen, profile_embeddings = _build_schedule(
             config, diary_batches, start_date, profiles=profiles
         )
-        if config.simulation.model == "ditras":
-            traj, synth_activity_col = _run_trip_ditras(
-                config,
-                tessellation_df,
-                relevance_column,
-                start_date,
-                end_date,
-                bank,
-                diary_arrays,
-                chosen,
-                rust_timing,
-                profiles=profiles,
-            )
-        else:
-            traj, synth_activity_col = _run_trip_sts_epr(
-                config,
-                tessellation_df,
-                relevance_column,
-                start_date,
-                end_date,
-                bank,
-                diary_arrays,
-                chosen,
-                rust_timing,
-                profiles=profiles,
-                profile_embeddings=profile_embeddings,
-            )
-        typer.echo(f"Rust simulation phase: {rust_timing.seconds:.2f}s")
+        traj, synth_activity_col = _run_simulation_core(
+            config,
+            tessellation_df,
+            relevance_column,
+            start_date,
+            end_date,
+            bank,
+            diary_arrays,
+            chosen,
+            core_timing,
+            profiles=profiles,
+            profile_embeddings=profile_embeddings,
+        )
+        typer.echo(f"Rust simulation phase: {core_timing.seconds:.2f}s")
 
     traj.df.to_parquet(config.simulation.output, index=False)
     typer.echo(

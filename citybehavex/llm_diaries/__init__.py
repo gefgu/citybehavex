@@ -9,8 +9,7 @@ from .cache import (
     load_validated_diary_cache,
     save_validated_diary_cache,
 )
-from .client import OpenAICompatibleDiaryClient
-from .distribution import allocate_location_counts, lognormal_location_probabilities
+from citybehavex.math import allocate_location_counts, lognormal_location_probabilities
 from .generator import fetch_diary_batch as _fetch_diary_batch
 from .models import (
     ChatChoice,
@@ -44,6 +43,14 @@ def fetch_diary_batch(*args, **kwargs):
     """Compatibility wrapper that keeps ``citybehavex.llm_diaries.requests`` patchable."""
     kwargs.setdefault("requests_module", requests)
     return _fetch_diary_batch(*args, **kwargs)
+
+
+def __getattr__(name: str):
+    if name == "OpenAICompatibleDiaryClient":
+        from citybehavex.llm import OpenAICompatibleDiaryClient
+
+        return OpenAICompatibleDiaryClient
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 __all__ = [

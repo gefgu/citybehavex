@@ -20,6 +20,7 @@ import pandas as pd
 from pydantic import BaseModel, ConfigDict
 
 from .config import AgentProfilesConfig
+from .math import sample_beta_scaled_ints, sample_multinomial_index, sample_weighted_indices
 
 # ---------------------------------------------------------------------------
 # Category labels (ordered to match config weight lists)
@@ -122,26 +123,6 @@ def profile_to_narrative(profile: AgentProfile) -> str:
 # ---------------------------------------------------------------------------
 
 
-def _sample_multinomial(weights: list[float], rng: np.random.Generator) -> int:
-    """Sample one category index from unnormalized weights."""
-    w = np.asarray(weights, dtype=float)
-    w = w / w.sum()
-    return int(rng.choice(len(w), p=w))
-
-
-def _sample_tiles_weighted(
-    relevances: np.ndarray,
-    n: int,
-    rng: np.random.Generator,
-) -> np.ndarray:
-    """Sample ``n`` tile indices weighted by ``relevances``."""
-    total = relevances.sum()
-    if total <= 0:
-        return rng.integers(0, len(relevances), size=n)
-    probs = relevances / total
-    return rng.choice(len(relevances), size=n, p=probs)
-
-
 def generate_profiles(
     n: int,
     config: AgentProfilesConfig,
@@ -168,20 +149,26 @@ def generate_profiles(
     # Home tiles: uniform
     home_tiles = rng.integers(0, n_tiles, size=n)
     # Work tiles: relevance-weighted
-    work_tiles = _sample_tiles_weighted(rel_vals, n, rng)
+    work_tiles = sample_weighted_indices(rel_vals, n, rng)
 
     # Gender
     genders = rng.integers(0, 2, size=n)  # 0=female, 1=male
 
     # Age: Beta(a, b) scaled to [age_min, age_max]
-    raw_beta = rng.beta(config.age_beta_a, config.age_beta_b, size=n)
-    ages = (raw_beta * (config.age_max - config.age_min) + config.age_min).astype(int)
+    ages = sample_beta_scaled_ints(
+        config.age_beta_a,
+        config.age_beta_b,
+        config.age_min,
+        config.age_max,
+        n,
+        rng,
+    )
 
     # Education, health, household, job — each independently multinomial
-    educations = [_sample_multinomial(config.education_weights, rng) for _ in range(n)]
-    healths = [_sample_multinomial(config.health_weights, rng) for _ in range(n)]
-    households = [_sample_multinomial(config.household_weights, rng) for _ in range(n)]
-    jobs = [_sample_multinomial(config.job_weights, rng) for _ in range(n)]
+    educations = [sample_multinomial_index(config.education_weights, rng) for _ in range(n)]
+    healths = [sample_multinomial_index(config.health_weights, rng) for _ in range(n)]
+    households = [sample_multinomial_index(config.household_weights, rng) for _ in range(n)]
+    jobs = [sample_multinomial_index(config.job_weights, rng) for _ in range(n)]
 
     # Transport modes (independent Bernoulli from config probabilities)
     has_car = rng.random(n) < config.car_probability

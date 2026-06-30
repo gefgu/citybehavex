@@ -6,10 +6,9 @@ import requests
 from pydantic import ValidationError
 
 from citybehavex.config import LLMConfig
+from citybehavex.math import allocate_location_counts
 
 from .cache import apply_variant, cache_path, load_cache_with_fallback, save_validated_diary_cache
-from .client import OpenAICompatibleDiaryClient
-from .distribution import allocate_location_counts
 from .models import Diary, DiaryBatch, DiaryValidationError, LLMStats, LocationCountDistribution
 from .parsing import parse_single_diary_response
 from .prompts import build_single_diary_prompt
@@ -69,6 +68,8 @@ def fetch_diary_batch(
             )
         except DiaryValidationError:
             pass  # No usable cache (missing or config changed) -> generate below.
+
+    from citybehavex.llm import OpenAICompatibleDiaryClient
 
     client = OpenAICompatibleDiaryClient(config, requests_module=requests_module)
     try:

@@ -1,7 +1,4 @@
-//! Trip-duration-aware STS-EPR.
-//!
-//! This ports `skmob2_core::models::sts_epr` into the citybehavex extension and
-//! adds the same trip-duration stay emission used by trip-DITRAS.
+//! CityBehavEx simulation core with social exploration and trip-duration stay emission.
 
 use numpy::{IntoPyArray, PyArray1, PyReadonlyArray1};
 use pyo3::exceptions::PyValueError;
@@ -276,7 +273,7 @@ fn make_individual_return(
     }
 }
 
-fn sts_epr_exploration(
+fn social_exploration(
     agent: usize,
     agents: &[AgentState],
     distances: &[f64],
@@ -527,11 +524,11 @@ fn choose_location_local(
         if social {
             social_action!(SocialMode::Exploration)
                 .or_else(|| {
-                    sts_epr_exploration(agent, agents, distances, od_rows, relevances, n_locations, rng, scratch)
+                    social_exploration(agent, agents, distances, od_rows, relevances, n_locations, rng, scratch)
                 })
                 .or_else(|| make_individual_return(agent, agents, rng, scratch))
         } else {
-            sts_epr_exploration(agent, agents, distances, od_rows, relevances, n_locations, rng, scratch)
+            social_exploration(agent, agents, distances, od_rows, relevances, n_locations, rng, scratch)
                 .or_else(|| social_action!(SocialMode::Exploration))
                 .or_else(|| make_individual_return(agent, agents, rng, scratch))
         }
@@ -539,13 +536,13 @@ fn choose_location_local(
         social_action!(SocialMode::Return)
             .or_else(|| make_individual_return(agent, agents, rng, scratch))
             .or_else(|| {
-                sts_epr_exploration(agent, agents, distances, od_rows, relevances, n_locations, rng, scratch)
+                social_exploration(agent, agents, distances, od_rows, relevances, n_locations, rng, scratch)
             })
     } else {
         make_individual_return(agent, agents, rng, scratch)
             .or_else(|| social_action!(SocialMode::Return))
             .or_else(|| {
-                sts_epr_exploration(agent, agents, distances, od_rows, relevances, n_locations, rng, scratch)
+                social_exploration(agent, agents, distances, od_rows, relevances, n_locations, rng, scratch)
             })
     };
 
@@ -635,7 +632,7 @@ fn append_trip_record(
 }
 
 #[allow(clippy::too_many_arguments)]
-fn simulate_trip_sts_epr_impl(
+fn simulate_core_impl(
     lats: &[f64],
     lngs: &[f64],
     relevances: &[f64],
@@ -998,7 +995,7 @@ fn simulate_trip_sts_epr_impl(
     profile_embs=None, emb_dim=0usize,
     act_kappa=1.0f64, act_temp=0.5f64
 ))]
-pub fn trip_sts_epr_simulate_agents<'py>(
+pub fn simulation_core_simulate_agents<'py>(
     py: Python<'py>,
     latitudes: PyReadonlyArray1<'py, f64>,
     longitudes: PyReadonlyArray1<'py, f64>,
@@ -1116,7 +1113,7 @@ pub fn trip_sts_epr_simulate_agents<'py>(
 
     let (out_agents, out_lats, out_lngs, out_arr, out_dep, out_dur,
          enc_agent, enc_contact, enc_tile, enc_ts, out_activity) =
-        simulate_trip_sts_epr_impl(
+        simulate_core_impl(
             lats, lngs, rels, dists,
             &ns, &nb, eps,
             dt_raw, da_raw, &ds, &de,

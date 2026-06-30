@@ -10,10 +10,9 @@ tessellation:
   output: data/gparis_poi_tessellation.parquet
 
 simulation:
-  model: sts_epr
   agents: 500
   days: 7
-  output: data/gparis_sts_epr_trajectories.parquet
+  output: data/gparis_simulation_core_trajectories.parquet
   random_state: 42
   relevance_column: relevance
   granularity_minutes: 15   # schedule slot length (5, 15, or 60)
@@ -70,4 +69,4 @@ profiles:
 comparison:
   path: data/gparis_visitation_df.parquet
   label: gparis
-  html: data/gparis_sts_epr_comparison.html
+  html: data/gparis_simulation_core_comparison.html

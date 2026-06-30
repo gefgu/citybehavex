@@ -1,11 +1,11 @@
 # CityBehavEx
 
 CityBehavEx ships a small Rust extension (`citybehavex._core`, built with maturin)
-that implements trip-duration-aware STS-EPR by default: agents follow a sub-hourly
-Markov schedule (5/15-min slots, weekday/weekend chains), social/EPR logic chooses
+that implements the project simulation core: agents follow a sub-hourly Markov
+schedule (5/15-min slots, weekday/weekend chains), social/EPR-style logic chooses
 locations, and a car trip-duration heuristic (`haversine / car_speed_kmh`) shifts
-arrivals and departures off the slot grid. Trip-DITRAS is still available with
-`--ditras`. The extension path-depends on the sibling `../skmob2` crate.
+arrivals and departures off the slot grid. The extension path-depends on the
+sibling `../skmob2` crate.
 
 ## Building
 
@@ -26,43 +26,37 @@ changing any `.rs` file.
 Run the configured Greater Paris simulation from the repository root:
 
 ```bash
-uv run citybehavex simulate --config configs/gparis_sts_epr.yaml
-```
-
-Run the legacy trip-DITRAS path explicitly:
-
-```bash
-uv run citybehavex simulate --config configs/gparis_sts_epr.yaml --ditras
+uv run citybehavex simulate --config configs/gparis_simulation_core.yaml
 ```
 
 LLM generation creates 30 weekday and 30 weekend diaries by default. Override
 the number, within the supported range of 10 to 30, from the CLI:
 
 ```bash
-uv run citybehavex simulate --config configs/gparis_sts_epr.yaml --diary-count 20
+uv run citybehavex simulate --config configs/gparis_simulation_core.yaml --diary-count 20
 ```
 
 Equivalently, run the package as a Python module:
 
 ```bash
-uv run python -m citybehavex simulate --config configs/gparis_sts_epr.yaml
+uv run python -m citybehavex simulate --config configs/gparis_simulation_core.yaml
 ```
 
 Generate the comparison report again from the existing data without rerunning
 the simulation:
 
 ```bash
-uv run citybehavex report --config configs/gparis_sts_epr.yaml
+uv run citybehavex report --config configs/gparis_simulation_core.yaml
 ```
 
 Paths can also be provided explicitly:
 
 ```bash
 uv run citybehavex report \
-  --synthetic data/gparis_sts_epr_trajectories.parquet \
+  --synthetic data/gparis_simulation_core_trajectories.parquet \
   --comparison data/gparis_visitation_df.parquet \
   --comparison-label gparis \
-  --output data/gparis_sts_epr_comparison.html
+  --output data/gparis_simulation_core_comparison.html
 ```
 
 ### Embedding model (ddCRP schedule selection)
