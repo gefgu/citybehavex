@@ -32,7 +32,8 @@ import pandas as pd
 from .config import EmbeddingConfig, ScheduleConfig
 from .embeddings import embed_diaries
 from .llm_diaries import Diary, DiaryBatch
-from .trip_ditras import DiaryArrays
+
+DiaryArrays = tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]
 
 # Fixed purpose→code map. HOME always stays 0 (Rust invariant).
 # WORK = 1 is reserved so Rust can pin WORK episodes to a persistent work tile.

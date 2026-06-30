@@ -9,7 +9,7 @@ from citybehavex.activities import (
     activity_duration_arrays,
     build_eligibility_csr,
 )
-from citybehavex.trip_sts_epr import simulate_trip_sts_epr
+from citybehavex.simulation_core import simulate_agents
 
 _SLOT = 900
 _SPEED = 50.0
@@ -22,7 +22,7 @@ def _run(lats, lngs, abs_locs, slot_times, *, end_ts, rho=1.0, gamma=0.21):
     ends = np.array([len(diary_ts)], dtype=np.int64)
     # Returns 11-tuple: agents, lats, lngs, arrival, departure, duration,
     #                   enc_agent, enc_contact, enc_tile, enc_ts, activity
-    return core.trip_sts_epr_simulate_agents(
+    return core.simulation_core_simulate_agents(
         np.asarray(lats, dtype=float),
         np.asarray(lngs, dtype=float),
         np.ones(len(lats), dtype=float),
@@ -49,7 +49,7 @@ def _run(lats, lngs, abs_locs, slot_times, *, end_ts, rho=1.0, gamma=0.21):
     )
 
 
-def test_sts_epr_long_trip_is_centered_on_slot_boundary():
+def test_simulation_core_long_trip_is_centered_on_slot_boundary():
     lats = [48.8566, 48.95]
     lngs = [2.3522, 2.55]
     slot_times = [0, 8 * 3600, 18 * 3600]
@@ -66,7 +66,7 @@ def test_sts_epr_long_trip_is_centered_on_slot_boundary():
     assert abs((8 * 3600 - dep[0]) - (arr[1] - 8 * 3600)) <= 1
 
 
-def test_sts_epr_short_trip_arrives_within_the_slot():
+def test_simulation_core_short_trip_arrives_within_the_slot():
     lats = [48.8566, 48.8580]
     lngs = [2.3522, 2.3540]
     slot_times = [0, 8 * 3600, 18 * 3600]
@@ -79,7 +79,7 @@ def test_sts_epr_short_trip_arrives_within_the_slot():
     assert 8 * 3600 <= arr[1] < 8 * 3600 + _SLOT
 
 
-def test_sts_epr_trip_durations_are_off_the_hourly_grid():
+def test_simulation_core_trip_durations_are_off_the_hourly_grid():
     lats = [48.8566, 48.95]
     lngs = [2.3522, 2.55]
     slot_times = [0, 8 * 3600, 18 * 3600]
@@ -88,7 +88,7 @@ def test_sts_epr_trip_durations_are_off_the_hourly_grid():
     assert any(int(a) % _SLOT != 0 for a in np.asarray(arr))
 
 
-def test_sts_epr_keeps_one_location_for_continuous_abstract_block():
+def test_simulation_core_keeps_one_location_for_continuous_abstract_block():
     lats = [48.8566, 48.8580, 48.8610, 48.8640]
     lngs = [2.3522, 2.3540, 2.3580, 2.3620]
     slot_times = [0, 8 * 3600, 8 * 3600 + _SLOT, 8 * 3600 + 2 * _SLOT, 18 * 3600]
@@ -107,7 +107,7 @@ def test_sts_epr_keeps_one_location_for_continuous_abstract_block():
     assert len(ag) == 3
 
 
-def test_sts_epr_reuses_same_day_location_for_abstract_code():
+def test_simulation_core_reuses_same_day_location_for_abstract_code():
     lats = [48.8566, 48.8580, 48.8610, 48.8640]
     lngs = [2.3522, 2.3540, 2.3580, 2.3620]
     slot_times = [
@@ -138,7 +138,7 @@ def test_sts_epr_reuses_same_day_location_for_abstract_code():
     assert out_lngs[1] == out_lngs[3]
 
 
-def test_simulate_trip_sts_epr_returns_trip_columns():
+def test_simulate_agents_returns_trip_columns():
     tess = pd.DataFrame(
         {
             "tile_id": [0, 1],
@@ -153,7 +153,7 @@ def test_simulate_trip_sts_epr_returns_trip_columns():
         np.array([0], dtype=np.int64),
         np.array([3], dtype=np.int64),
     )
-    df, encounters = simulate_trip_sts_epr(
+    df, encounters = simulate_agents(
         tess,
         "relevance",
         diary_arrays,
@@ -180,7 +180,7 @@ def test_simulate_trip_sts_epr_returns_trip_columns():
     assert pd.api.types.is_datetime64_any_dtype(df["arrival"])
 
 
-def test_simulate_trip_sts_epr_encounters_has_expected_columns():
+def test_simulate_agents_encounters_has_expected_columns():
     tess = pd.DataFrame(
         {
             "tile_id": [0, 1],
@@ -195,7 +195,7 @@ def test_simulate_trip_sts_epr_encounters_has_expected_columns():
         np.array([0, 0], dtype=np.int64),
         np.array([3, 3], dtype=np.int64),
     )
-    _, encounters = simulate_trip_sts_epr(
+    _, encounters = simulate_agents(
         tess,
         "relevance",
         diary_arrays,
@@ -233,7 +233,7 @@ def test_activity_column_present_when_enabled():
     diary_arrays = _diary_arrays_single([0, 1, 0], [0, 8 * 3600, 18 * 3600])
     act_dur_mu, act_dur_sigma = activity_duration_arrays()
     purpose_act_starts, purpose_acts = build_eligibility_csr()
-    df, _ = simulate_trip_sts_epr(
+    df, _ = simulate_agents(
         tess, "relevance", diary_arrays,
         start_ts=0, end_ts=86400,
         slot_seconds=_SLOT, car_speed_kmh=_SPEED,
@@ -257,7 +257,7 @@ def test_activity_column_absent_when_disabled():
         "relevance": [1.0, 1.0],
     })
     diary_arrays = _diary_arrays_single([0, 1, 0], [0, 8 * 3600, 18 * 3600])
-    df, _ = simulate_trip_sts_epr(
+    df, _ = simulate_agents(
         tess, "relevance", diary_arrays,
         start_ts=0, end_ts=86400,
         slot_seconds=_SLOT, car_speed_kmh=_SPEED,
@@ -284,7 +284,7 @@ def test_activities_produce_non_trivial_dwell():
     diary_arrays = _diary_arrays_single(locs, slots)
     act_dur_mu, act_dur_sigma = activity_duration_arrays()
     purpose_act_starts, purpose_acts = build_eligibility_csr()
-    df, _ = simulate_trip_sts_epr(
+    df, _ = simulate_agents(
         tess, "relevance", diary_arrays,
         start_ts=0, end_ts=3 * 86400,
         slot_seconds=_SLOT, car_speed_kmh=_SPEED,

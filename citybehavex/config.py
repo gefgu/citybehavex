@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Any, Literal, Optional
+from typing import Any, Optional
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -38,7 +38,6 @@ class SimulationConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     tessellation: Optional[str] = None
-    model: Literal["sts_epr", "ditras"] = "sts_epr"
     min_lon: Optional[float] = None
     min_lat: Optional[float] = None
     max_lon: Optional[float] = None
@@ -208,7 +207,7 @@ class AgentProfilesConfig(BaseModel):
     age, education, job, transport modes, home/work tile) before the simulation runs.
     Profile narratives are embedded and used to drive schedule selection (ddCRP) and
     the social friendship graph. When ``enabled`` is false, the simulation falls back
-    to anonymous numeric agents (DITRAS only; STS-EPR requires profiles).
+    to anonymous numeric agents.
 
     Distributions default to generic Western-European-city values. Set
     ``llm_override: true`` to have the LLM derive job/education weights from city POI

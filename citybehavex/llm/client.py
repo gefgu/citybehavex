@@ -5,8 +5,7 @@ from typing import Any
 import requests
 
 from citybehavex.config import LLMConfig
-
-from .models import DiaryValidationError, LLMStats
+from citybehavex.llm_diaries.models import DiaryValidationError, LLMStats
 
 
 class OpenAICompatibleDiaryClient:

@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Build the citybehavex Rust extension (citybehavex._core, the trip-duration-aware
-# mobility simulators) into the project virtualenv with maturin. Mirrors update_local_skmob.sh.
+# Build the citybehavex Rust extension (citybehavex._core, the simulation core)
+# into the project virtualenv with maturin. Mirrors update_local_skmob.sh.
 #
 # The extension path-depends on ../skmob2/skmob2-core with default-features = false,
 # so it does NOT pull in the C/SIMD crates (numkong/wass). If you also changed the
@@ -56,13 +56,10 @@ echo "Verifying the local citybehavex build"
 "${VENV_DIR}/bin/python" - <<'PY'
 import citybehavex._core as core
 
-if not hasattr(core, "trip_ditras_simulate_agents"):
-    raise SystemExit("citybehavex._core.trip_ditras_simulate_agents is unavailable")
-if not hasattr(core, "trip_sts_epr_simulate_agents"):
-    raise SystemExit("citybehavex._core.trip_sts_epr_simulate_agents is unavailable")
+if not hasattr(core, "simulation_core_simulate_agents"):
+    raise SystemExit("citybehavex._core.simulation_core_simulate_agents is unavailable")
 print(f"citybehavex._core: {core.__file__}")
-print("trip_ditras_simulate_agents: OK")
-print("trip_sts_epr_simulate_agents: OK")
+print("simulation_core_simulate_agents: OK")
 PY
 
 echo "Done"

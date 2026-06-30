@@ -5,27 +5,15 @@ from typer.testing import CliRunner
 from citybehavex.cli import app
 
 
-def test_simulate_defaults_to_sts_epr(monkeypatch):
+def test_simulate_runs_with_config(monkeypatch):
     captured = {}
 
     def fake_run_simulation(config):
-        captured["model"] = config.simulation.model
+        captured["agents"] = config.simulation.agents
 
     monkeypatch.setattr("citybehavex.cli.run_simulation", fake_run_simulation)
-    result = CliRunner().invoke(app, ["simulate"])
+    result = CliRunner().invoke(app, ["simulate", "--agents", "12"])
 
     assert result.exit_code == 0
-    assert captured["model"] == "sts_epr"
+    assert captured["agents"] == 12
 
-
-def test_simulate_ditras_flag_selects_ditras(monkeypatch):
-    captured = {}
-
-    def fake_run_simulation(config):
-        captured["model"] = config.simulation.model
-
-    monkeypatch.setattr("citybehavex.cli.run_simulation", fake_run_simulation)
-    result = CliRunner().invoke(app, ["simulate", "--ditras"])
-
-    assert result.exit_code == 0
-    assert captured["model"] == "ditras"

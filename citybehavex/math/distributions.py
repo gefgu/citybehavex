@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import math
 
-from .models import LocationCountDistribution
+import numpy as np
 
 
 def lognormal_location_probabilities(
@@ -11,6 +11,8 @@ def lognormal_location_probabilities(
     max_locations: int,
 ) -> dict[int, float]:
     """Return rounded log-normal probabilities truncated to ``1..max_locations``."""
+    from citybehavex.llm_diaries.models import LocationCountDistribution
+
     distribution = LocationCountDistribution(
         mu=mu,
         sigma=sigma,
@@ -58,3 +60,36 @@ def allocate_location_counts(
     for k in sorted(counts):
         out.extend([k] * counts[k])
     return out
+
+
+def sample_multinomial_index(weights: list[float], rng: np.random.Generator) -> int:
+    """Sample one category index from unnormalized weights."""
+    w = np.asarray(weights, dtype=float)
+    w = w / w.sum()
+    return int(rng.choice(len(w), p=w))
+
+
+def sample_weighted_indices(
+    weights: np.ndarray,
+    n: int,
+    rng: np.random.Generator,
+) -> np.ndarray:
+    """Sample ``n`` indices weighted by ``weights``; fall back to uniform if empty."""
+    total = weights.sum()
+    if total <= 0:
+        return rng.integers(0, len(weights), size=n)
+    probs = weights / total
+    return rng.choice(len(weights), size=n, p=probs)
+
+
+def sample_beta_scaled_ints(
+    a: float,
+    b: float,
+    low: int,
+    high: int,
+    n: int,
+    rng: np.random.Generator,
+) -> np.ndarray:
+    """Sample beta values scaled to integer range ``[low, high)``."""
+    raw = rng.beta(a, b, size=n)
+    return (raw * (high - low) + low).astype(int)

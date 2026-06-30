@@ -39,17 +39,9 @@ def test_cli_overrides_config_defaults():
     assert updated.output == "trajectories.parquet"
 
 
-def test_simulation_config_defaults_to_sts_epr():
-    assert SimulationConfig().model == "sts_epr"
-
-
-def test_simulation_config_accepts_ditras_model():
-    assert SimulationConfig(model="ditras").model == "ditras"
-
-
-def test_simulation_config_rejects_invalid_model():
+def test_simulation_config_rejects_removed_model_field():
     with pytest.raises(ValueError):
-        SimulationConfig(model="bad")
+        SimulationConfig(model="legacy")
 
 
 def test_llm_config_defaults_to_thirty_diaries():

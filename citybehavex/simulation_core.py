@@ -1,4 +1,4 @@
-"""Trip-duration-aware STS-EPR driver for citybehavex."""
+"""Project-owned simulation core driver for citybehavex."""
 
 from __future__ import annotations
 
@@ -11,15 +11,15 @@ import pandas as pd
 import citybehavex._core as _cbx_core
 
 from .social_graph import build_profile_social_graph, random_geometric_fallback
-from .trip_ditras import DiaryArrays
+from .schedule_ddcrp import DiaryArrays
 
 
 @dataclass
-class RustTiming:
+class CoreTiming:
     seconds: float = 0.0
 
 
-def simulate_trip_sts_epr(
+def simulate_agents(
     tessellation_df: pd.DataFrame,
     relevance_column: str | None,
     diary_arrays: DiaryArrays,
@@ -37,7 +37,7 @@ def simulate_trip_sts_epr(
     dt_update_mob_sim_hours: float = 24 * 7,
     indipendency_window_hours: float = 0.5,
     rsl: bool = False,
-    timing: RustTiming | None = None,
+    timing: CoreTiming | None = None,
     starting_locs: np.ndarray | None = None,
     work_tiles: np.ndarray | None = None,
     profile_embeddings: np.ndarray | None = None,
@@ -49,7 +49,7 @@ def simulate_trip_sts_epr(
     act_kappa: float = 1.0,
     act_temp: float = 0.5,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Run trip-duration-aware STS-EPR.
+    """Run the CityBehavEx simulation core.
 
     Returns:
         (trajectories_df, encounters_df) where encounters_df records
@@ -107,7 +107,7 @@ def simulate_trip_sts_epr(
     (
         agent_ids, out_lats, out_lngs, arrival, departure, trip_dur,
         enc_agent, enc_contact, enc_tile, enc_ts, out_activity,
-    ) = _cbx_core.trip_sts_epr_simulate_agents(
+    ) = _cbx_core.simulation_core_simulate_agents(
         lats,
         lngs,
         relevances,
