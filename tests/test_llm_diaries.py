@@ -5,8 +5,8 @@ import json
 import pandas as pd
 import pytest
 
-from citybehavex.config import LLMConfig
-from citybehavex.diaries import diary_batch_to_markov_training
+from citybehavex.llm import LLMConfig
+from citybehavex.llm_diaries.training import diary_batch_to_markov_training
 from citybehavex.llm_diaries import (
     Diary,
     DiaryBatch,

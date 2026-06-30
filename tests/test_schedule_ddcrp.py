@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import numpy as np
 import pandas as pd
-import pytest
 
-from citybehavex import embeddings as emb
-from citybehavex.config import EmbeddingConfig, ScheduleConfig
+from citybehavex.embedding import EmbeddingConfig
+from citybehavex.embedding import service as emb
+from citybehavex.schedules import ScheduleConfig
 from citybehavex.llm_diaries import Diary, DiaryBatch, LocationCountDistribution
-from citybehavex.schedule_ddcrp import (
+from citybehavex.schedules import (
     DiaryBank,
     build_ddcrp_diary,
     build_diary_bank,
@@ -82,7 +82,7 @@ def test_diary_to_abs_locs_leisure_code():
 
 
 def test_embed_texts_disabled_returns_none():
-    from citybehavex.embeddings import embed_texts
+    from citybehavex.embedding import embed_texts
     assert embed_texts(["hello"], EmbeddingConfig(enabled=False)) is None
 
 
@@ -92,7 +92,7 @@ def test_embed_diaries_disabled_returns_none():
 
 
 def test_embed_texts_cache_round_trip(tmp_path, monkeypatch):
-    from citybehavex.embeddings import embed_texts
+    from citybehavex.embedding import embed_texts
     calls = {"n": 0}
 
     def fake_post(base_url, model, texts, *, api_key, timeout):
@@ -137,7 +137,7 @@ def test_embed_diaries_cache_round_trip(tmp_path, monkeypatch):
 
 def test_embed_texts_returns_none_on_server_failure():
     cfg = EmbeddingConfig(base_url=None, auto_launch=False)
-    from citybehavex.embeddings import embed_texts
+    from citybehavex.embedding import embed_texts
     assert embed_texts(["hello"], cfg) is None
 
 
@@ -235,9 +235,6 @@ def test_profile_similarity_biases_selection():
         profile_embeddings=profile_embs,
     )
     weekday_cols = [d for d in range(5) if (MONDAY + pd.Timedelta(days=d)).dayofweek < 5]
-
-    work_bank_idx = set(np.flatnonzero(~bank.is_weekend[:5]).tolist())  # indices 0-4
-    leisure_bank_idx = set(np.flatnonzero(~bank.is_weekend[5:]).tolist() + list(range(5, 10)))
 
     worker_picks = chosen[0, weekday_cols]
     leisure_picks = chosen[1, weekday_cols]

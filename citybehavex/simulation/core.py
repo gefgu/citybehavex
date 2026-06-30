@@ -10,8 +10,8 @@ import pandas as pd
 
 import citybehavex._core as _cbx_core
 
-from .social_graph import build_profile_social_graph, random_geometric_fallback
-from .schedule_ddcrp import DiaryArrays
+from citybehavex.schedules import DiaryArrays
+from citybehavex.simulation.social_graph import build_profile_social_graph, random_geometric_fallback
 
 
 @dataclass

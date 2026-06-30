@@ -4,17 +4,13 @@ from typing import Optional
 
 import typer
 
-from .config import (
-    CityBehavExConfig,
-    ComparisonConfig,
-    LLMConfig,
-    SimulationConfig,
-    TessellationConfig,
-    apply_overrides,
-    load_config,
-)
+from .config import CityBehavExConfig, apply_overrides, load_config
+from .llm import LLMConfig
+from .reports import ComparisonConfig
 from .simulation import run_simulation
+from .simulation import SimulationConfig
 from .tessellation import build_poi_tessellation, build_tessellation
+from .tessellation import TessellationConfig
 
 app = typer.Typer(help="CityBehavEx - synthetic urban mobility toolkit.")
 
