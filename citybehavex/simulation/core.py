@@ -97,11 +97,18 @@ def simulate_agents(
     emb_dim = 0
     act_embs_flat: np.ndarray | None = None
     prof_embs_flat: np.ndarray | None = None
+    profile_act_sims_flat: np.ndarray | None = None
     if act_dur_mu is not None and act_embs is not None and profile_embeddings is not None:
         emb_dim = act_embs.shape[1] if act_embs.ndim == 2 else 0
         if emb_dim > 0:
             act_embs_flat = np.ascontiguousarray(act_embs.flatten(), dtype=np.float64)
             prof_embs_flat = np.ascontiguousarray(profile_embeddings.flatten(), dtype=np.float64)
+            # Precompute profile×activity cosine sims: embeddings are L2-normalized,
+            # so dot product == cosine similarity. Shape: [n_agents * n_acts].
+            profile_act_sims_flat = np.ascontiguousarray(
+                (profile_embeddings.astype(np.float64) @ act_embs.astype(np.float64).T).flatten(),
+                dtype=np.float64,
+            )
 
     start = time.perf_counter()
     (
@@ -142,6 +149,7 @@ def simulate_agents(
         emb_dim,
         float(act_kappa),
         float(act_temp),
+        profile_act_sims_flat,
     )
     elapsed = time.perf_counter() - start
     if timing is not None:

@@ -10,28 +10,18 @@ use crate::simulation_core::types::{
 fn cosine_similarity_sparse(
     a_locs: &[usize],
     a_counts: &[u32],
-    b_locs: &[usize],
+    norm_a_sq: f64,
     b_counts: &[u32],
+    norm_b_sq: f64,
 ) -> f64 {
+    if norm_a_sq == 0.0 || norm_b_sq == 0.0 {
+        return 0.0;
+    }
     let dot: f64 = a_locs
         .iter()
         .map(|&l| (a_counts[l] as f64) * (b_counts[l] as f64))
         .sum();
-    let norm_a: f64 = a_locs
-        .iter()
-        .map(|&l| (a_counts[l] as f64).powi(2))
-        .sum::<f64>()
-        .sqrt();
-    let norm_b: f64 = b_locs
-        .iter()
-        .map(|&l| (b_counts[l] as f64).powi(2))
-        .sum::<f64>()
-        .sqrt();
-    if norm_a == 0.0 || norm_b == 0.0 {
-        0.0
-    } else {
-        dot / (norm_a * norm_b)
-    }
+    dot / (norm_a_sq.sqrt() * norm_b_sq.sqrt())
 }
 
 fn cdf_sample(rng: &mut impl Rng, candidates: &[usize], cdf: &[f64]) -> usize {
@@ -73,9 +63,11 @@ fn social_exploration(
     n_locations: usize,
     rng: &mut impl Rng,
     scratch: &mut Scratch,
+    explore_cache: &mut Option<(usize, f64, Vec<usize>, Vec<f64>)>,
 ) -> Option<usize> {
     let src = agents[agent].current_location;
     let home = agents[agent].home_location;
+    let s = agents[agent].s;
     let visit_counts = &agents[agent].visit_counts;
 
     if let Some(od_rows) = od_rows {
@@ -88,6 +80,13 @@ fn social_exploration(
                     if visit_counts[loc] == 0 && loc != src && loc != home {
                         return Some(loc);
                     }
+                }
+            }
+
+            // Rejection sampling exhausted — check cache before doing O(n_locations) scan.
+            if let Some((cached_src, cached_s, ref candidates, ref cdf)) = *explore_cache {
+                if cached_src == src && (cached_s - s).abs() < 0.5 && !candidates.is_empty() {
+                    return Some(cdf_sample(rng, candidates, cdf));
                 }
             }
 
@@ -110,9 +109,12 @@ fn social_exploration(
                 }
             }
             if scratch.candidates.is_empty() {
+                *explore_cache = None;
                 return None;
             }
-            return Some(cdf_sample(rng, &scratch.candidates, &scratch.cdf));
+            let result = cdf_sample(rng, &scratch.candidates, &scratch.cdf);
+            *explore_cache = Some((src, s, scratch.candidates.clone(), scratch.cdf.clone()));
+            return Some(result);
         }
     }
 
@@ -143,7 +145,7 @@ fn social_exploration(
     Some(cdf_sample(rng, &scratch.candidates, &scratch.cdf))
 }
 
-fn update_edge_sim_local(
+pub(crate) fn update_edge_sim(
     agent: usize,
     agents: &[AgentState],
     neighbor_indices: &[usize],
@@ -158,8 +160,9 @@ fn update_edge_sim_local(
             edge_sim[i] = cosine_similarity_sparse(
                 &agents[agent].visited_locs,
                 &agents[agent].visit_counts,
-                &agents[nb].visited_locs,
+                agents[agent].norm_sq,
                 &agents[nb].visit_counts,
+                agents[nb].norm_sq,
             );
             edge_upd[i] = current_ts + dt_update_s;
         }
@@ -170,12 +173,9 @@ struct SocialActionContext<'a, R: Rng> {
     agent: usize,
     agents: &'a [AgentState],
     neighbor_indices: &'a [usize],
-    edge_sim: &'a mut [f64],
-    edge_upd: &'a mut [i64],
+    edge_sim: &'a [f64],
     mode: SocialMode,
     rng: &'a mut R,
-    current_ts: i64,
-    dt_update_s: i64,
     scratch: &'a mut Scratch,
 }
 
@@ -183,26 +183,15 @@ fn make_social_action_local<R: Rng>(ctx: SocialActionContext<'_, R>) -> Option<(
     if ctx.neighbor_indices.is_empty() {
         return None;
     }
-    update_edge_sim_local(
-        ctx.agent,
-        ctx.agents,
-        ctx.neighbor_indices,
-        ctx.edge_sim,
-        ctx.edge_upd,
-        ctx.current_ts,
-        ctx.dt_update_s,
-    );
 
-    ctx.scratch.sims.clear();
-    ctx.scratch.sims.extend_from_slice(ctx.edge_sim);
-    let contact_idx = if ctx.scratch.sims.iter().all(|&s| s == 0.0) {
-        ctx.rng.gen_range(0..ctx.scratch.sims.len())
+    let contact_idx = if ctx.edge_sim.iter().all(|&s| s == 0.0) {
+        ctx.rng.gen_range(0..ctx.edge_sim.len())
     } else {
-        let total: f64 = ctx.scratch.sims.iter().sum();
+        let total: f64 = ctx.edge_sim.iter().sum();
         let threshold = ctx.rng.gen_range(0.0_f64..1.0) * total;
         let mut cumsum = 0.0_f64;
-        let mut chosen = ctx.scratch.sims.len() - 1;
-        for (i, &w) in ctx.scratch.sims.iter().enumerate() {
+        let mut chosen = ctx.edge_sim.len() - 1;
+        for (i, &w) in ctx.edge_sim.iter().enumerate() {
             cumsum += w;
             if cumsum > threshold {
                 chosen = i;
@@ -257,8 +246,7 @@ pub(crate) struct LocationChoiceContext<'a, R: Rng> {
     pub(crate) agents: &'a [AgentState],
     pub(crate) diary: &'a DiaryState,
     pub(crate) neighbor_indices: &'a [usize],
-    pub(crate) edge_sim: &'a mut [f64],
-    pub(crate) edge_upd: &'a mut [i64],
+    pub(crate) edge_sim: &'a [f64],
     pub(crate) rng: &'a mut R,
     pub(crate) params: &'a SimulationParams,
     pub(crate) n_locations: usize,
@@ -268,6 +256,7 @@ pub(crate) struct LocationChoiceContext<'a, R: Rng> {
     pub(crate) diary_abs_locs: &'a [i32],
     pub(crate) scratch: &'a mut Scratch,
     pub(crate) encounters: &'a mut Vec<Encounter>,
+    pub(crate) explore_cache: &'a mut Option<(usize, f64, Vec<usize>, Vec<f64>)>,
 }
 
 fn social_action_for_choice<R: Rng>(
@@ -279,11 +268,8 @@ fn social_action_for_choice<R: Rng>(
         agents: ctx.agents,
         neighbor_indices: ctx.neighbor_indices,
         edge_sim: ctx.edge_sim,
-        edge_upd: ctx.edge_upd,
         mode,
         rng: ctx.rng,
-        current_ts: ctx.current_ts,
-        dt_update_s: ctx.params.dt_update_mob_sim_s,
         scratch: ctx.scratch,
     })
     .map(|(loc, contact)| {
@@ -306,6 +292,7 @@ fn exploration_for_choice<R: Rng>(ctx: &mut LocationChoiceContext<'_, R>) -> Opt
         ctx.n_locations,
         ctx.rng,
         ctx.scratch,
+        ctx.explore_cache,
     )
 }
 

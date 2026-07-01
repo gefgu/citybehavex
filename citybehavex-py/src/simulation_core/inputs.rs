@@ -54,6 +54,7 @@ pub(crate) struct ActivityInputs<'a> {
     pub(crate) purpose_act_starts: &'a [usize],
     pub(crate) purpose_acts: &'a [usize],
     pub(crate) profile_embs: &'a [f64],
+    pub(crate) profile_act_sims: &'a [f64],
     pub(crate) emb_dim: usize,
     pub(crate) kappa: f64,
     pub(crate) temperature: f64,

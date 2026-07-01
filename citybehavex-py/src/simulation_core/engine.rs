@@ -9,7 +9,7 @@ use crate::simulation_core::activity::sample_activity_and_duration;
 use crate::simulation_core::inputs::CoreInputs;
 use crate::simulation_core::outputs::{SimulationOutput, TripOutputBuffers};
 use crate::simulation_core::social::{
-    LocationChoiceContext, choose_location_local, pick_starting_loc,
+    LocationChoiceContext, choose_location_local, pick_starting_loc, update_edge_sim,
 };
 use crate::simulation_core::types::{AgentParData, AgentState, DiaryState, Scratch};
 
@@ -205,6 +205,7 @@ pub(crate) fn simulate(inputs: CoreInputs<'_>) -> Result<SimulationOutput, Strin
                 encounters: Vec::new(),
                 activity_counts: vec![0u32; inputs.activities.act_dur_mu.len()],
                 pending_departure: 0,
+                explore_cache: None,
             }
         })
         .collect();
@@ -235,15 +236,20 @@ pub(crate) fn simulate(inputs: CoreInputs<'_>) -> Result<SimulationOutput, Strin
     );
 
     if activities_on {
-        for (i, data) in par_data.iter_mut().enumerate().take(inputs.params.n_agents) {
+        for (i, data) in par_data
+            .iter_mut()
+            .enumerate()
+            .take(inputs.params.n_agents)
+        {
             let AgentParData {
                 activity_counts,
                 rng,
                 pending_departure,
+                scratch,
                 ..
             } = data;
             let (act_idx, dur) =
-                sample_activity_and_duration(i, 0, activity_counts, rng, &inputs.activities);
+                sample_activity_and_duration(i, 0, activity_counts, rng, &inputs.activities, scratch);
             output.activity[output.last_output_idx[i]] = act_idx;
             *pending_departure = inputs.params.start_ts + dur;
         }
@@ -251,7 +257,30 @@ pub(crate) fn simulate(inputs: CoreInputs<'_>) -> Result<SimulationOutput, Strin
 
     let mut commit_buf: Vec<(i64, usize, usize, i32)> = Vec::new();
     let mut window_start = inputs.params.start_ts;
+    
+    // Tracking simulation days and duration
+    let mut current_day = 0;
+    let mut day_start_instant = std::time::Instant::now();
+
+    println!(
+        "Starting simulation from {} to {} with {} agents and {} locations",
+        inputs.params.start_ts,
+        inputs.params.end_ts,
+        inputs.params.n_agents,
+        n_locations
+    );
+
     while window_start < inputs.params.end_ts {
+        // Calculate the current day based on simulated elapsed seconds (86400s in a day)
+        let simulated_day = (window_start - inputs.params.start_ts).div_euclid(86_400);
+        
+        // Print and reset timer if we've crossed into a new day
+        if simulated_day > current_day {
+            println!("Day {} simulated in {:.3?}", current_day, day_start_instant.elapsed());
+            current_day = simulated_day;
+            day_start_instant = std::time::Instant::now();
+        }
+
         let window_end =
             (window_start + inputs.params.indipendency_window_s).min(inputs.params.end_ts);
 
@@ -287,8 +316,7 @@ pub(crate) fn simulate(inputs: CoreInputs<'_>) -> Result<SimulationOutput, Strin
                             agents: &agents,
                             diary: &data.diary,
                             neighbor_indices: &data.neighbor_indices,
-                            edge_sim: &mut data.edge_sim,
-                            edge_upd: &mut data.edge_upd,
+                            edge_sim: &data.edge_sim,
                             rng: &mut data.rng,
                             params: &inputs.params,
                             n_locations,
@@ -298,6 +326,7 @@ pub(crate) fn simulate(inputs: CoreInputs<'_>) -> Result<SimulationOutput, Strin
                             diary_abs_locs: inputs.diary.abstract_locations,
                             scratch: &mut data.scratch,
                             encounters: &mut data.encounters,
+                            explore_cache: &mut data.explore_cache,
                         });
                         data.abstract_loc_cache.push((abstract_loc, loc));
                         loc
@@ -346,6 +375,7 @@ pub(crate) fn simulate(inputs: CoreInputs<'_>) -> Result<SimulationOutput, Strin
                     ref mut activity_counts,
                     ref mut rng,
                     ref mut pending_departure,
+                    ref mut scratch,
                     ..
                 } = par_data[a];
                 let (act_idx, dur) = sample_activity_and_duration(
@@ -354,14 +384,32 @@ pub(crate) fn simulate(inputs: CoreInputs<'_>) -> Result<SimulationOutput, Strin
                     activity_counts,
                     rng,
                     &inputs.activities,
+                    scratch,
                 );
                 output.activity[new_idx] = act_idx;
                 *pending_departure = new_arr + dur;
             }
         }
 
+        // Phase C: update stale edge similarities using the committed agent state.
+        // Each agent writes only its own edge_sim/edge_upd; agents is read-only.
+        par_data.par_iter_mut().enumerate().for_each(|(a, data)| {
+            update_edge_sim(
+                a,
+                &agents,
+                &data.neighbor_indices,
+                &mut data.edge_sim,
+                &mut data.edge_upd,
+                window_end,
+                inputs.params.dt_update_mob_sim_s,
+            );
+        });
+
         window_start = window_end;
     }
+
+    // Print duration for the final (potentially partial) day simulated
+    println!("Day {} simulated in {:.3?}", current_day, day_start_instant.elapsed());
 
     for &idx in &output.last_output_idx {
         output.departure[idx] = inputs.params.end_ts.max(output.arrival[idx]);

@@ -36,7 +36,7 @@ diaries:
   max_locations: 6
 
 embedding:
-  enabled: true
+  enabled: false
   model: "nomic-ai/nomic-embed-text-v1.5"
   base_url: "http://localhost:8001"
   task_prefix: "clustering: "

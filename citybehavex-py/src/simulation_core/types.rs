@@ -44,6 +44,7 @@ pub(crate) struct AgentState {
     pub(crate) visit_counts: Vec<u32>,
     pub(crate) total_visits: f64,
     pub(crate) s: f64,
+    pub(crate) norm_sq: f64,
 }
 
 impl AgentState {
@@ -56,11 +57,14 @@ impl AgentState {
             visit_counts: vec![0u32; n_locations],
             total_visits: 0.0,
             s: 0.0,
+            norm_sq: 0.0,
         }
     }
 
     pub(crate) fn visit(&mut self, loc: usize) {
-        if self.visit_counts[loc] == 0 {
+        let old = self.visit_counts[loc];
+        self.norm_sq += (2 * old + 1) as f64;
+        if old == 0 {
             self.s += 1.0;
             self.visited_locs.push(loc);
         }
@@ -72,7 +76,7 @@ impl AgentState {
 pub(crate) struct Scratch {
     pub(crate) candidates: Vec<usize>,
     pub(crate) cdf: Vec<f64>,
-    pub(crate) sims: Vec<f64>,
+    pub(crate) act_cdf: Vec<f64>,
 }
 
 impl Scratch {
@@ -80,7 +84,7 @@ impl Scratch {
         Self {
             candidates: Vec::with_capacity(200),
             cdf: Vec::with_capacity(200),
-            sims: Vec::with_capacity(64),
+            act_cdf: Vec::with_capacity(16),
         }
     }
 }
@@ -108,6 +112,9 @@ pub(crate) struct AgentParData {
     pub(crate) encounters: Vec<Encounter>,
     pub(crate) activity_counts: Vec<u32>,
     pub(crate) pending_departure: i64,
+    /// Cached CDF for gravity-exploration of unvisited tiles.
+    /// Keyed by (source_tile, s_at_build); invalidated when either changes.
+    pub(crate) explore_cache: Option<(usize, f64, Vec<usize>, Vec<f64>)>,
 }
 
 #[derive(Clone, Copy, PartialEq)]

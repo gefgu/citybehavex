@@ -1,6 +1,7 @@
 use rand::Rng;
 
 use crate::simulation_core::inputs::ActivityInputs;
+use crate::simulation_core::types::Scratch;
 
 fn sample_standard_normal(rng: &mut impl Rng) -> f64 {
     let u1: f64 = rng.gen_range(f64::MIN_POSITIVE..1.0);
@@ -14,6 +15,7 @@ pub(crate) fn sample_activity_and_duration(
     activity_counts: &mut Vec<u32>,
     rng: &mut impl Rng,
     inputs: &ActivityInputs<'_>,
+    scratch: &mut Scratch,
 ) -> (i64, i64) {
     let n_acts = inputs.act_dur_mu.len();
     if n_acts == 0 || inputs.purpose_act_starts.len() < 2 {
@@ -30,7 +32,11 @@ pub(crate) fn sample_activity_and_duration(
     }
     let eligible = &inputs.purpose_acts[act_start..act_end];
 
-    let has_embs = inputs.emb_dim > 0
+    let has_precomputed = !inputs.profile_act_sims.is_empty()
+        && inputs.profile_act_sims.len() >= (agent + 1) * n_acts;
+
+    let has_embs = !has_precomputed
+        && inputs.emb_dim > 0
         && !inputs.act_embs.is_empty()
         && !inputs.profile_embs.is_empty()
         && (agent + 1) * inputs.emb_dim <= inputs.profile_embs.len();
@@ -40,7 +46,7 @@ pub(crate) fn sample_activity_and_duration(
         &[]
     };
 
-    let mut cdf: Vec<f64> = Vec::with_capacity(eligible.len());
+    scratch.act_cdf.clear();
     let mut cumsum = 0.0_f64;
     for &a in eligible {
         let count = if a < activity_counts.len() {
@@ -48,28 +54,32 @@ pub(crate) fn sample_activity_and_duration(
         } else {
             0
         };
-        let base = if count > 0 {
-            count as f64
-        } else {
-            inputs.kappa
-        };
-        let w = if has_embs && a * inputs.emb_dim + inputs.emb_dim <= inputs.act_embs.len() {
+        let base = if count > 0 { count as f64 } else { inputs.kappa };
+        let sim = if has_precomputed {
+            inputs.profile_act_sims[agent * n_acts + a].clamp(-1.0, 1.0)
+        } else if has_embs && a * inputs.emb_dim + inputs.emb_dim <= inputs.act_embs.len() {
             let act_emb = &inputs.act_embs[a * inputs.emb_dim..(a + 1) * inputs.emb_dim];
-            let sim: f64 = prof_slice
+            prof_slice
                 .iter()
                 .zip(act_emb.iter())
                 .map(|(p, q)| p * q)
-                .sum();
-            base * (sim.clamp(-1.0, 1.0) / inputs.temperature).exp()
+                .sum::<f64>()
+                .clamp(-1.0, 1.0)
         } else {
+            f64::NAN
+        };
+        let w = if sim.is_nan() {
             base
+        } else {
+            base * (sim / inputs.temperature).exp()
         };
         cumsum += w;
-        cdf.push(cumsum);
+        scratch.act_cdf.push(cumsum);
     }
 
     let threshold = rng.gen_range(0.0..1.0) * cumsum;
-    let idx = cdf
+    let idx = scratch
+        .act_cdf
         .partition_point(|&v| v <= threshold)
         .min(eligible.len() - 1);
     let chosen = eligible[idx];
