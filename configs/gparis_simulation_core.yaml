@@ -19,7 +19,7 @@ simulation:
   car_speed_kmh: 50.0       # car speed for the trip-duration heuristic
 
 llm:
-  base_url: "http://localhost:8080"
+  base_url: "http://localhost:8081"
   api_key: "none"
   model: "Qwen/Qwen2.5-32B-Instruct-AWQ"
   diary_count: 30

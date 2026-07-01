@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Optional
 
 import requests
 
@@ -11,16 +11,22 @@ from citybehavex.llm_diaries.models import DiaryValidationError, LLMStats
 class OpenAICompatibleDiaryClient:
     """Small wrapper around the OpenAI-compatible chat endpoints used for diaries."""
 
-    def __init__(self, config: LLMConfig, *, requests_module=requests) -> None:
+    def __init__(
+        self,
+        config: LLMConfig,
+        *,
+        base_url: Optional[str] = None,
+        requests_module=requests,
+    ) -> None:
         self.config = config
         self.requests = requests_module
-        self.base_url = config.base_url.rstrip("/")
+        effective_url = (base_url or config.base_url or "").rstrip("/")
+        self.base_url = effective_url
         self.chat_url = f"{self.base_url}/v1/chat/completions"
         self.models_url = f"{self.base_url}/v1/models"
-        self.headers = {
-            "Authorization": f"Bearer {config.api_key}",
-            "Content-Type": "application/json",
-        }
+        self.headers = {"Content-Type": "application/json"}
+        if config.api_key:
+            self.headers["Authorization"] = f"Bearer {config.api_key}"
 
     def preflight(self) -> None:
         try:

@@ -21,9 +21,17 @@ class LLMConfig(BaseModel):
     prompt_path: Optional[str] = None
     raw_response_path: Optional[str] = None
     validated_diaries_path: Optional[str] = None
+    auto_launch: bool = False
+    vllm_port: int = 8080
+    vllm_startup_timeout_seconds: float = 600.0
+    vllm_extra_args: list[str] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def validate_client_fields(self) -> LLMConfig:
+        if self.auto_launch:
+            if not self.model:
+                raise ValueError("llm model must be provided when auto_launch is enabled")
+            return self
         if any([self.base_url, self.api_key, self.model]) and not all(
             [self.base_url, self.api_key, self.model]
         ):

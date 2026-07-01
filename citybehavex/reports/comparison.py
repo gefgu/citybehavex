@@ -697,9 +697,12 @@ def generate_comparison_report(
 ) -> None:
     typer.echo(f"Loading observed trajectories from {real_path} ...")
     real_df = pd.read_parquet(real_path)
+    _dt_col = detect_column(real_df, _DATETIME_CANDIDATES)
+    if _dt_col and not pd.api.types.is_datetime64_any_dtype(real_df[_dt_col]):
+        real_df[_dt_col] = pd.to_datetime(real_df[_dt_col])
     real_traj = skmob2.TrajDataFrame(
         real_df,
-        datetime_col=detect_column(real_df, _DATETIME_CANDIDATES),
+        datetime_col=_dt_col,
         lat_col=detect_column(real_df, _LAT_CANDIDATES),
         lng_col=detect_column(real_df, _LNG_CANDIDATES),
         uid_col=detect_column(real_df, _UID_CANDIDATES),
