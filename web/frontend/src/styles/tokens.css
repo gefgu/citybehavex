@@ -1,0 +1,83 @@
+/* DESIGN.md tokens mapped onto pico's theme variables.
+ * Sober editorial system: white canvas, dark ink, signature accents (coral /
+ * forest / mustard). No gradients, minimal shadows, no hover-only states. */
+
+:root {
+  /* palette */
+  --ink: #181d26;
+  --ink-active: #0d1218;
+  --body: #333840;
+  --muted: #41454d;
+  --hairline: #dddddd;
+  --canvas: #ffffff;
+  --surface-soft: #f8fafc;
+  --surface-strong: #e0e2e6;
+  --surface-dark: #181d26;
+
+  --coral: #aa2d00;
+  --forest: #0a2e0e;
+  --cream: #f5e9d4;
+  --peach: #fcab79;
+  --mint: #a8d8c4;
+  --yellow: #f4d35e;
+  --mustard: #d9a441;
+
+  --link: #1b61c9;
+  --info: #254fad;
+  --success: #006400;
+
+  /* radius */
+  --radius-xs: 2px;
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 12px;
+
+  /* spacing (4px base) */
+  --space-xxs: 4px;
+  --space-xs: 8px;
+  --space-sm: 12px;
+  --space-md: 16px;
+  --space-lg: 24px;
+  --space-xl: 32px;
+  --space-xxl: 48px;
+  --space-section: 96px;
+
+  --content-width: 1280px;
+
+  /* --- pico overrides --- */
+  --pico-font-family:
+    "Inter Display", "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --pico-font-weight: 400;
+  --pico-line-height: 1.5;
+  --pico-border-radius: var(--radius-md);
+  --pico-spacing: var(--space-md);
+
+  --pico-background-color: var(--canvas);
+  --pico-color: var(--body);
+  --pico-h1-color: var(--ink);
+  --pico-h2-color: var(--ink);
+  --pico-h3-color: var(--ink);
+  --pico-h4-color: var(--ink);
+  --pico-muted-color: var(--muted);
+  --pico-muted-border-color: var(--hairline);
+  --pico-primary: var(--ink);
+  --pico-primary-background: var(--ink);
+  --pico-primary-hover-background: var(--ink-active);
+  --pico-primary-border: var(--ink);
+  --pico-primary-hover-border: var(--ink-active);
+  --pico-primary-underline: transparent;
+  --pico-primary-inverse: #ffffff;
+  --pico-secondary: var(--muted);
+  --pico-card-background-color: var(--canvas);
+  --pico-card-border-color: var(--hairline);
+  --pico-card-box-shadow: none;
+  --pico-border-color: var(--hairline);
+  --pico-form-element-border-color: var(--hairline);
+  --pico-form-element-active-border-color: var(--info);
+}
+
+/* Display weights stay 400–500; emphasis comes from size/color, never bold. */
+h1, h2, h3, h4 {
+  font-weight: 500;
+  letter-spacing: -0.01em;
+}

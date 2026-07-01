@@ -31,3 +31,7 @@ notebooks/02_shanghai
 *.npz
 **/diary_embeddings.npz
 data/**/*.npz
+
+# web app
+node_modules/
+data/.web_cache/

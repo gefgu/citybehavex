@@ -75,6 +75,38 @@ uv run --extra embeddings vllm serve nomic-ai/nomic-embed-text-v1.5 \
 The `embeddings` extra (vLLM) is required only for serving; without a GPU set
 `embedding.enabled: false` to fall back to identity similarity.
 
+## Web app
+
+`web/` is an interactive replacement for the standalone comparison `.html`
+report: a FastAPI backend serves the comparison as JSON plot data and a
+React/Vite frontend renders it (see `web/README.md` for details). The backend
+reuses the same compute as `citybehavex report`, so the numbers match.
+
+Run the two dev servers from the repository root. Use the venv's interpreter
+directly for the backend — `uv run` would try to rebuild the Rust extension:
+
+```bash
+# backend (http://localhost:8000)
+.venv/bin/python -m uvicorn app.main:app --app-dir web/backend --reload --port 8000
+```
+
+```bash
+# frontend (http://localhost:5173, proxies /api to the backend)
+cd web/frontend
+npm install
+npm run dev
+```
+
+Then open http://localhost:5173. The Experiments page is populated from
+`configs/*.yaml`; opening a run's charts builds the payload on first request
+(large cities take a while) and caches it under `data/.web_cache/`.
+
+Node.js is provided via nvm; source it first if `node` is not on your PATH:
+
+```bash
+export NVM_DIR="$HOME/.nvm" && . "$NVM_DIR/nvm.sh"
+```
+
 ## Updating local skmob2
 
 Rebuild the sibling `../skmob2` Rust extension into this project's `.venv`:
