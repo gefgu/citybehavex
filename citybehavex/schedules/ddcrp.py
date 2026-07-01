@@ -29,6 +29,12 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 
+try:
+    from joblib import Parallel, delayed as _delayed
+    _JOBLIB_AVAILABLE = True
+except ImportError:
+    _JOBLIB_AVAILABLE = False
+
 from citybehavex.embedding import embed_diaries
 from citybehavex.embedding.config import EmbeddingConfig
 from citybehavex.llm_diaries import Diary, DiaryBatch
@@ -175,64 +181,58 @@ def build_ddcrp_diary(
 
     chosen = np.empty((n_agents, days), dtype=np.int64)
 
-    per_ts: list[np.ndarray] = []
-    per_loc: list[np.ndarray] = []
-    d_starts = np.empty(n_agents, dtype=np.int64)
-    d_ends = np.empty(n_agents, dtype=np.int64)
-    offset = 0
+    slots = days * slots_per_day
 
-    for agent in range(n_agents):
+    def _process_agent(agent: int) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         rng = np.random.default_rng(np.random.SeedSequence([int(random_state), agent]))
-
-        # Per-agent T and alpha drawn from Beta distributions.
         T_a = float(rng.beta(params.temperature_beta_a, params.temperature_beta_b))
-        T_a = max(T_a, 1e-6)  # guard against exact 0
+        T_a = max(T_a, 1e-6)
         alpha_a = float(rng.beta(params.alpha_beta_a, params.alpha_beta_b))
         alpha_a = max(alpha_a, 1e-6)
 
-        # Per-diary usage count for this agent (n_k in the formula).
         usage_counts = np.zeros(K, dtype=np.float64)
-        agent_sims = agent_diary_sim[agent]  # [K]
+        agent_sims = agent_diary_sim[agent]
 
-        agent_locs = np.empty(days * slots_per_day, dtype=np.int32)
-        agent_ts = np.empty(days * slots_per_day, dtype=np.int64)
+        agent_locs = np.empty(slots, dtype=np.int32)
+        agent_ts = np.empty(slots, dtype=np.int64)
+        agent_chosen = np.empty(days, dtype=np.int64)
 
         for d in range(days):
             is_we = bool(day_is_weekend[d])
             candidates = weekend_idx if is_we else weekday_idx
-
-            sims_k = agent_sims[candidates]  # [n_candidates]
+            sims_k = agent_sims[candidates]
             counts_k = usage_counts[candidates]
-
-            # count_k = n_k if used, else alpha_a.
             effective_counts = np.where(counts_k > 0, counts_k, alpha_a)
-            # w_k = count_k * exp(s_k / T_a)
             w = effective_counts * np.exp(sims_k / T_a)
-
             total = w.sum()
             if not np.isfinite(total) or total <= 0:
                 pick = int(candidates[rng.integers(len(candidates))])
             else:
                 pick = int(candidates[rng.choice(len(candidates), p=w / total)])
-
-            chosen[agent, d] = pick
+            agent_chosen[d] = pick
             usage_counts[pick] += 1.0
-
             base = d * slots_per_day
             agent_locs[base : base + slots_per_day] = bank.slot_locs[pick]
             agent_ts[base : base + slots_per_day] = day_ts[d] + slot_offsets
 
-        per_ts.append(agent_ts)
-        per_loc.append(agent_locs)
-        d_starts[agent] = offset
-        offset += agent_ts.size
-        d_ends[agent] = offset
+        return agent_locs, agent_ts, agent_chosen
 
-    diary_timestamps = (
-        np.concatenate(per_ts) if per_ts else np.empty(0, dtype=np.int64)
-    ).astype(np.int64)
-    diary_abs_locs = (
-        np.concatenate(per_loc) if per_loc else np.empty(0, dtype=np.int32)
-    ).astype(np.int32)
+    if _JOBLIB_AVAILABLE and n_agents > 4:
+        results = Parallel(n_jobs=-1, backend="loky")(
+            _delayed(_process_agent)(agent) for agent in range(n_agents)
+        )
+    else:
+        results = [_process_agent(agent) for agent in range(n_agents)]
+
+    diary_timestamps = np.empty(n_agents * slots, dtype=np.int64)
+    diary_abs_locs = np.empty(n_agents * slots, dtype=np.int32)
+    d_starts = np.arange(n_agents, dtype=np.int64) * slots
+    d_ends = d_starts + slots
+    for agent, (agent_locs, agent_ts, agent_chosen) in enumerate(results):
+        off = agent * slots
+        diary_abs_locs[off : off + slots] = agent_locs
+        diary_timestamps[off : off + slots] = agent_ts
+        chosen[agent] = agent_chosen
+
     diary_arrays: DiaryArrays = (diary_timestamps, diary_abs_locs, d_starts, d_ends)
     return diary_arrays, chosen

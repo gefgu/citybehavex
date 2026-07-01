@@ -24,7 +24,8 @@ use crate::simulation_core::inputs::{
     act_embs=None, act_dur_mu=None, act_dur_sigma=None,
     purpose_act_starts=None, purpose_acts=None,
     profile_embs=None, emb_dim=0usize,
-    act_kappa=1.0f64, act_temp=0.5f64
+    act_kappa=1.0f64, act_temp=0.5f64,
+    profile_act_sims=None
 ))]
 pub fn simulation_core_simulate_agents<'py>(
     py: Python<'py>,
@@ -62,6 +63,7 @@ pub fn simulation_core_simulate_agents<'py>(
     emb_dim: usize,
     act_kappa: f64,
     act_temp: f64,
+    profile_act_sims: Option<PyReadonlyArray1<'py, f64>>,
 ) -> PyResult<(
     Bound<'py, PyArray1<i64>>,
     Bound<'py, PyArray1<f64>>,
@@ -140,6 +142,11 @@ pub fn simulation_core_simulate_agents<'py>(
         Some(v) => v.as_slice()?,
         None => profile_embs_empty,
     };
+    let profile_act_sims_empty: &[f64] = &[];
+    let profile_act_sims_s = match &profile_act_sims {
+        Some(v) => v.as_slice()?,
+        None => profile_act_sims_empty,
+    };
     let purpose_act_starts_v: Vec<usize> = match &purpose_act_starts {
         Some(v) => v.as_slice()?.iter().map(|&x| x.max(0) as usize).collect(),
         None => Vec::new(),
@@ -192,6 +199,7 @@ pub fn simulation_core_simulate_agents<'py>(
             purpose_act_starts: &purpose_act_starts_v,
             purpose_acts: &purpose_acts_v,
             profile_embs: profile_embs_s,
+            profile_act_sims: profile_act_sims_s,
             emb_dim,
             kappa: act_kappa,
             temperature: act_temp,

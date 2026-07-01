@@ -1,0 +1,7 @@
+Loading cached generated tessellation from data/yjmob/yjmob_h3_tessellation.parquet ...
+Generated 100000 agent profiles
+Saved agent profiles -> data/yjmob/yjmob_agent_profiles.parquet
+LLM diary phase: 0.00s, 0 chat completion calls, 2 cached diary batches
+ddCRP schedule bank: 60 diaries (30 weekday / 30 weekend), embeddings=off (popularity CRP, no profile similarity)
+Profile embeddings unavailable — falling back to popularity CRP
+Running simulation core: 100000 agents x 75 days @ 30-min slots, 40 km/h car (2019-09-15 -> 2019-11-29)
