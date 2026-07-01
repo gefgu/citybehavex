@@ -231,6 +231,11 @@ def _build_activity_data(
     return act_embs, act_dur_mu, act_dur_sigma, purpose_act_starts, purpose_acts
 
 
+def _stamp_path(path: str, ts: str) -> str:
+    p = Path(path)
+    return str(p.with_name(f"{p.stem}_{ts}{p.suffix}"))
+
+
 def _run_simulation_core(
     config: CityBehavExConfig,
     tessellation_df: pd.DataFrame,
@@ -243,6 +248,7 @@ def _run_simulation_core(
     timing: CoreTiming,
     profiles: Optional[list[AgentProfile]] = None,
     profile_embeddings: Optional[np.ndarray] = None,
+    output_path: Optional[str] = None,
 ) -> tuple[skmob2.TrajDataFrame, Optional[str]]:
     granularity = config.simulation.granularity_minutes
     typer.echo(
@@ -284,7 +290,8 @@ def _run_simulation_core(
         act_temp=config.activities.temperature,
     )
     if len(encounters) > 0:
-        enc_path = config.simulation.output.replace(".parquet", "_encounters.parquet")
+        base = output_path or config.simulation.output
+        enc_path = base.replace(".parquet", "_encounters.parquet")
         encounters.to_parquet(enc_path, index=False)
         typer.echo(f"Saved {len(encounters):,} encounters -> {enc_path}")
     df = annotate_trajectory_purposes_ddcrp(df, bank, chosen, start_date)
@@ -323,6 +330,10 @@ def maybe_build_profiles(
 
 
 def run_simulation(config: CityBehavExConfig) -> skmob2.TrajDataFrame:
+    ts = datetime.now().strftime("%Y%m%dT%H%M%S")
+    stamped_output = _stamp_path(config.simulation.output, ts)
+    stamped_html = _stamp_path(config.comparison.html, ts)
+
     tessellation_df, relevance_column = load_or_build_tessellation(config)
     start_date, end_date = simulation_dates(config)
     profiles = maybe_build_profiles(config, tessellation_df, relevance_column)
@@ -359,13 +370,14 @@ def run_simulation(config: CityBehavExConfig) -> skmob2.TrajDataFrame:
             core_timing,
             profiles=profiles,
             profile_embeddings=profile_embeddings,
+            output_path=stamped_output,
         )
         typer.echo(f"Rust simulation phase: {core_timing.seconds:.2f}s")
 
-    traj.df.to_parquet(config.simulation.output, index=False)
+    traj.df.to_parquet(stamped_output, index=False)
     typer.echo(
         f"Saved {len(traj.df):,} records "
-        f"({traj.df[traj.uid_col].nunique()} agents) -> {config.simulation.output}"
+        f"({traj.df[traj.uid_col].nunique()} agents) -> {stamped_output}"
     )
 
     if config.comparison.path:
@@ -375,7 +387,7 @@ def run_simulation(config: CityBehavExConfig) -> skmob2.TrajDataFrame:
             traj=traj,
             real_path=config.comparison.path,
             observed_label=config.comparison.label,
-            output_path=config.comparison.html,
+            output_path=stamped_html,
             synth_activity_col=synth_activity_col,
         )
     return traj

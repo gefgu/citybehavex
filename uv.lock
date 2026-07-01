@@ -690,7 +690,7 @@ requires-dist = [
     { name = "scipy", specifier = ">=1.17.1" },
     { name = "seaborn", specifier = ">=0.13.2" },
     { name = "shapely", specifier = ">=2.1.2" },
-    { name = "skmob-vis", editable = "../skmob-viz" },
+    { name = "skmob-vis", editable = "../skmob-vis" },
     { name = "skmob2", extras = ["data", "generation", "tessellation", "diversity"], editable = "../skmob2" },
     { name = "torch", marker = "extra == 'embeddings'", specifier = "==2.6.0" },
     { name = "tqdm", specifier = ">=4.67.3" },
@@ -5575,7 +5575,7 @@ wheels = [
 [[package]]
 name = "skmob-vis"
 version = "0.1.0"
-source = { editable = "../skmob-viz" }
+source = { editable = "../skmob-vis" }
 dependencies = [
     { name = "numpy" },
     { name = "skmob2" },

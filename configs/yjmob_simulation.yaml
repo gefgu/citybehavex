@@ -18,7 +18,7 @@ simulation:
   car_speed_kmh: 40.0       # urban Japan average (mix of city and suburban roads)
 
 llm:
-  base_url: "http://localhost:8080"
+  base_url: "http://localhost:8081"
   api_key: "none"
   model: "Qwen/Qwen2.5-32B-Instruct-AWQ"
   diary_count: 30

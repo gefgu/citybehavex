@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import datetime
+from pathlib import Path
 from typing import Optional
 
 import typer
@@ -114,7 +116,10 @@ def report(
     synthetic_path = synthetic or loaded.simulation.output
     comparison_path = comparison or loaded.comparison.path
     observed_label = comparison_label or loaded.comparison.label
-    output_path = output or loaded.comparison.html
+    base_html = output or loaded.comparison.html
+    ts = datetime.now().strftime("%Y%m%dT%H%M%S")
+    p = Path(base_html)
+    output_path = str(p.with_name(f"{p.stem}_{ts}{p.suffix}"))
 
     if comparison_path is None:
         typer.echo(

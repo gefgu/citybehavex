@@ -67,4 +67,4 @@ pythonpath = ["."]
 
 [tool.uv.sources]
 skmob2 = { path = "../skmob2", editable = true }
-skmob-vis = { path = "../skmob-viz", editable = true }
+skmob-vis = { path = "../skmob-vis", editable = true }
