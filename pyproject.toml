@@ -47,6 +47,12 @@ embeddings = [
     "torch==2.6.0",
     "transformers>=4.51.1,<5.0.0",
 ]
+# Web app backend (web/backend) that serves comparison-report data as JSON for
+# the React/Vite frontend in web/frontend.
+web = [
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.32.0",
+]
 
 [project.scripts]
 citybehavex = "citybehavex.cli:app"
