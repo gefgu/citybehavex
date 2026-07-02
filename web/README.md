@@ -15,9 +15,10 @@ web/
 │   └── cache.py        on-disk payload cache keyed by input mtimes
 └── frontend/           React + Vite + TS (pico.css + DESIGN.md tokens)
     └── src/
-        ├── pages/      Home, Experiments, Charts
+        ├── pages/      Home, Experiments, Charts, Timeline
         ├── charts/     ECharts option builders + theme
-        └── components/ Layout, StvdMap (react-leaflet)
+        └── components/ Layout, StvdMap (react-leaflet), TimelineMap (mapbox-gl),
+                         AgentSidebar
 ```
 
 ## Run (development)
@@ -42,6 +43,20 @@ npm run dev
 
 Open http://localhost:5173.
 
+## Timeline view setup
+
+The timeline view (`/experiments/:id/timeline`) uses Mapbox GL JS instead of the
+free CARTO/Leaflet tiles used elsewhere in this app, since it needs GPU-accelerated
+per-agent marker updates at animation frame rate. This means it needs its own
+access token:
+
+1. Create a free account at https://account.mapbox.com and copy an access token.
+2. Create `web/frontend/.env.local` (gitignored) containing:
+   ```
+   VITE_MAPBOX_TOKEN=pk.your_token_here
+   ```
+3. Restart `npm run dev` — Vite only reads `.env*` files at startup.
+
 ## Endpoints
 
 - `GET /api/experiments[?with_summary=true]` — experiments from `configs/*.yaml`,
@@ -51,6 +66,17 @@ Open http://localhost:5173.
   comparison payload (metrics, ECDFs, mobility laws, activity, profiles, motifs,
   STVD GeoJSON). `run` defaults to the latest; results are cached under
   `data/.web_cache/`.
+- `GET /api/experiments/{id}/timeline/meta[?run=<id>]` — run's date range, bbox,
+  and data-availability flags for the timeline view.
+- `GET /api/experiments/{id}/timeline/legs?since=&until=&min_lat=&min_lng=&max_lat=&max_lng=[&run=&max_agents=2000]` —
+  agents active in a time window and map viewport, as origin/destination leg or
+  dwell segments (client interpolates positions between them). Time window is
+  capped at 6h of sim time per request; `max_agents` at 5000. Backed by a derived,
+  time-sorted "legs index" parquet cached under `data/.web_cache/timeline_legs/`
+  (built once per run, from a `LAG()` window function over the raw trajectory
+  table — expensive for the largest cities, hence cached).
+- `GET /api/experiments/{id}/timeline/agents/{uid}[?run=<id>]` — one agent's
+  profile, narrative bio, full trip history, and recent encounters.
 
 ## Production (single origin)
 

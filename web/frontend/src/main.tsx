@@ -8,6 +8,7 @@ import { Layout } from "./components/Layout";
 import { Home } from "./pages/Home";
 import { Experiments } from "./pages/Experiments";
 import { Charts } from "./pages/Charts";
+import { Timeline } from "./pages/Timeline";
 
 const router = createBrowserRouter([
   {
@@ -16,6 +17,7 @@ const router = createBrowserRouter([
       { path: "/", element: <Home /> },
       { path: "/experiments", element: <Experiments /> },
       { path: "/experiments/:id/charts", element: <Charts /> },
+      { path: "/experiments/:id/timeline", element: <Timeline /> },
       { path: "*", element: <Navigate to="/" replace /> },
     ],
   },

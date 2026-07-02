@@ -234,6 +234,116 @@ table.metrics td.unit { color: var(--muted); }
 }
 .stvd-legend span { width: 20px; height: 20px; display: block; }
 
+/* ---- timeline view ---- */
+.timeline-layout {
+  display: flex;
+  gap: var(--space-lg);
+  align-items: flex-start;
+}
+.timeline-main {
+  flex: 1;
+  min-width: 0;
+}
+.timeline-map-wrap {
+  position: relative;
+}
+.timeline-map {
+  height: 620px;
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  border: 1px solid var(--hairline);
+}
+.timeline-gl-lost {
+  position: absolute;
+  inset: var(--space-md);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: var(--space-lg);
+  background: var(--cream);
+  border: 1px solid var(--mustard);
+  border-radius: var(--radius-sm);
+  color: var(--ink);
+  font-size: 14px;
+  z-index: 5;
+}
+.timeline-controls {
+  display: flex;
+  gap: var(--space-sm);
+  align-items: center;
+  margin-bottom: var(--space-sm);
+  flex-wrap: wrap;
+}
+.timeline-controls .btn {
+  padding: 6px 16px;
+  font-size: 13px;
+}
+.timeline-clock {
+  font-family: ui-monospace, monospace;
+  font-size: 13px;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+.timeline-scrub {
+  width: 100%;
+  margin-bottom: var(--space-sm);
+}
+.timeline-legend {
+  display: flex;
+  gap: var(--space-sm);
+  flex-wrap: wrap;
+}
+.timeline-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--muted);
+}
+.timeline-legend-item i {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  display: inline-block;
+}
+.timeline-sidebar {
+  width: 340px;
+  flex-shrink: 0;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-md);
+  padding: var(--space-md);
+  background: var(--canvas);
+}
+.timeline-sidebar-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-md);
+  margin-bottom: var(--space-sm);
+}
+.timeline-sidebar-header h3 { margin: 0; }
+.agent-narrative {
+  font-size: 13px;
+  color: var(--body);
+  margin: var(--space-sm) 0;
+}
+.agent-scroll {
+  max-height: 200px;
+  overflow-y: auto;
+}
+table.agent-table {
+  width: 100%;
+  font-size: 13px;
+  border-collapse: collapse;
+}
+table.agent-table td, table.agent-table th {
+  padding: 3px 8px 3px 0;
+  text-align: left;
+  border-bottom: 1px solid var(--hairline);
+}
+table.agent-table td:first-child { color: var(--muted); }
+
 /* ---- states ---- */
 .state {
   padding: var(--space-xxl);

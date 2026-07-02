@@ -34,6 +34,10 @@ class Run:
     path: Path
     mtime: float
 
+    @property
+    def encounters_path(self) -> Path:
+        return self.path.with_name(f"{self.path.stem}_encounters{self.path.suffix}")
+
     def to_dict(self, with_summary: bool = False) -> dict[str, Any]:
         d: dict[str, Any] = {
             "run_id": self.run_id,
@@ -86,6 +90,7 @@ class Experiment:
     label: str
     synthetic_output: Optional[Path]
     observed_path: Optional[Path]
+    profiles_path: Optional[Path]
     params: dict[str, Any]
     runs: list[Run]
 
@@ -99,6 +104,7 @@ class Experiment:
                 if self.observed_path else None
             ),
             "observed_exists": bool(self.observed_path and self.observed_path.exists()),
+            "profiles_exists": bool(self.profiles_path and self.profiles_path.exists()),
             "params": self.params,
             "runs": [r.to_dict(with_summary=with_summary) for r in self.runs],
         }
@@ -118,6 +124,7 @@ def _load_experiment(config_path: Path) -> Experiment:
     cfg = load_config(str(config_path))
     synthetic_output = _resolve(cfg.simulation.output)
     observed_path = _resolve(cfg.comparison.path)
+    profiles_path = _resolve(cfg.profiles.output) if cfg.profiles.enabled else None
     params = {
         "agents": cfg.simulation.agents,
         "days": cfg.simulation.days,
@@ -131,6 +138,7 @@ def _load_experiment(config_path: Path) -> Experiment:
         label=cfg.comparison.label,
         synthetic_output=synthetic_output,
         observed_path=observed_path,
+        profiles_path=profiles_path,
         params=params,
         runs=_discover_runs(synthetic_output),
     )

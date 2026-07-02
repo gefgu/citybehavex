@@ -14,6 +14,9 @@ export const COLORS = {
   mustard: "#d9a441",
   info: "#254fad",
   cream: "#f5e9d4",
+  peach: "#fcab79",
+  mint: "#a8d8c4",
+  yellow: "#f4d35e",
 };
 
 // role -> line/marker color
@@ -36,6 +39,18 @@ export const PROFILE_COLOR: Record<string, string> = {
   Regular: COLORS.mustard,
   Routiner: COLORS.forest,
 };
+
+// purpose -> color for the timeline agent map + legend
+export const PURPOSE_COLOR: Record<string, string> = {
+  HOME: COLORS.forest,
+  WORK: COLORS.coral,
+  STUDIES: COLORS.info,
+  PURCHASE: COLORS.mustard,
+  LEISURE: COLORS.mint,
+  HEALTH: COLORS.peach,
+  OTHER: COLORS.yellow,
+};
+export const DEFAULT_PURPOSE_COLOR = COLORS.muted;
 
 const FONT = '"Inter Display", Inter, system-ui, sans-serif';
 const MONO = 'ui-monospace, "SF Mono", monospace';

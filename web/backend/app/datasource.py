@@ -16,8 +16,11 @@ import duckdb
 from .reports_bridge import detect_column
 
 
-def _quote(path: Path) -> str:
+def quote_path(path: Path) -> str:
     return str(path).replace("'", "''")
+
+
+_quote = quote_path
 
 
 def parquet_columns(path: Path) -> list[str]:
