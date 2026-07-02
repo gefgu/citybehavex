@@ -31,7 +31,7 @@ def _diary(day_id: int = 1) -> dict:
             {"start": "00:00", "end": "07:00", "purpose": "HOME"},
             {"start": "07:00", "end": "09:00", "purpose": "OTHER"},
             {"start": "09:00", "end": "17:00", "purpose": "WORK"},
-            {"start": "17:00", "end": "19:00", "purpose": "PURCHASE"},
+            {"start": "17:00", "end": "19:00", "purpose": "OTHER"},
             {"start": "19:00", "end": "24:00", "purpose": "HOME"},
         ],
     }

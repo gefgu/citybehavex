@@ -14,7 +14,7 @@ import numpy as np
 
 
 # Fixed purpose codes (matches _PURPOSE_CODE in schedule_ddcrp.py and WORK_CODE in Rust)
-N_PURPOSES = 7
+N_PURPOSES = 3
 
 # MTUS-derived activities: (name, description, mu_ln, sigma_ln, eligible_purpose_codes)
 # mu_ln / sigma_ln are parameters of LogNormal in ln(hours):
@@ -22,20 +22,20 @@ N_PURPOSES = 7
 #   duration_seconds passed to Rust = duration_hours * 3600
 _CATALOG_RAW: list[tuple[str, str, float, float, list[int]]] = [
     ("sleep",         "Sleeping or resting at home",                   2.08, 0.30, [0]),
-    ("personal_care", "Personal hygiene and grooming",                 -0.69, 0.50, [0, 5]),
+    ("personal_care", "Personal hygiene and grooming",                 -0.69, 0.50, [0, 2]),
     ("home_chores",   "Cooking, cleaning, household tasks",             0.00, 0.60, [0]),
     ("childcare",     "Looking after children at home",                 0.41, 0.70, [0]),
     ("paid_work",     "Working at the office or job site",              2.08, 0.30, [1]),
-    ("work_break",    "Short coffee or lunch break during work",       -0.69, 0.40, [1, 6]),
+    ("work_break",    "Short coffee or lunch break during work",       -0.69, 0.40, [1, 2]),
     ("study",         "Studying, attending class, or doing homework",   1.10, 0.50, [2]),
-    ("shopping",      "Grocery or retail shopping",                    -0.29, 0.50, [3]),
-    ("errands",       "Administrative tasks, pick-ups, bank errands",  -0.69, 0.50, [3, 6]),
-    ("recreation",    "Outdoor activities, parks, sightseeing",         0.69, 0.60, [4]),
-    ("social_visit",  "Meeting friends or family socially",             0.92, 0.60, [4, 0]),
-    ("sport",         "Sports, exercise, gym session",                  0.41, 0.40, [4]),
-    ("entertainment", "Cinema, theatre, concert, restaurant",           0.92, 0.50, [4]),
-    ("healthcare",    "Doctor visit, treatment, pharmacy",              0.00, 0.50, [5]),
-    ("voluntary",     "Volunteering or community activities",           0.69, 0.60, [6]),
+    ("shopping",      "Grocery or retail shopping",                    -0.29, 0.50, [2]),
+    ("errands",       "Administrative tasks, pick-ups, bank errands",  -0.69, 0.50, [2]),
+    ("recreation",    "Outdoor activities, parks, sightseeing",         0.69, 0.60, [2]),
+    ("social_visit",  "Meeting friends or family socially",             0.92, 0.60, [2, 0]),
+    ("sport",         "Sports, exercise, gym session",                  0.41, 0.40, [2]),
+    ("entertainment", "Cinema, theatre, concert, restaurant",           0.92, 0.50, [2]),
+    ("healthcare",    "Doctor visit, treatment, pharmacy",              0.00, 0.50, [2]),
+    ("voluntary",     "Volunteering or community activities",           0.69, 0.60, [2]),
 ]
 
 N_ACTIVITIES = len(_CATALOG_RAW)

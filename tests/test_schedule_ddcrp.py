@@ -54,7 +54,7 @@ def _batches(n_weekday: int = 10, n_weekend: int = 10) -> dict[str, DiaryBatch]:
         _diary(f"wd-{i:03d}", "WORK", "09:00", "17:00") for i in range(n_weekday)
     ]
     weekend = [
-        _diary(f"we-{i:03d}", "LEISURE", "12:00", "18:00") for i in range(n_weekend)
+        _diary(f"we-{i:03d}", "OTHER", "12:00", "18:00") for i in range(n_weekend)
     ]
     return {"weekday": _batch(weekday), "weekend": _batch(weekend)}
 
@@ -72,10 +72,10 @@ def test_diary_to_abs_locs_home_zero_work_one():
     assert np.all(locs[17:] == 0)   # HOME
 
 
-def test_diary_to_abs_locs_leisure_code():
-    diary = _diary("x", "LEISURE", "10:00", "18:00")
+def test_diary_to_abs_locs_other_code():
+    diary = _diary("x", "OTHER", "10:00", "18:00")
     locs = diary_to_abs_locs(diary, SLOTS, GRAN)
-    assert np.all(locs[10:18] == 4)  # LEISURE = 4 in fixed map
+    assert np.all(locs[10:18] == 2)  # OTHER = 2 in fixed map
 
 
 # --- embeddings cache + fallback -------------------------------------------
@@ -201,12 +201,12 @@ def test_diary_arrays_shapes_and_mask():
 
 def test_profile_similarity_biases_selection():
     """Agents with injected profile embeddings should prefer similar diaries."""
-    # Two diary groups: "work-heavy" (codes: WORK episodes) vs "leisure-heavy".
+    # Two diary groups: "work-heavy" (codes: WORK episodes) vs "other-heavy".
     work_diaries = [_diary(f"w-{i}", "WORK", "08:00", "18:00") for i in range(5)]
-    leisure_diaries = [_diary(f"l-{i}", "LEISURE", "10:00", "22:00") for i in range(5)]
+    other_diaries = [_diary(f"o-{i}", "OTHER", "10:00", "22:00") for i in range(5)]
     batches = {
-        "weekday": _batch(work_diaries + leisure_diaries),
-        "weekend": _batch(leisure_diaries + work_diaries),
+        "weekday": _batch(work_diaries + other_diaries),
+        "weekend": _batch(other_diaries + work_diaries),
     }
     bank = build_diary_bank(batches, EmbeddingConfig(enabled=False), GRAN)
 
@@ -226,7 +226,7 @@ def test_profile_similarity_biases_selection():
     )
 
     # "Worker" agent: embedding close to work diaries.
-    # "Leisure" agent: embedding close to leisure diaries.
+    # "Other" agent: embedding close to other diaries.
     profile_embs = np.array([[1.0, 0.0], [0.0, 1.0]], dtype=np.float32)
 
     params = ScheduleConfig(temperature_beta_a=0.5, temperature_beta_b=10.0)  # low T → sharp
@@ -237,14 +237,14 @@ def test_profile_similarity_biases_selection():
     weekday_cols = [d for d in range(5) if (MONDAY + pd.Timedelta(days=d)).dayofweek < 5]
 
     worker_picks = chosen[0, weekday_cols]
-    leisure_picks = chosen[1, weekday_cols]
+    other_picks = chosen[1, weekday_cols]
 
     # Worker agent should mostly pick work diaries (idx 0-4).
     worker_work_frac = np.mean([p < 5 for p in worker_picks])
-    leisure_leisure_frac = np.mean([p >= 5 for p in leisure_picks])
+    other_other_frac = np.mean([p >= 5 for p in other_picks])
     # With sharp temperature, similarity should dominate — expect at least 60% correct.
     assert worker_work_frac >= 0.6, f"Worker only picked work {worker_work_frac:.0%}"
-    assert leisure_leisure_frac >= 0.6, f"Leisure agent only picked leisure {leisure_leisure_frac:.0%}"
+    assert other_other_frac >= 0.6, f"Other agent only picked other {other_other_frac:.0%}"
 
 
 def test_no_profile_embeddings_uses_popularity():

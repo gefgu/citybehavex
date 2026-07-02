@@ -6,7 +6,7 @@ from typing import Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-Purpose = Literal["HOME", "WORK", "STUDIES", "PURCHASE", "LEISURE", "HEALTH", "OTHER"]
+Purpose = Literal["HOME", "WORK", "OTHER"]
 
 
 class DiaryValidationError(ValueError):

@@ -69,6 +69,7 @@ export interface TimelineSegment {
   d_lat: number;
   d_lng: number;
   purpose: string;
+  category?: string | null;
 }
 
 export interface TimelineLegsPayload {
@@ -101,6 +102,7 @@ export interface AgentTrip {
   lat: number;
   lng: number;
   purpose: string;
+  category?: string | null;
   trip_duration_minutes: number;
   dwell_minutes: number;
 }

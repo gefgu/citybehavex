@@ -11,6 +11,10 @@ _CATEGORY_CSV = Path(__file__).parents[1] / "category" / "unique_categories.csv"
 
 def load_category_mapping() -> dict[str, str]:
     mapping_df = pd.read_csv(_CATEGORY_CSV)
+    mapping_df["purpose"] = mapping_df["purpose"].where(
+        mapping_df["purpose"].eq("WORK"),
+        "OTHER",
+    )
     return dict(zip(mapping_df["primary_category"], mapping_df["purpose"]))
 
 

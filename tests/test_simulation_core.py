@@ -300,9 +300,9 @@ def test_activities_produce_non_trivial_dwell():
 
 
 def test_activities_catalog_coverage():
-    """Every purpose code 0-6 has at least one eligible activity."""
+    """Every purpose code 0-2 has at least one eligible activity."""
     purpose_act_starts, purpose_acts = build_eligibility_csr()
-    assert len(purpose_act_starts) == 8  # 7 purposes + sentinel
-    for p in range(7):
+    assert len(purpose_act_starts) == 4  # 3 purposes + sentinel
+    for p in range(3):
         n_eligible = int(purpose_act_starts[p + 1] - purpose_act_starts[p])
         assert n_eligible > 0, f"Purpose {p} has no eligible activities"

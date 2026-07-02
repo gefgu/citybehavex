@@ -5,6 +5,10 @@ function fmtDateTime(s: string): string {
   return s.replace("T", " ");
 }
 
+function fmtPurpose(purpose: string, category?: string | null): string {
+  return category ? `${purpose} · ${category}` : purpose;
+}
+
 export function AgentSidebar({
   uid,
   expId,
@@ -104,7 +108,7 @@ export function AgentSidebar({
                     {data.trips.map((t, i) => (
                       <tr key={i}>
                         <td>{fmtDateTime(t.arrival)}</td>
-                        <td>{t.purpose}</td>
+                        <td>{fmtPurpose(t.purpose, t.category)}</td>
                         <td>{t.dwell_minutes.toFixed(0)}</td>
                       </tr>
                     ))}

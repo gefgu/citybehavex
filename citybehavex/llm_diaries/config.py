@@ -14,10 +14,6 @@ class DiariesConfig(BaseModel):
         default_factory=lambda: [
             "HOME",
             "WORK",
-            "STUDIES",
-            "PURCHASE",
-            "LEISURE",
-            "HEALTH",
             "OTHER",
         ]
     )
