@@ -9,6 +9,7 @@ import typer
 from .config import CityBehavExConfig, apply_overrides, load_config
 from .llm import LLMConfig
 from .reports import ComparisonConfig
+from .roads import RoadNetworkConfig
 from .simulation import run_simulation
 from .simulation import SimulationConfig
 from .tessellation import build_poi_tessellation, build_tessellation
@@ -197,6 +198,11 @@ def simulate(
     ),
     comparison_label: Optional[str] = typer.Option(None, help="Comparison series label"),
     comparison_html: Optional[str] = typer.Option(None, help="Output comparison HTML path"),
+    enable_road_routing: Optional[bool] = typer.Option(
+        None,
+        "--enable-road-routing/--no-enable-road-routing",
+        help="Route car trips over the Overture Maps road graph instead of straight-line haversine.",
+    ),
 ):
     """Run DensityEPR fallback or config-driven simulation core."""
     loaded = load_config(config)
@@ -209,6 +215,12 @@ def simulate(
             "min_poi_count": min_poi_count,
             "poi_tessellation": poi_tessellation,
             "relevance_column": relevance_column,
+        },
+    )
+    road_network = apply_overrides(
+        loaded.road_network,
+        {
+            "enabled": enable_road_routing,
         },
     )
     sim = apply_overrides(
@@ -247,9 +259,11 @@ def simulate(
     assert isinstance(sim, SimulationConfig)
     assert isinstance(comp, ComparisonConfig)
     assert isinstance(llm, LLMConfig)
+    assert isinstance(road_network, RoadNetworkConfig)
     effective = CityBehavExConfig(
         tessellation=tess,
         simulation=sim,
+        road_network=road_network,
         llm=llm,
         diaries=loaded.diaries,
         embedding=loaded.embedding,

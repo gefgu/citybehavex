@@ -18,9 +18,15 @@ simulation:
   random_state: 42
   relevance_column: relevance
   granularity_minutes: 60
-  car_speed_kmh: 35.0        # dense Shanghai urban average
+  car_speed_kmh: 35.0        # fallback speed when road routing is disabled/unsnapped
   social_graph_k: 20
   profile_graph_exact_threshold: 10000
+
+road_network:
+  enabled: true
+  nodes_output: data/shanghai/shanghai_road_graph_nodes.parquet
+  edges_output: data/shanghai/shanghai_road_graph_edges.parquet
+  snap_output: data/shanghai/shanghai_road_graph_snap.parquet
 
 llm:
   base_url: "http://localhost:8081"
@@ -56,6 +62,12 @@ schedule:
   temperature_beta_b: 5.0
   alpha_beta_a: 2.0
   alpha_beta_b: 5.0
+
+activities:
+  enabled: true
+  kappa: 1.0
+  temperature: 0.5
+  embed_activities: false
 
 profiles:
   enabled: true

@@ -34,10 +34,44 @@ if TYPE_CHECKING:
 def legs_index_path(exp_id: str, run: "Run") -> Path:
     return get_or_build_parquet(
         "timeline_legs",
-        ("v2", exp_id, run.run_id),
+        ("v3", exp_id, run.run_id),
         run.path,
         build=lambda out: _build_legs_index(run.path, out),
     )
+
+
+def moving_index_path(exp_id: str, run: "Run") -> Path | None:
+    """Cached, (uid, stop_id, seq)-sorted copy of the run's ``_moving.parquet``.
+
+    Returns ``None`` when the run has no moving parquet (older runs, or runs
+    with road routing disabled) — callers fall back to the plain 2-point
+    straight-line leg interpolation in that case.
+    """
+    if not run.moving_path.exists():
+        return None
+    return get_or_build_parquet(
+        "timeline_moving",
+        ("v1", exp_id, run.run_id),
+        run.moving_path,
+        build=lambda out: _build_moving_index(run.moving_path, out),
+    )
+
+
+def _build_moving_index(moving_path: Path, out_path: Path) -> None:
+    con = duckdb.connect()
+    try:
+        con.execute(
+            f"""
+            COPY (
+                SELECT uid, stop_id, seq, lat, lng, t
+                FROM read_parquet('{quote_path(moving_path)}')
+                ORDER BY uid, stop_id, seq
+            )
+            TO '{quote_path(out_path)}' (FORMAT PARQUET)
+            """
+        )
+    finally:
+        con.close()
 
 
 def _parquet_columns(con: duckdb.DuckDBPyConnection, path: Path) -> set[str]:
@@ -52,13 +86,14 @@ def _build_legs_index(trajectory_path: Path, out_path: Path) -> None:
     try:
         columns = _parquet_columns(con, trajectory_path)
         category_expr = "category" if "category" in columns else "NULL::VARCHAR AS category"
+        stop_id_expr = "stop_id" if "stop_id" in columns else "NULL::BIGINT AS stop_id"
         con.execute(
             f"""
             COPY (
                 WITH ordered AS (
                     SELECT
                         uid, lat, lng, arrival, departure, trip_duration_minutes, purpose,
-                        {category_expr},
+                        {category_expr}, {stop_id_expr},
                         LAG(lat) OVER w AS o_lat,
                         LAG(lng) OVER w AS o_lng
                     FROM read_parquet('{quote_path(trajectory_path)}')
@@ -67,13 +102,15 @@ def _build_legs_index(trajectory_path: Path, out_path: Path) -> None:
                 combined AS (
                     SELECT uid, 'dwell' AS kind,
                            arrival AS t_start, departure AS t_end,
-                           lat AS o_lat, lng AS o_lng, lat AS d_lat, lng AS d_lng, purpose, category
+                           lat AS o_lat, lng AS o_lng, lat AS d_lat, lng AS d_lng, purpose, category,
+                           NULL::BIGINT AS stop_id
                     FROM ordered
                     UNION ALL
                     SELECT uid, 'leg' AS kind,
                            arrival - (trip_duration_minutes * INTERVAL '1 minute') AS t_start,
                            arrival AS t_end,
-                           o_lat, o_lng, lat AS d_lat, lng AS d_lng, purpose, category
+                           o_lat, o_lng, lat AS d_lat, lng AS d_lng, purpose, category,
+                           stop_id
                     FROM ordered
                     WHERE o_lat IS NOT NULL
                 )
@@ -121,6 +158,7 @@ def query_active_legs(
     until: datetime,
     bbox: tuple[float, float, float, float],
     max_agents: int,
+    moving_path: Path | None = None,
 ) -> tuple[list[dict[str, Any]], bool]:
     """Return (segments, truncated) for agents active in [since, until) and bbox.
 
@@ -131,6 +169,11 @@ def query_active_legs(
     Known v1 approximation: the bbox test only checks leg endpoints (origin or
     destination), not true segment-rectangle intersection — a leg that clips
     through the viewport without either endpoint inside it is missed.
+
+    When ``moving_path`` (a cached, sorted copy of the run's road-routing
+    waypoints — see ``moving_index_path``) is given, "leg"-kind segments get an
+    extra ``waypoints`` field so the frontend can animate movement along the
+    actual road path instead of a 2-point straight-line lerp.
     """
     min_lat, min_lng, max_lat, max_lng = bbox
     con = duckdb.connect()
@@ -147,7 +190,8 @@ def query_active_legs(
                 ORDER BY hash(uid)
                 LIMIT $max_agents
             )
-            SELECT l.uid, l.kind, l.t_start, l.t_end, l.o_lat, l.o_lng, l.d_lat, l.d_lng, l.purpose, l.category
+            SELECT l.uid, l.kind, l.t_start, l.t_end, l.o_lat, l.o_lng, l.d_lat, l.d_lng,
+                   l.purpose, l.category, l.stop_id
             FROM read_parquet('{quote_path(legs_path)}') l
             JOIN candidates c USING (uid)
             WHERE l.t_start <= $until AND l.t_end >= $since
@@ -171,7 +215,47 @@ def query_active_legs(
     segments = [dict(zip(cols, r)) for r in rows]
     distinct_uids = {s["uid"] for s in segments}
     truncated = len(distinct_uids) >= max_agents
+
+    if moving_path is not None:
+        _attach_waypoints(segments, moving_path)
+    for s in segments:
+        s.pop("stop_id", None)
+
     return segments, truncated
+
+
+def _attach_waypoints(segments: list[dict[str, Any]], moving_path: Path) -> None:
+    pairs = {
+        (s["uid"], s["stop_id"])
+        for s in segments
+        if s["kind"] == "leg" and s.get("stop_id") is not None
+    }
+    if not pairs:
+        return
+    values = ", ".join(f"({uid}, {stop_id})" for uid, stop_id in pairs)
+    con = duckdb.connect()
+    try:
+        rows = con.execute(
+            f"""
+            SELECT m.uid, m.stop_id, m.lat, m.lng, m.t
+            FROM read_parquet('{quote_path(moving_path)}') m
+            JOIN (VALUES {values}) AS requested(uid, stop_id)
+              ON m.uid = requested.uid AND m.stop_id = requested.stop_id
+            ORDER BY m.uid, m.stop_id, m.seq
+            """
+        ).fetchall()
+    finally:
+        con.close()
+
+    waypoints_by_key: dict[tuple[int, int], list[dict[str, Any]]] = {}
+    for uid, stop_id, lat, lng, t in rows:
+        waypoints_by_key.setdefault((uid, stop_id), []).append(
+            {"lat": lat, "lng": lng, "t": t.isoformat() if hasattr(t, "isoformat") else t}
+        )
+
+    for s in segments:
+        if s["kind"] == "leg" and s.get("stop_id") is not None:
+            s["waypoints"] = waypoints_by_key.get((s["uid"], s["stop_id"]))
 
 
 def query_agent_trips(trajectory_path: Path, uid: int) -> list[dict[str, Any]]:

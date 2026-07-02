@@ -16,6 +16,7 @@ from ..experiments import Experiment, Run, get_experiment
 from ..models import ApiResponseWrapper
 from ..timeline_data import (
     legs_index_path,
+    moving_index_path,
     query_active_legs,
     query_agent_encounters,
     query_agent_trips,
@@ -122,8 +123,9 @@ def get_timeline_legs(
         raise HTTPException(status_code=422, detail="requested window too large (max 6h of sim time per request)")
 
     legs_path = legs_index_path(exp_id, selected)
+    moving_path = moving_index_path(exp_id, selected)
     segments, truncated = query_active_legs(
-        legs_path, since, until, (min_lat, min_lng, max_lat, max_lng), max_agents
+        legs_path, since, until, (min_lat, min_lng, max_lat, max_lng), max_agents, moving_path
     )
     payload = {
         "run_id": selected.run_id,

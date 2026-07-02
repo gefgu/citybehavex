@@ -15,7 +15,13 @@ simulation:
   random_state: 42
   relevance_column: total_poi_count
   granularity_minutes: 30
-  car_speed_kmh: 40.0       # urban Japan average (mix of city and suburban roads)
+  car_speed_kmh: 40.0       # fallback speed when road routing is disabled/unsnapped
+
+road_network:
+  enabled: true
+  nodes_output: data/yjmob/yjmob_road_graph_nodes.parquet
+  edges_output: data/yjmob/yjmob_road_graph_edges.parquet
+  snap_output: data/yjmob/yjmob_road_graph_snap.parquet
 
 llm:
   base_url: "http://localhost:8081"
@@ -51,6 +57,12 @@ schedule:
   temperature_beta_b: 5.0
   alpha_beta_a: 2.0
   alpha_beta_b: 5.0
+
+activities:
+  enabled: true
+  kappa: 1.0
+  temperature: 0.5
+  embed_activities: false
 
 profiles:
   enabled: true

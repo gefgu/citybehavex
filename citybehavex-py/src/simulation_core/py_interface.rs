@@ -5,7 +5,7 @@ use pyo3::prelude::*;
 use crate::simulation_core::engine::simulate;
 use crate::simulation_core::inputs::{
     ActivityInputs, CoreInputs, DiaryInputs, InitialLocationInputs, LocationInputs,
-    SimulationParams, SocialGraphInputs,
+    RoadNetworkInputs, SimulationParams, SocialGraphInputs,
 };
 
 #[pyfunction]
@@ -25,7 +25,10 @@ use crate::simulation_core::inputs::{
     purpose_act_starts=None, purpose_acts=None,
     profile_embs=None, emb_dim=0usize,
     act_kappa=1.0f64, act_temp=0.5f64,
-    profile_act_sims=None
+    profile_act_sims=None,
+    road_edge_from=None, road_edge_to=None, road_edge_weight_ds=None,
+    road_node_lats=None, road_node_lngs=None, location_road_node=None,
+    max_leg_waypoints=16usize
 ))]
 pub fn simulation_core_simulate_agents<'py>(
     py: Python<'py>,
@@ -64,18 +67,36 @@ pub fn simulation_core_simulate_agents<'py>(
     act_kappa: f64,
     act_temp: f64,
     profile_act_sims: Option<PyReadonlyArray1<'py, f64>>,
+    road_edge_from: Option<PyReadonlyArray1<'py, i64>>,
+    road_edge_to: Option<PyReadonlyArray1<'py, i64>>,
+    road_edge_weight_ds: Option<PyReadonlyArray1<'py, i64>>,
+    road_node_lats: Option<PyReadonlyArray1<'py, f64>>,
+    road_node_lngs: Option<PyReadonlyArray1<'py, f64>>,
+    location_road_node: Option<PyReadonlyArray1<'py, i64>>,
+    max_leg_waypoints: usize,
 ) -> PyResult<(
-    Bound<'py, PyArray1<i64>>,
-    Bound<'py, PyArray1<f64>>,
-    Bound<'py, PyArray1<f64>>,
-    Bound<'py, PyArray1<i64>>,
-    Bound<'py, PyArray1<i64>>,
-    Bound<'py, PyArray1<f64>>,
-    Bound<'py, PyArray1<i64>>,
-    Bound<'py, PyArray1<i64>>,
-    Bound<'py, PyArray1<i64>>,
-    Bound<'py, PyArray1<i64>>,
-    Bound<'py, PyArray1<i64>>,
+    (
+        Bound<'py, PyArray1<i64>>,
+        Bound<'py, PyArray1<f64>>,
+        Bound<'py, PyArray1<f64>>,
+        Bound<'py, PyArray1<i64>>,
+        Bound<'py, PyArray1<i64>>,
+        Bound<'py, PyArray1<f64>>,
+        Bound<'py, PyArray1<i64>>,
+        Bound<'py, PyArray1<i64>>,
+        Bound<'py, PyArray1<i64>>,
+        Bound<'py, PyArray1<i64>>,
+        Bound<'py, PyArray1<i64>>,
+    ),
+    (
+        Bound<'py, PyArray1<i64>>,
+        Bound<'py, PyArray1<i64>>,
+        Bound<'py, PyArray1<i64>>,
+        Bound<'py, PyArray1<i32>>,
+        Bound<'py, PyArray1<f64>>,
+        Bound<'py, PyArray1<f64>>,
+        Bound<'py, PyArray1<i64>>,
+    ),
 )> {
     let lats = latitudes.as_slice()?;
     let lngs = longitudes.as_slice()?;
@@ -156,6 +177,34 @@ pub fn simulation_core_simulate_agents<'py>(
         None => Vec::new(),
     };
 
+    let road_edge_from_v: Vec<usize> = match &road_edge_from {
+        Some(v) => v.as_slice()?.iter().map(|&x| x.max(0) as usize).collect(),
+        None => Vec::new(),
+    };
+    let road_edge_to_v: Vec<usize> = match &road_edge_to {
+        Some(v) => v.as_slice()?.iter().map(|&x| x.max(0) as usize).collect(),
+        None => Vec::new(),
+    };
+    let road_edge_weight_v: Vec<usize> = match &road_edge_weight_ds {
+        Some(v) => v.as_slice()?.iter().map(|&x| x.max(0) as usize).collect(),
+        None => Vec::new(),
+    };
+    let road_node_lats_empty: &[f64] = &[];
+    let road_node_lats_s = match &road_node_lats {
+        Some(v) => v.as_slice()?,
+        None => road_node_lats_empty,
+    };
+    let road_node_lngs_empty: &[f64] = &[];
+    let road_node_lngs_s = match &road_node_lngs {
+        Some(v) => v.as_slice()?,
+        None => road_node_lngs_empty,
+    };
+    let location_road_node_empty: &[i64] = &[];
+    let location_road_node_s = match &location_road_node {
+        Some(v) => v.as_slice()?,
+        None => location_road_node_empty,
+    };
+
     let output = simulate(CoreInputs {
         locations: LocationInputs {
             lats,
@@ -204,20 +253,40 @@ pub fn simulation_core_simulate_agents<'py>(
             kappa: act_kappa,
             temperature: act_temp,
         },
+        road_network: RoadNetworkInputs {
+            edge_from: &road_edge_from_v,
+            edge_to: &road_edge_to_v,
+            edge_weight_ds: &road_edge_weight_v,
+            node_lats: road_node_lats_s,
+            node_lngs: road_node_lngs_s,
+            location_node: location_road_node_s,
+            max_leg_waypoints,
+        },
     })
     .map_err(PyValueError::new_err)?;
 
     Ok((
-        output.agents.into_pyarray(py),
-        output.lats.into_pyarray(py),
-        output.lngs.into_pyarray(py),
-        output.arrival.into_pyarray(py),
-        output.departure.into_pyarray(py),
-        output.duration.into_pyarray(py),
-        output.encounter_agent.into_pyarray(py),
-        output.encounter_contact.into_pyarray(py),
-        output.encounter_tile.into_pyarray(py),
-        output.encounter_ts.into_pyarray(py),
-        output.activity.into_pyarray(py),
+        (
+            output.agents.into_pyarray(py),
+            output.lats.into_pyarray(py),
+            output.lngs.into_pyarray(py),
+            output.arrival.into_pyarray(py),
+            output.departure.into_pyarray(py),
+            output.duration.into_pyarray(py),
+            output.encounter_agent.into_pyarray(py),
+            output.encounter_contact.into_pyarray(py),
+            output.encounter_tile.into_pyarray(py),
+            output.encounter_ts.into_pyarray(py),
+            output.activity.into_pyarray(py),
+        ),
+        (
+            output.stop_id.into_pyarray(py),
+            output.path_agent.into_pyarray(py),
+            output.path_stop_id.into_pyarray(py),
+            output.path_seq.into_pyarray(py),
+            output.path_lat.into_pyarray(py),
+            output.path_lng.into_pyarray(py),
+            output.path_t.into_pyarray(py),
+        ),
     ))
 }

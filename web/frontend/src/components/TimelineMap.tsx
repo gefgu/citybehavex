@@ -21,6 +21,12 @@ const SPEED_OPTIONS = [1, 10, 60, 300];
 // combinations (e.g. NVIDIA + DMABUF on Linux Firefox, a known upstream bug).
 const RENDER_INTERVAL_MS = 1000 / 15;
 
+interface Waypoint {
+  t: number;
+  lat: number;
+  lng: number;
+}
+
 interface Seg {
   kind: "dwell" | "leg";
   t_start: number;
@@ -30,6 +36,7 @@ interface Seg {
   d_lat: number;
   d_lng: number;
   purpose: string;
+  waypoints?: Waypoint[];
 }
 
 type AgentFeatureCollection = FeatureCollection<Point, { uid: number; purpose: string }>;
@@ -61,6 +68,16 @@ function formatClock(ms: number): string {
   )}:${pad2(d.getSeconds())}`;
 }
 
+// Finds the two waypoints bracketing `t` (or the closest pair at either end
+// if `t` falls outside the path's own time range). Waypoint counts per leg
+// are small (capped server-side), so a linear scan is plenty.
+function bracketWaypoints(waypoints: Waypoint[], t: number): [Waypoint, Waypoint] {
+  for (let i = 0; i < waypoints.length - 1; i++) {
+    if (t <= waypoints[i + 1].t) return [waypoints[i], waypoints[i + 1]];
+  }
+  return [waypoints[waypoints.length - 2], waypoints[waypoints.length - 1]];
+}
+
 function findActiveSegment(segs: Seg[], t: number): Seg | undefined {
   for (let i = segs.length - 1; i >= 0; i--) {
     const s = segs[i];
@@ -81,6 +98,7 @@ function mergeSegments(target: Map<number, Seg[]>, raw: TimelineSegment[]) {
       d_lat: s.d_lat,
       d_lng: s.d_lng,
       purpose: s.purpose,
+      waypoints: s.waypoints?.map((w) => ({ t: parseSimTime(w.t), lat: w.lat, lng: w.lng })),
     };
     const list = byUid.get(s.uid) ?? [];
     list.push(seg);
@@ -108,10 +126,11 @@ function pruneSegments(target: Map<number, Seg[]>, olderThanMs: number) {
 
 // Renders the agent map for a timeline run: agents are Mapbox circle-layer
 // features whose position is recomputed every animation frame (dwelling =
-// fixed at the stop's coordinates, traveling = linearly interpolated between
-// the previous stop and this one over the leg's arrival/duration window) and
-// pushed via `setData`, never through React state — a per-frame re-render
-// would not keep up with thousands of agents.
+// fixed at the stop's coordinates, traveling = interpolated along the leg's
+// road-routing waypoints when present, else linearly between the previous
+// stop and this one over the leg's arrival/duration window) and pushed via
+// `setData`, never through React state — a per-frame re-render would not
+// keep up with thousands of agents.
 export function TimelineMap({
   meta,
   expId,
@@ -288,6 +307,12 @@ export function TimelineMap({
           if (seg.kind === "dwell") {
             lat = seg.d_lat;
             lng = seg.d_lng;
+          } else if (seg.waypoints && seg.waypoints.length >= 2) {
+            const [a, b] = bracketWaypoints(seg.waypoints, c.simTimeMs);
+            const span = b.t - a.t;
+            const frac = span > 0 ? (c.simTimeMs - a.t) / span : 1;
+            lat = a.lat + (b.lat - a.lat) * frac;
+            lng = a.lng + (b.lng - a.lng) * frac;
           } else {
             const span = seg.t_end - seg.t_start;
             const frac = span > 0 ? (c.simTimeMs - seg.t_start) / span : 1;
