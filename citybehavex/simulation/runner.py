@@ -277,6 +277,8 @@ def _run_simulation_core(
         car_speed_kmh=config.simulation.car_speed_kmh,
         n_agents=config.simulation.agents,
         random_state=config.simulation.random_state,
+        social_graph_k=config.simulation.social_graph_k,
+        profile_graph_exact_threshold=config.simulation.profile_graph_exact_threshold,
         timing=timing,
         starting_locs=home_tiles,
         work_tiles=work_tiles,

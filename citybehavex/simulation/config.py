@@ -21,8 +21,10 @@ class SimulationConfig(BaseModel):
     relevance_column: str = "total_poi_count"
     granularity_minutes: int = 15
     car_speed_kmh: float = 50.0
+    social_graph_k: int = 20
+    profile_graph_exact_threshold: int = 10_000
 
-    @field_validator("agents", "days")
+    @field_validator("agents", "days", "social_graph_k", "profile_graph_exact_threshold")
     @classmethod
     def positive_int(cls, value: int) -> int:
         if value <= 0:

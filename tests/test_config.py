@@ -41,6 +41,17 @@ def test_simulation_config_rejects_removed_model_field():
         SimulationConfig(model="legacy")
 
 
+def test_simulation_config_rejects_removed_social_graph_radius():
+    with pytest.raises(ValueError):
+        SimulationConfig(social_graph_radius=0.5)
+
+
+def test_simulation_config_accepts_bounded_social_graph_settings():
+    config = SimulationConfig(social_graph_k=30, profile_graph_exact_threshold=5000)
+    assert config.social_graph_k == 30
+    assert config.profile_graph_exact_threshold == 5000
+
+
 def test_llm_config_defaults_to_thirty_diaries():
     assert LLMConfig().diary_count == 30
 

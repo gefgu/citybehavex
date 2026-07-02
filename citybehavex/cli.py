@@ -173,6 +173,18 @@ def simulate(
     relevance_column: Optional[str] = typer.Option(None, help="Location attractiveness column"),
     output: Optional[str] = typer.Option(None, help="Output parquet path"),
     random_state: Optional[int] = typer.Option(None, help="Random seed"),
+    social_graph_k: Optional[int] = typer.Option(
+        None,
+        "--social-graph-k",
+        min=1,
+        help="Maximum social neighbors per agent.",
+    ),
+    profile_graph_exact_threshold: Optional[int] = typer.Option(
+        None,
+        "--profile-graph-exact-threshold",
+        min=1,
+        help="Maximum agent count for exact profile kNN before cluster sampling.",
+    ),
     diary_count: Optional[int] = typer.Option(
         None,
         "--diary-count",
@@ -213,6 +225,8 @@ def simulate(
             "relevance_column": relevance_column,
             "output": output,
             "random_state": random_state,
+            "social_graph_k": social_graph_k,
+            "profile_graph_exact_threshold": profile_graph_exact_threshold,
         },
     )
     comp = apply_overrides(
