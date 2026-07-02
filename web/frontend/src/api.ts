@@ -103,6 +103,9 @@ export interface AgentTrip {
   lng: number;
   purpose: string;
   category?: string | null;
+  activity: number | null;
+  activity_name: string | null;
+  activity_description: string | null;
   trip_duration_minutes: number;
   dwell_minutes: number;
 }
@@ -111,6 +114,20 @@ export interface AgentEncounter {
   contact_uid: number;
   ts: string;
   tile: number;
+  stop_arrival: string | null;
+  stop_departure: string | null;
+  lat: number | null;
+  lng: number | null;
+  purpose: string | null;
+  category?: string | null;
+  activity: number | null;
+  activity_name: string | null;
+  activity_description: string | null;
+  trip_duration_minutes: number | null;
+  dwell_minutes: number | null;
+  contact_profile: AgentProfileFields | null;
+  contact_narrative: string | null;
+  location_warning: string | null;
 }
 
 export interface AgentProfilePayload {
