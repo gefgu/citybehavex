@@ -34,21 +34,31 @@ if TYPE_CHECKING:
 def legs_index_path(exp_id: str, run: "Run") -> Path:
     return get_or_build_parquet(
         "timeline_legs",
-        (exp_id, run.run_id),
+        ("v2", exp_id, run.run_id),
         run.path,
         build=lambda out: _build_legs_index(run.path, out),
     )
 
 
+def _parquet_columns(con: duckdb.DuckDBPyConnection, path: Path) -> set[str]:
+    rows = con.execute(
+        f"DESCRIBE SELECT * FROM read_parquet('{quote_path(path)}')"
+    ).fetchall()
+    return {str(row[0]) for row in rows}
+
+
 def _build_legs_index(trajectory_path: Path, out_path: Path) -> None:
     con = duckdb.connect()
     try:
+        columns = _parquet_columns(con, trajectory_path)
+        category_expr = "category" if "category" in columns else "NULL::VARCHAR AS category"
         con.execute(
             f"""
             COPY (
                 WITH ordered AS (
                     SELECT
                         uid, lat, lng, arrival, departure, trip_duration_minutes, purpose,
+                        {category_expr},
                         LAG(lat) OVER w AS o_lat,
                         LAG(lng) OVER w AS o_lng
                     FROM read_parquet('{quote_path(trajectory_path)}')
@@ -57,13 +67,13 @@ def _build_legs_index(trajectory_path: Path, out_path: Path) -> None:
                 combined AS (
                     SELECT uid, 'dwell' AS kind,
                            arrival AS t_start, departure AS t_end,
-                           lat AS o_lat, lng AS o_lng, lat AS d_lat, lng AS d_lng, purpose
+                           lat AS o_lat, lng AS o_lng, lat AS d_lat, lng AS d_lng, purpose, category
                     FROM ordered
                     UNION ALL
                     SELECT uid, 'leg' AS kind,
                            arrival - (trip_duration_minutes * INTERVAL '1 minute') AS t_start,
                            arrival AS t_end,
-                           o_lat, o_lng, lat AS d_lat, lng AS d_lng, purpose
+                           o_lat, o_lng, lat AS d_lat, lng AS d_lng, purpose, category
                     FROM ordered
                     WHERE o_lat IS NOT NULL
                 )
@@ -137,7 +147,7 @@ def query_active_legs(
                 ORDER BY hash(uid)
                 LIMIT $max_agents
             )
-            SELECT l.uid, l.kind, l.t_start, l.t_end, l.o_lat, l.o_lng, l.d_lat, l.d_lng, l.purpose
+            SELECT l.uid, l.kind, l.t_start, l.t_end, l.o_lat, l.o_lng, l.d_lat, l.d_lng, l.purpose, l.category
             FROM read_parquet('{quote_path(legs_path)}') l
             JOIN candidates c USING (uid)
             WHERE l.t_start <= $until AND l.t_end >= $since
@@ -167,8 +177,10 @@ def query_active_legs(
 def query_agent_trips(trajectory_path: Path, uid: int) -> list[dict[str, Any]]:
     con = duckdb.connect()
     try:
+        columns = _parquet_columns(con, trajectory_path)
+        category_expr = "category" if "category" in columns else "NULL::VARCHAR AS category"
         rows = con.execute(
-            f"""SELECT arrival, departure, lat, lng, purpose,
+            f"""SELECT arrival, departure, lat, lng, purpose, {category_expr},
                        trip_duration_minutes, dwell_minutes
                 FROM read_parquet('{quote_path(trajectory_path)}')
                 WHERE uid = $uid ORDER BY arrival""",

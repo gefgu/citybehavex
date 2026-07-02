@@ -44,10 +44,6 @@ export const PROFILE_COLOR: Record<string, string> = {
 export const PURPOSE_COLOR: Record<string, string> = {
   HOME: COLORS.forest,
   WORK: COLORS.coral,
-  STUDIES: COLORS.info,
-  PURCHASE: COLORS.mustard,
-  LEISURE: COLORS.mint,
-  HEALTH: COLORS.peach,
   OTHER: COLORS.yellow,
 };
 export const DEFAULT_PURPOSE_COLOR = COLORS.muted;

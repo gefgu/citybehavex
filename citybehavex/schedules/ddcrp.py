@@ -17,7 +17,7 @@ This is a Chinese Restaurant Process with semantic smoothing. Weekday and weeken
 are **hard-separated**: a weekday only draws from the weekday bank and vice versa.
 
 Fixed purpose→code map in ``diary_to_abs_locs``:
-  HOME=0, WORK=1, STUDIES=2, PURCHASE=3, LEISURE=4, HEALTH=5, OTHER=6
+  HOME=0, WORK=1, OTHER=2
 This allows Rust to short-circuit WORK episodes to a per-agent persistent work
 tile, mirroring the HOME short-circuit.
 """
@@ -47,11 +47,7 @@ DiaryArrays = tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]
 _PURPOSE_CODE: dict[str, int] = {
     "HOME": 0,
     "WORK": 1,
-    "STUDIES": 2,
-    "PURCHASE": 3,
-    "LEISURE": 4,
-    "HEALTH": 5,
-    "OTHER": 6,
+    "OTHER": 2,
 }
 
 
@@ -71,7 +67,7 @@ def diary_to_abs_locs(diary: Diary, slots_per_day: int, granularity_minutes: int
         if ep_i >= len(episodes):
             break
         purpose = episodes[ep_i].purpose
-        code = _PURPOSE_CODE.get(purpose, 6)
+        code = _PURPOSE_CODE.get(purpose, 2)
         locs[slot] = code
     return locs
 

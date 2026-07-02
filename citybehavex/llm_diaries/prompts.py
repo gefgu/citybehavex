@@ -63,7 +63,7 @@ def build_single_diary_prompt(
         f"Purpose distribution hints: {json.dumps(distribution, sort_keys=True)}\n"
         f"{location_rule}"
         f"{dedup_rule}"
-        "Allowed purposes: HOME, WORK, STUDIES, PURCHASE, LEISURE, HEALTH, OTHER.\n"
+        "Allowed purposes: HOME, WORK, OTHER.\n"
         "Rules: start at 00:00, end at 24:00, use contiguous non-overlapping episodes, "
         "include HOME, and use only start/end times in HH:MM.\n"
         "Vary this diary from the others by routine timing and non-home activity mix.\n"

@@ -161,11 +161,25 @@ def _run_density_epr(
     traj = skmob2.TrajDataFrame(traj)
     synth_activity_col = None
     if "purpose" in tessellation_df.columns:
-        extra_cols = [c for c in ["tile_id", "purpose"] if c in tessellation_df.columns]
-        lookup = tessellation_df[["lat", "lng"] + extra_cols].drop_duplicates(["lat", "lng"])
-        traj.df = traj.df.merge(lookup, on=["lat", "lng"], how="left")
+        traj.df = _merge_tessellation_metadata(
+            traj.df,
+            tessellation_df,
+            ["tile_id", "purpose", "category"],
+        )
         synth_activity_col = "purpose"
     return traj, synth_activity_col
+
+
+def _merge_tessellation_metadata(
+    df: pd.DataFrame,
+    tessellation_df: pd.DataFrame,
+    candidate_cols: list[str],
+) -> pd.DataFrame:
+    extra_cols = [c for c in candidate_cols if c in tessellation_df.columns and c not in df.columns]
+    if not extra_cols:
+        return df
+    lookup = tessellation_df[["lat", "lng"] + extra_cols].drop_duplicates(["lat", "lng"])
+    return df.merge(lookup, on=["lat", "lng"], how="left")
 
 
 def _build_schedule(
@@ -296,6 +310,7 @@ def _run_simulation_core(
         enc_path = base.replace(".parquet", "_encounters.parquet")
         encounters.to_parquet(enc_path, index=False)
         typer.echo(f"Saved {len(encounters):,} encounters -> {enc_path}")
+    df = _merge_tessellation_metadata(df, tessellation_df, ["tile_id", "category"])
     df = annotate_trajectory_purposes_ddcrp(df, bank, chosen, start_date)
     traj = skmob2.TrajDataFrame(
         df, datetime_col="datetime", lat_col="lat", lng_col="lng", uid_col="uid"
