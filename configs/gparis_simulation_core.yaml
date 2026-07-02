@@ -16,7 +16,13 @@ simulation:
   random_state: 42
   relevance_column: relevance
   granularity_minutes: 15   # schedule slot length (5, 15, or 60)
-  car_speed_kmh: 50.0       # car speed for the trip-duration heuristic
+  car_speed_kmh: 50.0       # fallback speed when road routing is disabled/unsnapped
+
+road_network:
+  enabled: true
+  nodes_output: data/gparis_road_graph_nodes.parquet
+  edges_output: data/gparis_road_graph_edges.parquet
+  snap_output: data/gparis_road_graph_snap.parquet
 
 llm:
   base_url: "http://localhost:8081"
@@ -61,6 +67,12 @@ schedule:
   temperature_beta_b: 5.0   # Beta shape b for per-agent temperature T
   alpha_beta_a: 2.0         # Beta shape a for per-agent exploration alpha
   alpha_beta_b: 5.0         # Beta shape b for per-agent exploration alpha
+
+activities:
+  enabled: true
+  kappa: 1.0
+  temperature: 0.5
+  embed_activities: false
 
 profiles:
   enabled: true

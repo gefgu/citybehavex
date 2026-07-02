@@ -8,6 +8,7 @@ from citybehavex.llm.config import LLMConfig
 from citybehavex.llm_diaries.config import DiariesConfig
 from citybehavex.profiles.config import AgentProfilesConfig
 from citybehavex.reports.config import ComparisonConfig
+from citybehavex.roads.config import RoadNetworkConfig
 from citybehavex.schedules.config import ScheduleConfig
 from citybehavex.simulation.config import SimulationConfig
 from citybehavex.tessellation.config import TessellationConfig
@@ -18,6 +19,7 @@ class CityBehavExConfig(BaseModel):
 
     tessellation: TessellationConfig = Field(default_factory=TessellationConfig)
     simulation: SimulationConfig = Field(default_factory=SimulationConfig)
+    road_network: RoadNetworkConfig = Field(default_factory=RoadNetworkConfig)
     llm: LLMConfig = Field(default_factory=LLMConfig)
     diaries: DiariesConfig = Field(default_factory=DiariesConfig)
     embedding: EmbeddingConfig = Field(default_factory=EmbeddingConfig)

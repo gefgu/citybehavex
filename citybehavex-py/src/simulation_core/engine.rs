@@ -6,12 +6,28 @@ use skmob2_core::models::shared::derive_agent_seed;
 use skmob2_core::utils::haversine::haversine_km;
 
 use crate::simulation_core::activity::sample_activity_and_duration;
-use crate::simulation_core::inputs::CoreInputs;
-use crate::simulation_core::outputs::{SimulationOutput, TripOutputBuffers};
+use crate::simulation_core::inputs::{CoreInputs, RoadNetworkInputs};
+use crate::simulation_core::outputs::{RoadPathOutputBuffers, SimulationOutput, TripOutputBuffers};
+use crate::simulation_core::roads::{RoadGraph, subsample_waypoints};
 use crate::simulation_core::social::{
     LocationChoiceContext, choose_location_local, pick_starting_loc, update_edge_sim,
 };
 use crate::simulation_core::types::{AgentParData, AgentState, DiaryState, Scratch};
+
+/// Prepared road graph plus a reusable path calculator, borrowed fresh for
+/// each `append_trip_record` call (the commit loop is sequential, so a single
+/// calculator can be reused across the whole run without synchronization).
+struct RoadRuntime<'a> {
+    graph: &'a RoadGraph,
+    calc: &'a mut fast_paths::PathCalculator,
+    inputs: &'a RoadNetworkInputs<'a>,
+}
+
+#[derive(Default)]
+struct FallbackCounts {
+    unsnapped: i64,
+    disconnected: i64,
+}
 
 struct TripAppendContext<'a> {
     agent_idx: usize,
@@ -22,29 +38,80 @@ struct TripAppendContext<'a> {
     car_speed_kmh: f64,
     slot_seconds: i64,
     pending_departure: i64,
+    max_leg_waypoints: usize,
+}
+
+fn haversine_fallback_secs(cur_loc: usize, next_loc: usize, lats: &[f64], lngs: &[f64], car_speed_kmh: f64) -> i64 {
+    let d_km = haversine_km(lats[cur_loc], lngs[cur_loc], lats[next_loc], lngs[next_loc]);
+    let secs = (d_km / car_speed_kmh) * 3600.0;
+    if secs.is_finite() && secs > 0.0 {
+        secs.round() as i64
+    } else {
+        0
+    }
 }
 
 fn append_trip_record(
     ctx: TripAppendContext<'_>,
     output: &mut TripOutputBuffers,
     agents: &mut [AgentState],
+    road: Option<&mut RoadRuntime<'_>>,
+    paths: &mut RoadPathOutputBuffers,
+    fallback: &mut FallbackCounts,
 ) {
     let cur_loc = agents[ctx.agent_idx].current_location;
-    let dur_s: i64 = if ctx.next_loc == cur_loc {
-        0
+
+    // (trip duration, waypoint lats, waypoint lngs, cumulative weight at each waypoint in deciseconds)
+    let (dur_s, wp_lats, wp_lngs, wp_cum_ds): (i64, Vec<f64>, Vec<f64>, Vec<i64>) = if ctx.next_loc == cur_loc {
+        (
+            0,
+            vec![ctx.lats[cur_loc]; 2],
+            vec![ctx.lngs[cur_loc]; 2],
+            vec![0, 0],
+        )
     } else {
-        let d_km = haversine_km(
-            ctx.lats[cur_loc],
-            ctx.lngs[cur_loc],
-            ctx.lats[ctx.next_loc],
-            ctx.lngs[ctx.next_loc],
-        );
-        let secs = (d_km / ctx.car_speed_kmh) * 3600.0;
-        if secs.is_finite() && secs > 0.0 {
-            secs.round() as i64
-        } else {
-            0
+        let mut routed = None;
+        if let Some(road) = road {
+            let from_node = road.inputs.location_node.get(cur_loc).copied().unwrap_or(-1);
+            let to_node = road
+                .inputs
+                .location_node
+                .get(ctx.next_loc)
+                .copied()
+                .unwrap_or(-1);
+            if from_node >= 0 && to_node >= 0 {
+                match road
+                    .graph
+                    .shortest_path(road.calc, from_node as usize, to_node as usize)
+                {
+                    Some((_weight_ds, nodes)) => {
+                        let lats: Vec<f64> = nodes.iter().map(|&n| road.inputs.node_lats[n]).collect();
+                        let lngs: Vec<f64> = nodes.iter().map(|&n| road.inputs.node_lngs[n]).collect();
+                        let mut cumulative: Vec<i64> = Vec::with_capacity(nodes.len());
+                        let mut acc: i64 = 0;
+                        cumulative.push(0);
+                        for w in nodes.windows(2) {
+                            acc += road.graph.edge_weight_ds(w[0], w[1]);
+                            cumulative.push(acc);
+                        }
+                        let dur_s = (acc + 5) / 10;
+                        routed = Some((dur_s.max(0), lats, lngs, cumulative));
+                    }
+                    None => fallback.disconnected += 1,
+                }
+            } else {
+                fallback.unsnapped += 1;
+            }
         }
+        routed.unwrap_or_else(|| {
+            let dur_s = haversine_fallback_secs(cur_loc, ctx.next_loc, ctx.lats, ctx.lngs, ctx.car_speed_kmh);
+            (
+                dur_s,
+                vec![ctx.lats[cur_loc], ctx.lats[ctx.next_loc]],
+                vec![ctx.lngs[cur_loc], ctx.lngs[ctx.next_loc]],
+                vec![0, dur_s * 10],
+            )
+        })
     };
 
     let prev_idx = output.last_output_idx[ctx.agent_idx];
@@ -66,6 +133,7 @@ fn append_trip_record(
     agents[ctx.agent_idx].visit(ctx.next_loc);
     agents[ctx.agent_idx].current_location = ctx.next_loc;
 
+    let stop_id = output.agents.len() as i64;
     output.last_output_idx[ctx.agent_idx] = output.agents.len();
     output.agents.push(ctx.agent_idx as i64 + 1);
     output.lats.push(ctx.lats[ctx.next_loc]);
@@ -74,6 +142,24 @@ fn append_trip_record(
     output.departure.push(arrival);
     output.duration.push(dur_s as f64);
     output.activity.push(0);
+    output.stop_id.push(stop_id);
+
+    // Distribute absolute waypoint timestamps proportionally along the path's
+    // cumulative edge weight, so they land exactly on [departure, arrival]
+    // regardless of any slot-width clamping applied above.
+    let total_ds = *wp_cum_ds.last().unwrap_or(&0);
+    let times: Vec<i64> = if total_ds <= 0 {
+        wp_cum_ds.iter().map(|_| departure).collect()
+    } else {
+        wp_cum_ds
+            .iter()
+            .map(|&c| departure + ((c as f64 / total_ds as f64) * dur_s as f64).round() as i64)
+            .collect()
+    };
+    let (sub_lats, sub_lngs, sub_times) =
+        subsample_waypoints(&wp_lats, &wp_lngs, &times, ctx.max_leg_waypoints);
+    let agent_id = ctx.agent_idx as i64 + 1;
+    paths.push_leg(agent_id, stop_id, &sub_lats, &sub_lngs, &sub_times);
 }
 
 fn validate_inputs(inputs: &CoreInputs<'_>) -> Result<usize, String> {
@@ -255,9 +341,23 @@ pub(crate) fn simulate(inputs: CoreInputs<'_>) -> Result<SimulationOutput, Strin
         }
     }
 
+    let road_graph = if inputs.road_network.enabled() {
+        println!("Preparing road-network contraction hierarchy ...");
+        Some(RoadGraph::build(
+            inputs.road_network.edge_from,
+            inputs.road_network.edge_to,
+            inputs.road_network.edge_weight_ds,
+        ))
+    } else {
+        None
+    };
+    let mut road_calc = road_graph.as_ref().map(|g| g.new_calculator());
+    let mut paths = RoadPathOutputBuffers::default();
+    let mut fallback = FallbackCounts::default();
+
     let mut commit_buf: Vec<(i64, usize, usize, i32)> = Vec::new();
     let mut window_start = inputs.params.start_ts;
-    
+
     // Tracking simulation days and duration
     let mut current_day = 0;
     let mut day_start_instant = std::time::Instant::now();
@@ -273,7 +373,7 @@ pub(crate) fn simulate(inputs: CoreInputs<'_>) -> Result<SimulationOutput, Strin
     while window_start < inputs.params.end_ts {
         // Calculate the current day based on simulated elapsed seconds (86400s in a day)
         let simulated_day = (window_start - inputs.params.start_ts).div_euclid(86_400);
-        
+
         // Print and reset timer if we've crossed into a new day
         if simulated_day > current_day {
             println!("Day {} simulated in {:.3?}", current_day, day_start_instant.elapsed());
@@ -354,6 +454,14 @@ pub(crate) fn simulate(inputs: CoreInputs<'_>) -> Result<SimulationOutput, Strin
                 0
             };
             par_data[a].pending_departure = 0;
+            let mut road_runtime = match (road_graph.as_ref(), road_calc.as_mut()) {
+                (Some(g), Some(c)) => Some(RoadRuntime {
+                    graph: g,
+                    calc: c,
+                    inputs: &inputs.road_network,
+                }),
+                _ => None,
+            };
             append_trip_record(
                 TripAppendContext {
                     agent_idx: a,
@@ -364,9 +472,13 @@ pub(crate) fn simulate(inputs: CoreInputs<'_>) -> Result<SimulationOutput, Strin
                     car_speed_kmh: inputs.params.car_speed_kmh,
                     slot_seconds: inputs.params.slot_seconds,
                     pending_departure,
+                    max_leg_waypoints: inputs.road_network.max_leg_waypoints,
                 },
                 &mut output,
                 &mut agents,
+                road_runtime.as_mut(),
+                &mut paths,
+                &mut fallback,
             );
             if activities_on {
                 let new_arr = output.arrival[output.last_output_idx[a]];
@@ -415,6 +527,15 @@ pub(crate) fn simulate(inputs: CoreInputs<'_>) -> Result<SimulationOutput, Strin
         output.departure[idx] = inputs.params.end_ts.max(output.arrival[idx]);
     }
 
+    if inputs.road_network.enabled() {
+        println!(
+            "Road routing: {} fallbacks to straight-line (unsnapped={}, disconnected={})",
+            fallback.unsnapped + fallback.disconnected,
+            fallback.unsnapped,
+            fallback.disconnected
+        );
+    }
+
     let mut enc_agent: Vec<i64> = Vec::new();
     let mut enc_contact: Vec<i64> = Vec::new();
     let mut enc_tile: Vec<i64> = Vec::new();
@@ -428,5 +549,5 @@ pub(crate) fn simulate(inputs: CoreInputs<'_>) -> Result<SimulationOutput, Strin
         }
     }
 
-    Ok(output.into_output(enc_agent, enc_contact, enc_tile, enc_ts))
+    Ok(output.into_output(enc_agent, enc_contact, enc_tile, enc_ts, paths))
 }

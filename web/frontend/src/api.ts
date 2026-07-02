@@ -59,6 +59,12 @@ export interface TimelineMeta {
   car_speed_kmh: number | null;
 }
 
+export interface TimelineWaypoint {
+  lat: number;
+  lng: number;
+  t: string;
+}
+
 export interface TimelineSegment {
   uid: number;
   kind: "dwell" | "leg";
@@ -70,6 +76,9 @@ export interface TimelineSegment {
   d_lng: number;
   purpose: string;
   category?: string | null;
+  // Present on "leg" segments from runs with road routing enabled — the
+  // road-following path to animate along instead of a straight-line lerp.
+  waypoints?: TimelineWaypoint[] | null;
 }
 
 export interface TimelineLegsPayload {

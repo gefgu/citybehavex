@@ -5,6 +5,23 @@ pub(crate) struct CoreInputs<'a> {
     pub(crate) params: SimulationParams,
     pub(crate) initial_locations: InitialLocationInputs<'a>,
     pub(crate) activities: ActivityInputs<'a>,
+    pub(crate) road_network: RoadNetworkInputs<'a>,
+}
+
+pub(crate) struct RoadNetworkInputs<'a> {
+    pub(crate) edge_from: &'a [usize],
+    pub(crate) edge_to: &'a [usize],
+    pub(crate) edge_weight_ds: &'a [usize],
+    pub(crate) node_lats: &'a [f64],
+    pub(crate) node_lngs: &'a [f64],
+    pub(crate) location_node: &'a [i64],
+    pub(crate) max_leg_waypoints: usize,
+}
+
+impl RoadNetworkInputs<'_> {
+    pub(crate) fn enabled(&self) -> bool {
+        !self.edge_from.is_empty()
+    }
 }
 
 pub(crate) struct LocationInputs<'a> {

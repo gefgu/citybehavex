@@ -38,6 +38,10 @@ class Run:
     def encounters_path(self) -> Path:
         return self.path.with_name(f"{self.path.stem}_encounters{self.path.suffix}")
 
+    @property
+    def moving_path(self) -> Path:
+        return self.path.with_name(f"{self.path.stem}_moving{self.path.suffix}")
+
     def to_dict(self, with_summary: bool = False) -> dict[str, Any]:
         d: dict[str, Any] = {
             "run_id": self.run_id,
@@ -55,7 +59,8 @@ class Run:
 def _discover_runs(output_path: Optional[Path]) -> list[Run]:
     """All parquet runs for a ``simulation.output`` stem, newest first.
 
-    Excludes the ``*_encounters.parquet`` sibling written alongside trajectories.
+    Excludes the ``*_encounters.parquet`` and ``*_moving.parquet`` siblings
+    written alongside trajectories.
     """
     if output_path is None:
         return []
@@ -67,7 +72,7 @@ def _discover_runs(output_path: Optional[Path]) -> list[Run]:
     runs: list[Run] = []
     for candidate in parent.glob(f"{stem}*{output_path.suffix}"):
         name = candidate.stem
-        if name.endswith("_encounters"):
+        if name.endswith("_encounters") or name.endswith("_moving"):
             continue
         if name == stem:
             run_id = "base"

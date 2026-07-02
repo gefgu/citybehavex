@@ -52,12 +52,21 @@ def simulate_agents(
     purpose_acts: np.ndarray | None = None,
     act_kappa: float = 1.0,
     act_temp: float = 0.5,
-) -> tuple[pd.DataFrame, pd.DataFrame]:
+    road_edge_from: np.ndarray | None = None,
+    road_edge_to: np.ndarray | None = None,
+    road_edge_weight_ds: np.ndarray | None = None,
+    road_node_lats: np.ndarray | None = None,
+    road_node_lngs: np.ndarray | None = None,
+    location_road_node: np.ndarray | None = None,
+    max_leg_waypoints: int = 16,
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """Run the CityBehavEx simulation core.
 
     Returns:
-        (trajectories_df, encounters_df) where encounters_df records
-        (agent, contact, tile, ts) for each social interaction.
+        (trajectories_df, encounters_df, moving_df). ``encounters_df`` records
+        (agent, contact, tile, ts) for each social interaction; ``moving_df``
+        has one row per waypoint along each trip's road-following path (or a
+        2-point origin/destination pair when road routing is disabled/unsnapped).
     """
     lats = np.ascontiguousarray(tessellation_df["lat"].to_numpy(dtype=float))
     lng_col = "lng" if "lng" in tessellation_df.columns else "lon"
@@ -100,6 +109,31 @@ def simulate_agents(
     )
     eps = edge_weights if len(edge_weights) == len(neighbors) else None
 
+    road_enabled = (
+        road_edge_from is not None
+        and road_edge_to is not None
+        and road_edge_weight_ds is not None
+        and len(road_edge_from) > 0
+    )
+    if road_enabled:
+        r_edge_from = np.ascontiguousarray(road_edge_from, dtype=np.int64)
+        r_edge_to = np.ascontiguousarray(road_edge_to, dtype=np.int64)
+        r_edge_weight = np.ascontiguousarray(road_edge_weight_ds, dtype=np.int64)
+        r_node_lats = np.ascontiguousarray(road_node_lats, dtype=np.float64)
+        r_node_lngs = np.ascontiguousarray(road_node_lngs, dtype=np.float64)
+        r_location_node = (
+            np.ascontiguousarray(location_road_node, dtype=np.int64)
+            if location_road_node is not None
+            else np.full(len(tessellation_df), -1, dtype=np.int64)
+        )
+    else:
+        r_edge_from = np.empty(0, dtype=np.int64)
+        r_edge_to = np.empty(0, dtype=np.int64)
+        r_edge_weight = np.empty(0, dtype=np.int64)
+        r_node_lats = np.empty(0, dtype=np.float64)
+        r_node_lngs = np.empty(0, dtype=np.float64)
+        r_location_node = np.empty(0, dtype=np.int64)
+
     # Flatten activity embedding matrix if provided.
     emb_dim = 0
     act_embs_flat: np.ndarray | None = None
@@ -119,8 +153,13 @@ def simulate_agents(
 
     start = time.perf_counter()
     (
-        agent_ids, out_lats, out_lngs, arrival, departure, trip_dur,
-        enc_agent, enc_contact, enc_tile, enc_ts, out_activity,
+        (
+            agent_ids, out_lats, out_lngs, arrival, departure, trip_dur,
+            enc_agent, enc_contact, enc_tile, enc_ts, out_activity,
+        ),
+        (
+            stop_id, path_agent, path_stop_id, path_seq, path_lat, path_lng, path_t,
+        ),
     ) = _cbx_core.simulation_core_simulate_agents(
         lats,
         lngs,
@@ -157,6 +196,13 @@ def simulate_agents(
         float(act_kappa),
         float(act_temp),
         profile_act_sims_flat,
+        r_edge_from,
+        r_edge_to,
+        r_edge_weight,
+        r_node_lats,
+        r_node_lngs,
+        r_location_node,
+        int(max_leg_waypoints),
     )
     elapsed = time.perf_counter() - start
     if timing is not None:
@@ -168,6 +214,7 @@ def simulate_agents(
     trajectories = pd.DataFrame(
         {
             "uid": np.asarray(agent_ids, dtype=np.int64),
+            "stop_id": np.asarray(stop_id, dtype=np.int64),
             "datetime": arrival.astype("datetime64[s]"),
             "lat": np.asarray(out_lats, dtype=float),
             "lng": np.asarray(out_lngs, dtype=float),
@@ -188,4 +235,16 @@ def simulate_agents(
         }
     )
 
-    return trajectories, encounters
+    path_t_arr = np.asarray(path_t, dtype=np.int64)
+    moving = pd.DataFrame(
+        {
+            "uid": np.asarray(path_agent, dtype=np.int64),
+            "stop_id": np.asarray(path_stop_id, dtype=np.int64),
+            "seq": np.asarray(path_seq, dtype=np.int32),
+            "lat": np.asarray(path_lat, dtype=float),
+            "lng": np.asarray(path_lng, dtype=float),
+            "t": path_t_arr.astype("datetime64[s]"),
+        }
+    )
+
+    return trajectories, encounters, moving

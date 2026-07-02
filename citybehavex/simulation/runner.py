@@ -17,12 +17,70 @@ from citybehavex.embedding import embed_profiles, embed_texts
 from citybehavex.llm_diaries import DiaryBatch, LLMStats, allocate_location_counts, fetch_diary_batch
 from citybehavex.llm_diaries.training import annotate_trajectory_purposes_ddcrp
 from citybehavex.profiles import AgentProfile, generate_profiles, load_profiles, profile_to_narrative, profiles_to_frame
+from citybehavex.roads import build_road_graph, snap_locations_to_graph
 from citybehavex.schedules import DiaryBank, build_ddcrp_diary, build_diary_bank
 from citybehavex.simulation.core import CoreTiming, simulate_agents
 from citybehavex.tessellation import build_poi_tessellation, build_tessellation, purpose_distribution
 
 
 def load_or_build_tessellation(config: CityBehavExConfig) -> tuple[pd.DataFrame, str]:
+    tessellation_df, relevance_column = _load_or_build_tessellation_df(config)
+    tessellation_df = _maybe_snap_to_roads(config, tessellation_df)
+    return tessellation_df, relevance_column
+
+
+def _maybe_snap_to_roads(config: CityBehavExConfig, tessellation_df: pd.DataFrame) -> pd.DataFrame:
+    """Add a ``road_node`` column mapping each location to its nearest road graph node.
+
+    The snapping result is cached separately from the tessellation file itself,
+    since ``sim.tessellation``/``tess.path`` may point at a file we don't own.
+    """
+    rn = config.road_network
+    if not rn.enabled:
+        return tessellation_df
+
+    if Path(rn.snap_output).exists():
+        snap_df = pd.read_parquet(rn.snap_output)
+        if len(snap_df) == len(tessellation_df):
+            typer.echo(f"Loading cached road-node snapping from {rn.snap_output} ...")
+            return tessellation_df.assign(road_node=snap_df["road_node"].to_numpy())
+        typer.echo(
+            f"Warning: cached road-node snapping at {rn.snap_output} has "
+            f"{len(snap_df):,} rows but tessellation has {len(tessellation_df):,} — rebuilding"
+        )
+
+    sim = config.simulation
+    tess = config.tessellation
+    min_lon = sim.min_lon if sim.min_lon is not None else tess.min_lon
+    min_lat = sim.min_lat if sim.min_lat is not None else tess.min_lat
+    max_lon = sim.max_lon if sim.max_lon is not None else tess.max_lon
+    max_lat = sim.max_lat if sim.max_lat is not None else tess.max_lat
+    lng_col = "lng" if "lng" in tessellation_df.columns else "lon"
+    if None in [min_lon, min_lat, max_lon, max_lat]:
+        min_lon, max_lon = float(tessellation_df[lng_col].min()), float(tessellation_df[lng_col].max())
+        min_lat, max_lat = float(tessellation_df["lat"].min()), float(tessellation_df["lat"].max())
+
+    overture_release = rn.overture_release or tess.overture_release
+    nodes_df, _edges_df = build_road_graph(
+        min_lon, min_lat, max_lon, max_lat, overture_release, rn.nodes_output, rn.edges_output
+    )
+    road_node = snap_locations_to_graph(
+        tessellation_df, nodes_df, rn.snap_max_distance_m, lat_col="lat", lng_col=lng_col
+    )
+    n_unsnapped = int((road_node < 0).sum())
+    if n_unsnapped:
+        typer.echo(
+            f"Warning: {n_unsnapped:,}/{len(road_node):,} locations are farther than "
+            f"{rn.snap_max_distance_m:.0f}m from the road graph and will fall back to "
+            "straight-line routing for trips touching them"
+        )
+
+    Path(rn.snap_output).parent.mkdir(parents=True, exist_ok=True)
+    pd.DataFrame({"road_node": road_node}).to_parquet(rn.snap_output, index=False)
+    return tessellation_df.assign(road_node=road_node)
+
+
+def _load_or_build_tessellation_df(config: CityBehavExConfig) -> tuple[pd.DataFrame, str]:
     sim = config.simulation
     tess = config.tessellation
     tessellation_path = sim.tessellation or tess.path
@@ -281,7 +339,37 @@ def _run_simulation_core(
         else None
     )
     act_embs, act_dur_mu, act_dur_sigma, purpose_act_starts, purpose_acts = _build_activity_data(config)
-    df, encounters = simulate_agents(
+
+    road_kwargs: dict = {}
+    rn = config.road_network
+    if rn.enabled and "road_node" in tessellation_df.columns:
+        lng_col = "lng" if "lng" in tessellation_df.columns else "lon"
+        min_lon = config.simulation.min_lon if config.simulation.min_lon is not None else config.tessellation.min_lon
+        min_lat = config.simulation.min_lat if config.simulation.min_lat is not None else config.tessellation.min_lat
+        max_lon = config.simulation.max_lon if config.simulation.max_lon is not None else config.tessellation.max_lon
+        max_lat = config.simulation.max_lat if config.simulation.max_lat is not None else config.tessellation.max_lat
+        if None in [min_lon, min_lat, max_lon, max_lat]:
+            min_lon, max_lon = float(tessellation_df[lng_col].min()), float(tessellation_df[lng_col].max())
+            min_lat, max_lat = float(tessellation_df["lat"].min()), float(tessellation_df["lat"].max())
+        overture_release = rn.overture_release or config.tessellation.overture_release
+        nodes_df, edges_df = build_road_graph(
+            min_lon, min_lat, max_lon, max_lat, overture_release, rn.nodes_output, rn.edges_output
+        )
+        typer.echo(
+            f"Road routing enabled: {len(nodes_df):,} nodes, {len(edges_df):,} directed edges, "
+            f"max {rn.max_leg_waypoints} waypoints/leg"
+        )
+        road_kwargs = dict(
+            road_edge_from=edges_df["from_node"].to_numpy(dtype=np.int64),
+            road_edge_to=edges_df["to_node"].to_numpy(dtype=np.int64),
+            road_edge_weight_ds=edges_df["weight_ds"].to_numpy(dtype=np.int64),
+            road_node_lats=nodes_df["lat"].to_numpy(dtype=np.float64),
+            road_node_lngs=nodes_df["lng"].to_numpy(dtype=np.float64),
+            location_road_node=tessellation_df["road_node"].to_numpy(dtype=np.int64),
+            max_leg_waypoints=rn.max_leg_waypoints,
+        )
+
+    df, encounters, moving = simulate_agents(
         tessellation_df,
         relevance_column,
         diary_arrays,
@@ -304,12 +392,18 @@ def _run_simulation_core(
         purpose_acts=purpose_acts,
         act_kappa=config.activities.kappa,
         act_temp=config.activities.temperature,
+        **road_kwargs,
     )
     if len(encounters) > 0:
         base = output_path or config.simulation.output
         enc_path = base.replace(".parquet", "_encounters.parquet")
         encounters.to_parquet(enc_path, index=False)
         typer.echo(f"Saved {len(encounters):,} encounters -> {enc_path}")
+    if rn.enabled and len(moving) > 0:
+        base = output_path or config.simulation.output
+        moving_path = base.replace(".parquet", "_moving.parquet")
+        moving.to_parquet(moving_path, index=False)
+        typer.echo(f"Saved {len(moving):,} waypoints -> {moving_path}")
     df = _merge_tessellation_metadata(df, tessellation_df, ["tile_id", "category"])
     df = annotate_trajectory_purposes_ddcrp(df, bank, chosen, start_date)
     traj = skmob2.TrajDataFrame(
