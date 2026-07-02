@@ -29,6 +29,7 @@ export interface Experiment {
   label: string;
   observed_path: string | null;
   observed_exists: boolean;
+  profiles_exists: boolean;
   params: Record<string, unknown>;
   runs: Run[];
 }
@@ -44,6 +45,118 @@ export function fetchExperiment(id: string): Promise<Experiment> {
 export function fetchCharts(id: string, run?: string): Promise<ChartPayload> {
   const q = run ? `?run=${encodeURIComponent(run)}` : "";
   return getJson<ChartPayload>(`/api/experiments/${encodeURIComponent(id)}/charts${q}`);
+}
+
+// ---- timeline view ----
+export interface TimelineMeta {
+  run_id: string;
+  date_start: string | null;
+  date_end: string | null;
+  bbox: { min_lat: number; max_lat: number; min_lng: number; max_lng: number } | null;
+  agents_total: number | null;
+  has_profiles: boolean;
+  has_encounters: boolean;
+  car_speed_kmh: number | null;
+}
+
+export interface TimelineSegment {
+  uid: number;
+  kind: "dwell" | "leg";
+  t_start: string;
+  t_end: string;
+  o_lat: number;
+  o_lng: number;
+  d_lat: number;
+  d_lng: number;
+  purpose: string;
+}
+
+export interface TimelineLegsPayload {
+  run_id: string;
+  since: string;
+  until: string;
+  agent_count: number;
+  truncated: boolean;
+  segments: TimelineSegment[];
+}
+
+export interface AgentProfileFields {
+  uid: number;
+  gender: string;
+  name: string;
+  age: number;
+  education: string;
+  health: number;
+  household: string;
+  job: string;
+  has_car: boolean;
+  has_bike: boolean;
+  home_tile: number;
+  work_tile: number;
+}
+
+export interface AgentTrip {
+  arrival: string;
+  departure: string;
+  lat: number;
+  lng: number;
+  purpose: string;
+  trip_duration_minutes: number;
+  dwell_minutes: number;
+}
+
+export interface AgentEncounter {
+  contact_uid: number;
+  ts: string;
+  tile: number;
+}
+
+export interface AgentProfilePayload {
+  uid: number;
+  run_id: string;
+  profile: AgentProfileFields | null;
+  narrative: string | null;
+  trips: AgentTrip[];
+  encounters: AgentEncounter[];
+  warnings: string[];
+}
+
+export function fetchTimelineMeta(id: string, run?: string): Promise<TimelineMeta> {
+  const q = run ? `?run=${encodeURIComponent(run)}` : "";
+  return getJson<TimelineMeta>(`/api/experiments/${encodeURIComponent(id)}/timeline/meta${q}`);
+}
+
+export function fetchTimelineLegs(
+  id: string,
+  params: {
+    run?: string;
+    since: string;
+    until: string;
+    bbox: [number, number, number, number]; // [minLat, minLng, maxLat, maxLng]
+    maxAgents?: number;
+  },
+): Promise<TimelineLegsPayload> {
+  const [minLat, minLng, maxLat, maxLng] = params.bbox;
+  const q = new URLSearchParams({
+    since: params.since,
+    until: params.until,
+    min_lat: String(minLat),
+    min_lng: String(minLng),
+    max_lat: String(maxLat),
+    max_lng: String(maxLng),
+  });
+  if (params.run) q.set("run", params.run);
+  if (params.maxAgents) q.set("max_agents", String(params.maxAgents));
+  return getJson<TimelineLegsPayload>(
+    `/api/experiments/${encodeURIComponent(id)}/timeline/legs?${q.toString()}`,
+  );
+}
+
+export function fetchTimelineAgent(id: string, uid: number, run?: string): Promise<AgentProfilePayload> {
+  const q = run ? `?run=${encodeURIComponent(run)}` : "";
+  return getJson<AgentProfilePayload>(
+    `/api/experiments/${encodeURIComponent(id)}/timeline/agents/${uid}${q}`,
+  );
 }
 
 // ---- payload types (mirrors web/backend/app/payload.py) ----

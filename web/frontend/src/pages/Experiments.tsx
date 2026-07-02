@@ -61,15 +61,26 @@ export function Experiments() {
                         } users · ${fmtDate(run.summary.date_start)}→${fmtDate(run.summary.date_end)}`
                       : run.summary_error ?? ""}
                   </span>
-                  {runnable && (
-                    <Link
-                      to={`/experiments/${exp.id}/charts?run=${run.run_id}`}
-                      className="btn btn-secondary"
-                      style={{ marginLeft: "auto", padding: "4px 14px", fontSize: 13 }}
-                    >
-                      View charts
-                    </Link>
-                  )}
+                  <div style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
+                    {runnable && (
+                      <Link
+                        to={`/experiments/${exp.id}/charts?run=${run.run_id}`}
+                        className="btn btn-secondary"
+                        style={{ padding: "4px 14px", fontSize: 13 }}
+                      >
+                        View charts
+                      </Link>
+                    )}
+                    {run.summary && run.summary.rows > 0 && (
+                      <Link
+                        to={`/experiments/${exp.id}/timeline?run=${run.run_id}`}
+                        className="btn btn-secondary"
+                        style={{ padding: "4px 14px", fontSize: 13 }}
+                      >
+                        View timeline
+                      </Link>
+                    )}
+                  </div>
                 </div>
               ))}
             </div>

@@ -1,6 +1,7 @@
 node_modules/
 dist/
 *.tsbuildinfo
+.env*.local
 # tsc -b emits these from tsconfig.node.json; the source is vite.config.ts
 vite.config.js
 vite.config.d.ts

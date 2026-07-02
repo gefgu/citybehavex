@@ -36,3 +36,22 @@ def get_or_build(
     payload = build()
     cache_file.write_text(json.dumps(payload))
     return payload
+
+
+def get_or_build_parquet(
+    cache_name: str,
+    key_parts: tuple[str, ...],
+    input_path: Path,
+    build: Callable[[Path], None],
+) -> Path:
+    """Like ``get_or_build`` but for a parquet-file cache artifact keyed by a
+    single input's mtime (e.g. a derived per-run precomputation), rather than
+    the two-mtime JSON comparison-payload cache above.
+    """
+    subdir = CACHE_DIR / cache_name
+    subdir.mkdir(parents=True, exist_ok=True)
+    mtime = int(input_path.stat().st_mtime)
+    out = subdir / (f"{'__'.join(key_parts)}__{mtime}.parquet")
+    if not out.exists():
+        build(out)
+    return out
