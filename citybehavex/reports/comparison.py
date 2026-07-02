@@ -20,8 +20,8 @@ from skmob2 import (
     fit_values_to_truncated_powerlaw,
     fit_visitation_law,
     jensen_shannon_divergence,
-    od_matrix_common_part_of_commuters,
     time_bin_matrix_jensen_shannon_divergence,
+    trajectory_common_part_of_commuters,
     visits_per_user_wasserstein_distance,
     waiting_times,
     wasserstein_distance,
@@ -129,31 +129,17 @@ def _common_part_of_commuters(
     real_traj: skmob2.TrajDataFrame,
     resolutions: tuple[int, ...] = CPC_H3_RESOLUTIONS,
 ) -> list[tuple[int, float]]:
-    values = []
-    for resolution in resolutions:
-        synthetic_od = _trajectory_od_matrix(
-            traj.df,
-            uid_col=traj.uid_col,
-            datetime_col=traj.datetime_col,
-            lat_col=traj.lat_col,
-            lng_col=traj.lng_col,
-            resolution=resolution,
+    return [
+        (
+            resolution,
+            trajectory_common_part_of_commuters(
+                traj,
+                real_traj,
+                resolution=resolution,
+            ),
         )
-        observed_od = _trajectory_od_matrix(
-            real_traj.df,
-            uid_col=real_traj.uid_col,
-            datetime_col=real_traj.datetime_col,
-            lat_col=real_traj.lat_col,
-            lng_col=real_traj.lng_col,
-            resolution=resolution,
-        )
-        values.append(
-            (
-                resolution,
-                od_matrix_common_part_of_commuters(synthetic_od, observed_od),
-            )
-        )
-    return values
+        for resolution in resolutions
+    ]
 
 
 def _metrics_section_html(

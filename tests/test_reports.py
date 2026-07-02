@@ -99,7 +99,7 @@ def test_trajectory_od_matrix_orders_users_and_excludes_invalid_and_self_loops()
     assert origin not in matrix.columns
 
 
-def test_common_part_of_commuters_uses_labeled_od_matrices(monkeypatch):
+def test_common_part_of_commuters_uses_trajectory_cpc(monkeypatch):
     traj = SimpleNamespace(
         df=pd.DataFrame(
             {
@@ -118,23 +118,19 @@ def test_common_part_of_commuters_uses_labeled_od_matrices(monkeypatch):
     )
     calls = []
 
-    def cpc(synthetic_od, observed_od):
-        calls.append((synthetic_od, observed_od))
+    def cpc(synthetic_traj, observed_traj, *, resolution):
+        calls.append((synthetic_traj, observed_traj, resolution))
         return 0.75
 
     monkeypatch.setattr(
-        "citybehavex.reports.comparison.od_matrix_common_part_of_commuters",
+        "citybehavex.reports.comparison.trajectory_common_part_of_commuters",
         cpc,
     )
 
     values = _common_part_of_commuters(traj, traj)
 
     assert values == [(7, 0.75), (8, 0.75), (9, 0.75)]
-    assert len(calls) == 3
-    for synthetic_od, observed_od in calls:
-        assert isinstance(synthetic_od, pd.DataFrame)
-        assert synthetic_od.index.equals(observed_od.index)
-        assert synthetic_od.columns.equals(observed_od.columns)
+    assert calls == [(traj, traj, 7), (traj, traj, 8), (traj, traj, 9)]
 
 
 def test_metrics_section_html_shows_cpc_at_all_resolutions():
