@@ -179,9 +179,10 @@ def query_agent_trips(trajectory_path: Path, uid: int) -> list[dict[str, Any]]:
     try:
         columns = _parquet_columns(con, trajectory_path)
         category_expr = "category" if "category" in columns else "NULL::VARCHAR AS category"
+        activity_expr = "activity" if "activity" in columns else "NULL::BIGINT AS activity"
         rows = con.execute(
             f"""SELECT arrival, departure, lat, lng, purpose, {category_expr},
-                       trip_duration_minutes, dwell_minutes
+                       {activity_expr}, trip_duration_minutes, dwell_minutes
                 FROM read_parquet('{quote_path(trajectory_path)}')
                 WHERE uid = $uid ORDER BY arrival""",
             {"uid": uid},
@@ -192,15 +193,48 @@ def query_agent_trips(trajectory_path: Path, uid: int) -> list[dict[str, Any]]:
     return [dict(zip(cols, r)) for r in rows]
 
 
-def query_agent_encounters(encounters_path: Path, uid: int, limit: int = 20) -> list[dict[str, Any]]:
+def query_agent_encounters(
+    encounters_path: Path,
+    trajectory_path: Path,
+    uid: int,
+    limit: int = 20,
+) -> list[dict[str, Any]]:
     con = duckdb.connect()
     try:
+        columns = _parquet_columns(con, trajectory_path)
+        category_expr = "t.category" if "category" in columns else "NULL::VARCHAR AS category"
+        activity_expr = "t.activity" if "activity" in columns else "NULL::BIGINT AS activity"
         rows = con.execute(
-            f"""SELECT CASE WHEN agent = $uid THEN contact ELSE agent END AS contact_uid,
-                       to_timestamp(ts)::TIMESTAMP AS ts, tile
-                FROM read_parquet('{quote_path(encounters_path)}')
-                WHERE agent = $uid OR contact = $uid
-                ORDER BY ts DESC LIMIT $limit""",
+            f"""
+                WITH recent AS (
+                    SELECT CASE WHEN agent = $uid THEN contact ELSE agent END AS contact_uid,
+                           to_timestamp(ts)::TIMESTAMP AS ts, tile
+                    FROM read_parquet('{quote_path(encounters_path)}')
+                    WHERE agent = $uid OR contact = $uid
+                    ORDER BY ts DESC LIMIT $limit
+                ),
+                matched AS (
+                    SELECT recent.contact_uid, recent.ts, recent.tile,
+                           t.arrival AS stop_arrival, t.departure AS stop_departure,
+                           t.lat, t.lng, t.purpose, {category_expr}, {activity_expr},
+                           t.trip_duration_minutes, t.dwell_minutes,
+                           row_number() OVER (
+                               PARTITION BY recent.contact_uid, recent.ts, recent.tile
+                               ORDER BY t.arrival DESC NULLS LAST
+                           ) AS rn
+                    FROM recent
+                    LEFT JOIN read_parquet('{quote_path(trajectory_path)}') t
+                      ON t.uid = recent.contact_uid
+                     AND t.arrival <= recent.ts
+                     AND t.departure >= recent.ts
+                )
+                SELECT contact_uid, ts, tile, stop_arrival, stop_departure,
+                       lat, lng, purpose, category, activity,
+                       trip_duration_minutes, dwell_minutes
+                FROM matched
+                WHERE rn = 1
+                ORDER BY ts DESC
+            """,
             {"uid": uid, "limit": limit},
         ).fetchall()
         cols = [d[0] for d in con.description]

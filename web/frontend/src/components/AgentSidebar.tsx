@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { fetchTimelineAgent, type AgentProfilePayload } from "../api";
+import type { TimelineDetailSelection } from "./TimelineDetailPanel";
 
 function fmtDateTime(s: string): string {
   return s.replace("T", " ");
@@ -13,11 +14,13 @@ export function AgentSidebar({
   uid,
   expId,
   runId,
+  onSelectDetail,
   onClose,
 }: {
   uid: number;
   expId: string;
   runId?: string;
+  onSelectDetail: (selection: TimelineDetailSelection) => void;
   onClose: () => void;
 }) {
   const [data, setData] = useState<AgentProfilePayload | null>(null);
@@ -106,7 +109,30 @@ export function AgentSidebar({
                   </thead>
                   <tbody>
                     {data.trips.map((t, i) => (
-                      <tr key={i}>
+                      <tr
+                        key={i}
+                        className="agent-click-row"
+                        tabIndex={0}
+                        onClick={() =>
+                          onSelectDetail({
+                            kind: "trip",
+                            agentUid: uid,
+                            agentName: data.profile?.name ?? null,
+                            trip: t,
+                          })
+                        }
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" || e.key === " ") {
+                            e.preventDefault();
+                            onSelectDetail({
+                              kind: "trip",
+                              agentUid: uid,
+                              agentName: data.profile?.name ?? null,
+                              trip: t,
+                            });
+                          }
+                        }}
+                      >
                         <td>{fmtDateTime(t.arrival)}</td>
                         <td>{fmtPurpose(t.purpose, t.category)}</td>
                         <td>{t.dwell_minutes.toFixed(0)}</td>
@@ -131,8 +157,31 @@ export function AgentSidebar({
                   </thead>
                   <tbody>
                     {data.encounters.map((e, i) => (
-                      <tr key={i}>
-                        <td>{e.contact_uid}</td>
+                      <tr
+                        key={i}
+                        className="agent-click-row"
+                        tabIndex={0}
+                        onClick={() =>
+                          onSelectDetail({
+                            kind: "encounter",
+                            agentUid: uid,
+                            agentName: data.profile?.name ?? null,
+                            encounter: e,
+                          })
+                        }
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter" || event.key === " ") {
+                            event.preventDefault();
+                            onSelectDetail({
+                              kind: "encounter",
+                              agentUid: uid,
+                              agentName: data.profile?.name ?? null,
+                              encounter: e,
+                            });
+                          }
+                        }}
+                      >
+                        <td>{e.contact_profile?.name ?? e.contact_uid}</td>
                         <td>{fmtDateTime(e.ts)}</td>
                       </tr>
                     ))}

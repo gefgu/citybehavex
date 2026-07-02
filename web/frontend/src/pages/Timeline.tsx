@@ -3,6 +3,10 @@ import { Link, useParams, useSearchParams } from "react-router-dom";
 import { fetchTimelineMeta, type TimelineMeta } from "../api";
 import { TimelineMap } from "../components/TimelineMap";
 import { AgentSidebar } from "../components/AgentSidebar";
+import {
+  TimelineDetailPanel,
+  type TimelineDetailSelection,
+} from "../components/TimelineDetailPanel";
 
 export function Timeline() {
   const { id = "" } = useParams();
@@ -11,13 +15,25 @@ export function Timeline() {
   const [meta, setMeta] = useState<TimelineMeta | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [selectedUid, setSelectedUid] = useState<number | null>(null);
+  const [detailSelection, setDetailSelection] = useState<TimelineDetailSelection | null>(null);
 
   useEffect(() => {
     setMeta(null);
     setError(null);
     setSelectedUid(null);
+    setDetailSelection(null);
     fetchTimelineMeta(id, run).then(setMeta).catch((e) => setError(String(e)));
   }, [id, run]);
+
+  function selectAgent(uid: number) {
+    setSelectedUid(uid);
+    setDetailSelection(null);
+  }
+
+  function closeSidebar() {
+    setSelectedUid(null);
+    setDetailSelection(null);
+  }
 
   if (error) return <div className="state">Failed to load timeline: {error}</div>;
   if (!meta)
@@ -34,13 +50,17 @@ export function Timeline() {
       </p>
 
       <div className="timeline-layout">
-        <TimelineMap meta={meta} expId={id} runId={run} onSelectAgent={setSelectedUid} />
+        <div className="timeline-workspace">
+          <TimelineMap meta={meta} expId={id} runId={run} onSelectAgent={selectAgent} />
+          <TimelineDetailPanel selection={detailSelection} />
+        </div>
         {selectedUid !== null && (
           <AgentSidebar
             uid={selectedUid}
             expId={id}
             runId={run}
-            onClose={() => setSelectedUid(null)}
+            onSelectDetail={setDetailSelection}
+            onClose={closeSidebar}
           />
         )}
       </div>
