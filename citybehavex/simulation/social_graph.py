@@ -17,24 +17,100 @@ Over simulation time the Rust loop blends this initial weight with mobility-cosi
 
 from __future__ import annotations
 
+import math
+
 import numpy as np
+from sklearn.cluster import MiniBatchKMeans
+from sklearn.neighbors import NearestNeighbors
+
+
+def _empty_graph(n_nodes: int) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    return (
+        np.zeros(n_nodes + 1, dtype=np.int64),
+        np.empty(0, dtype=np.int64),
+        np.empty(0, dtype=np.float64),
+    )
+
+
+def _rows_to_csr(
+    rows: list[np.ndarray],
+    edge_weights: list[np.ndarray],
+    n_nodes: int,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    neighbor_starts = np.zeros(n_nodes + 1, dtype=np.int64)
+    for i, row in enumerate(rows):
+        neighbor_starts[i + 1] = neighbor_starts[i] + len(row)
+    if rows:
+        neighbors = np.concatenate(rows).astype(np.int64, copy=False)
+        weights = np.concatenate(edge_weights).astype(np.float64, copy=False)
+    else:
+        neighbors = np.empty(0, dtype=np.int64)
+        weights = np.empty(0, dtype=np.float64)
+    return neighbor_starts, neighbors, weights
+
+
+def _bounded_k(k: int, n: int) -> int:
+    if k <= 0:
+        raise ValueError("k must be positive")
+    return min(int(k), max(0, n - 1))
+
+
+def build_knn_fallback_social_graph(
+    n_agents: int,
+    k: int,
+    random_state: int,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Build a bounded synthetic social graph with at most ``n_agents * k`` edges.
+
+    Agents are placed deterministically in a synthetic unit square, then each row
+    connects to its k nearest peers. This replaces the old fixed-radius random
+    geometric graph whose expected degree grew linearly with population size.
+    """
+    if n_agents < 0:
+        raise ValueError("n_agents must be non-negative")
+    k = _bounded_k(k, n_agents)
+    if n_agents == 0 or k == 0:
+        return _empty_graph(n_agents)
+
+    rng = np.random.default_rng(random_state)
+    coordinates = rng.random((n_agents, 2), dtype=np.float64)
+    n_neighbors = min(k + 1, n_agents)
+    tree = NearestNeighbors(
+        n_neighbors=n_neighbors,
+        algorithm="kd_tree",
+        metric="euclidean",
+        n_jobs=-1,
+    )
+    tree.fit(coordinates)
+    indices = tree.kneighbors(coordinates, return_distance=False)
+
+    rows: list[np.ndarray] = []
+    weights: list[np.ndarray] = []
+    for i, row in enumerate(indices):
+        peers = row[row != i][:k].astype(np.int64, copy=False)
+        rows.append(peers)
+        weights.append(np.ones(len(peers), dtype=np.float64))
+    return _rows_to_csr(rows, weights, n_agents)
 
 
 def build_profile_social_graph(
     profile_embeddings: np.ndarray,
-    k: int = 10,
-    rng: np.random.Generator | None = None,
+    k: int = 20,
+    random_state: int = 42,
+    exact_threshold: int = 10_000,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Build a KNN social graph from L2-normalized profile embeddings.
 
     Each agent connects to its ``k`` most-similar peers (by cosine similarity).
-    Self-loops are excluded. When two agents would connect, the edge is stored
-    for both directions (symmetric graph).
+    Self-loops are excluded. Edges are directed so the edge count is capped by
+    ``n_agents * k``.
 
     Args:
         profile_embeddings: ``[n_agents, dim]`` L2-normalized embedding matrix.
         k: Number of nearest neighbours per agent.
-        rng: Optional RNG for breaking ties (not used currently, reserved).
+        random_state: Seed for deterministic large-graph cluster sampling.
+        exact_threshold: Use exact cosine kNN up to this population size; above
+            it, use MiniBatchKMeans clusters and sample bounded peer sets.
 
     Returns:
         ``(neighbor_starts, neighbors, edge_weights)`` where:
@@ -43,70 +119,96 @@ def build_profile_social_graph(
         - ``edge_weights`` is float64[n_edges] (cosine similarities)
     """
     n = len(profile_embeddings)
-    if n == 0:
-        empty = np.zeros(1, dtype=np.int64)
-        return empty, np.empty(0, dtype=np.int64), np.empty(0, dtype=np.float64)
+    k = _bounded_k(k, n)
+    if n == 0 or k == 0:
+        return _empty_graph(n)
+    if exact_threshold <= 0:
+        raise ValueError("exact_threshold must be positive")
 
-    k = min(k, n - 1)  # can't have more neighbours than other agents
+    embeddings = np.ascontiguousarray(profile_embeddings, dtype=np.float64)
+    if n <= exact_threshold:
+        return _exact_profile_knn(embeddings, k)
+    return _cluster_sample_profile_graph(embeddings, k, random_state)
 
-    # Cosine similarity matrix (already L2-normalized → dot product).
-    sim = np.clip(
-        profile_embeddings.astype(np.float64) @ profile_embeddings.astype(np.float64).T,
-        -1.0, 1.0,
+
+def _exact_profile_knn(
+    embeddings: np.ndarray,
+    k: int,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    n = len(embeddings)
+    nn = NearestNeighbors(
+        n_neighbors=min(k + 1, n),
+        algorithm="brute",
+        metric="cosine",
+        n_jobs=-1,
     )
-    np.fill_diagonal(sim, -2.0)  # exclude self-loops
+    nn.fit(embeddings)
+    distances, indices = nn.kneighbors(embeddings, return_distance=True)
 
-    # For each agent, pick top-k neighbours.
-    adj: list[list[tuple[int, float]]] = [[] for _ in range(n)]
-    for i in range(n):
-        top_k = np.argpartition(sim[i], -k)[-k:]
-        for j in top_k:
-            s = float(sim[i, j])
-            adj[i].append((int(j), s))
-            # Ensure symmetry: add reverse edge too.
-            adj[j].append((i, s))
-
-    # Deduplicate and sort each adjacency list.
-    neighbour_starts = np.zeros(n + 1, dtype=np.int64)
-    nb_list: list[int] = []
-    ew_list: list[float] = []
-    for i in range(n):
-        # Deduplicate by keeping max similarity for repeated edges.
-        seen: dict[int, float] = {}
-        for j, s in adj[i]:
-            if j in seen:
-                seen[j] = max(seen[j], s)
-            else:
-                seen[j] = s
-        sorted_nb = sorted(seen.items())
-        neighbour_starts[i + 1] = neighbour_starts[i] + len(sorted_nb)
-        for j, s in sorted_nb:
-            nb_list.append(j)
-            ew_list.append(s)
-
-    return (
-        neighbour_starts,
-        np.asarray(nb_list, dtype=np.int64),
-        np.asarray(ew_list, dtype=np.float64),
-    )
+    rows: list[np.ndarray] = []
+    weights: list[np.ndarray] = []
+    for i, row in enumerate(indices):
+        mask = row != i
+        peers = row[mask][:k].astype(np.int64, copy=False)
+        peer_distances = distances[i][mask][:k]
+        rows.append(peers)
+        weights.append(np.clip(1.0 - peer_distances, -1.0, 1.0))
+    return _rows_to_csr(rows, weights, n)
 
 
-def random_geometric_fallback(
-    n_agents: int,
-    radius: float,
+def _cluster_sample_profile_graph(
+    embeddings: np.ndarray,
+    k: int,
     random_state: int,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Thin wrapper around skmob2 random-geometric graph returning the same triple.
-
-    Used as a fallback when profile embeddings are unavailable. Edge weights are
-    all 1.0 (no semantic information).
-    """
-    from skmob2 import _core as _skmob_core
-
-    ns, nb = _skmob_core.model_social_graph_random_geometric(
-        int(n_agents), float(radius), int(random_state)
+    n = len(embeddings)
+    n_clusters = min(n, max(2, math.ceil(n / 500)))
+    kmeans = MiniBatchKMeans(
+        n_clusters=n_clusters,
+        random_state=random_state,
+        batch_size=min(4096, n),
+        n_init="auto",
     )
-    ns = np.asarray(ns, dtype=np.int64)
-    nb = np.asarray(nb, dtype=np.int64)
-    ew = np.ones(len(nb), dtype=np.float64)
-    return ns, nb, ew
+    labels = kmeans.fit_predict(embeddings)
+    clusters = [np.flatnonzero(labels == c).astype(np.int64) for c in range(n_clusters)]
+
+    centroids = np.ascontiguousarray(kmeans.cluster_centers_, dtype=np.float64)
+    norms = np.linalg.norm(centroids, axis=1, keepdims=True)
+    norms = np.where(norms == 0, 1.0, norms)
+    centroids = centroids / norms
+    centroid_order = np.argsort(-(centroids @ centroids.T), axis=1)
+
+    rows: list[np.ndarray] = []
+    weights: list[np.ndarray] = []
+    all_agents = np.arange(n, dtype=np.int64)
+    for i in range(n):
+        label = int(labels[i])
+        candidate_parts: list[np.ndarray] = []
+        total = 0
+        for cluster_id in centroid_order[label]:
+            cluster_agents = clusters[int(cluster_id)]
+            if len(cluster_agents) == 0:
+                continue
+            candidate_parts.append(cluster_agents)
+            total += len(cluster_agents)
+            if total > k:
+                break
+        candidates = (
+            np.concatenate(candidate_parts)
+            if candidate_parts
+            else all_agents
+        )
+        candidates = candidates[candidates != i]
+        if len(candidates) <= k:
+            peers = candidates.astype(np.int64, copy=False)
+        else:
+            rng = np.random.default_rng(np.random.SeedSequence([int(random_state), i]))
+            peers = rng.choice(candidates, size=k, replace=False).astype(np.int64, copy=False)
+            peers.sort()
+        rows.append(peers)
+        if len(peers) == 0:
+            weights.append(np.empty(0, dtype=np.float64))
+        else:
+            sims = embeddings[i] @ embeddings[peers].T
+            weights.append(np.clip(sims, -1.0, 1.0).astype(np.float64, copy=False))
+    return _rows_to_csr(rows, weights, n)

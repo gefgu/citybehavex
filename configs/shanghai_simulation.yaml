@@ -19,6 +19,8 @@ simulation:
   relevance_column: relevance
   granularity_minutes: 60
   car_speed_kmh: 35.0        # dense Shanghai urban average
+  social_graph_k: 20
+  profile_graph_exact_threshold: 10000
 
 llm:
   base_url: "http://localhost:8081"

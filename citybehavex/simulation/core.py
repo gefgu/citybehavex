@@ -11,7 +11,10 @@ import pandas as pd
 import citybehavex._core as _cbx_core
 
 from citybehavex.schedules import DiaryArrays
-from citybehavex.simulation.social_graph import build_profile_social_graph, random_geometric_fallback
+from citybehavex.simulation.social_graph import (
+    build_knn_fallback_social_graph,
+    build_profile_social_graph,
+)
 
 
 @dataclass
@@ -33,7 +36,8 @@ def simulate_agents(
     rho: float = 0.6,
     gamma: float = 0.21,
     alpha: float = 0.2,
-    social_graph_radius: float = 0.5,
+    social_graph_k: int = 20,
+    profile_graph_exact_threshold: int = 10_000,
     dt_update_mob_sim_hours: float = 24 * 7,
     indipendency_window_hours: float = 0.5,
     rsl: bool = False,
@@ -69,11 +73,14 @@ def simulate_agents(
 
     if profile_embeddings is not None:
         neighbor_starts, neighbors, edge_weights = build_profile_social_graph(
-            profile_embeddings, k=10
+            profile_embeddings,
+            k=social_graph_k,
+            random_state=random_state,
+            exact_threshold=profile_graph_exact_threshold,
         )
     else:
-        neighbor_starts, neighbors, edge_weights = random_geometric_fallback(
-            n_agents, social_graph_radius, random_state
+        neighbor_starts, neighbors, edge_weights = build_knn_fallback_social_graph(
+            n_agents, social_graph_k, random_state
         )
 
     neighbor_starts = np.ascontiguousarray(neighbor_starts, dtype=np.int64)
