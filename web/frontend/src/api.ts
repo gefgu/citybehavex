@@ -158,11 +158,9 @@ export interface AgentProfileFields {
   work_tile: number;
 }
 
-export interface AgentTrip {
+export interface AgentTripActivity {
   arrival: string;
   departure: string;
-  lat: number;
-  lng: number;
   purpose: string;
   category?: string | null;
   activity: number | null;
@@ -170,6 +168,18 @@ export interface AgentTrip {
   activity_description: string | null;
   trip_duration_minutes: number;
   dwell_minutes: number;
+}
+
+export interface AgentTrip {
+  arrival: string;
+  departure: string;
+  lat: number;
+  lng: number;
+  purpose: string;
+  category?: string | null;
+  trip_duration_minutes: number;
+  dwell_minutes: number;
+  activities: AgentTripActivity[];
 }
 
 export interface AgentEncounter {

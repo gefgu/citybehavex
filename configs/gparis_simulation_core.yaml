@@ -23,6 +23,7 @@ road_network:
   nodes_output: data/gparis_road_graph_nodes.parquet
   edges_output: data/gparis_road_graph_edges.parquet
   snap_output: data/gparis_road_graph_snap.parquet
+  max_leg_waypoints: 128
 
 llm:
   base_url: "http://localhost:8081"

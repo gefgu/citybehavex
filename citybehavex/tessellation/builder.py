@@ -9,12 +9,16 @@ import typer
 _CATEGORY_CSV = Path(__file__).parents[1] / "category" / "unique_categories.csv"
 
 
+def normalize_purpose_label(value: object) -> str:
+    """Collapse category-level purpose labels to the simulator's 3-purpose contract."""
+    if isinstance(value, str) and value.strip().upper() == "WORK":
+        return "WORK"
+    return "OTHER"
+
+
 def load_category_mapping() -> dict[str, str]:
     mapping_df = pd.read_csv(_CATEGORY_CSV)
-    mapping_df["purpose"] = mapping_df["purpose"].where(
-        mapping_df["purpose"].eq("WORK"),
-        "OTHER",
-    )
+    mapping_df["purpose"] = mapping_df["purpose"].map(normalize_purpose_label)
     return dict(zip(mapping_df["primary_category"], mapping_df["purpose"]))
 
 
@@ -156,5 +160,6 @@ def build_poi_tessellation(
 def purpose_distribution(tessellation_df: pd.DataFrame) -> dict[str, float]:
     if "purpose" not in tessellation_df.columns or len(tessellation_df) == 0:
         return {}
-    counts = tessellation_df["purpose"].value_counts(normalize=True)
+    purposes = tessellation_df["purpose"].map(normalize_purpose_label)
+    counts = purposes.value_counts(normalize=True)
     return {str(key): float(value) for key, value in counts.items()}

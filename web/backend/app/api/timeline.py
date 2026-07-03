@@ -15,11 +15,14 @@ from ..datasource import quote_path, run_summary
 from ..experiments import Experiment, Run, get_experiment
 from ..models import ApiResponseWrapper
 from ..timeline_data import (
+    group_trips_by_location,
     legs_index_path,
     moving_index_path,
     query_active_legs,
     query_agent_encounters,
     query_agent_trips,
+    query_activity_at_stop,
+    query_stop_activities,
     run_bbox,
 )
 
@@ -156,8 +159,24 @@ def get_timeline_agent(
         warnings.append("no agent profiles available for this experiment")
 
     trips = query_agent_trips(selected.path, uid)
-    for trip in trips:
-        trip.update(_activity_fields(trip.get("activity")))
+    has_activities_table = selected.activities_path.exists()
+    if has_activities_table:
+        # Post-fix run: each row is already one real stop, no lat/lng-merge
+        # guesswork needed — attach that stop's real micro-activities.
+        activities_by_stop = query_stop_activities(selected.activities_path, uid)
+        for trip in trips:
+            trip.pop("activity", None)
+            stop_id = trip.pop("stop_id", None)
+            stop_activities = activities_by_stop.get(int(stop_id), []) if stop_id is not None else []
+            trip["activities"] = [
+                {**a, **_activity_fields(a.get("activity"))} for a in stop_activities
+            ]
+    else:
+        # Legacy run: fall back to the lat/lng-adjacency merge workaround.
+        for trip in trips:
+            trip.pop("stop_id", None)
+            trip.update(_activity_fields(trip.get("activity")))
+        trips = group_trips_by_location(trips)
 
     encounters: list[dict[str, Any]] = []
     if selected.encounters_path.exists():
@@ -167,7 +186,15 @@ def get_timeline_agent(
             [int(e["contact_uid"]) for e in encounters],
         )
         for encounter in encounters:
-            encounter.update(_activity_fields(encounter.get("activity")))
+            stop_id = encounter.pop("stop_id", None)
+            activity_row = None
+            if has_activities_table and stop_id is not None and encounter.get("stop_arrival") is not None:
+                activity_row = query_activity_at_stop(
+                    selected.activities_path, int(encounter["contact_uid"]), int(stop_id), encounter["ts"]
+                )
+                encounter.update(_activity_fields(activity_row.get("activity") if activity_row else None))
+            else:
+                encounter.update(_activity_fields(encounter.get("activity")))
             contact = contact_profiles.get(int(encounter["contact_uid"]))
             if contact:
                 contact_profile, contact_narrative = contact

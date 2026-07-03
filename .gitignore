@@ -17,6 +17,7 @@ gparis_sample_trip_with_lengths.parquet
 *.fgb
 
 *.html
+!web/frontend/index.html
 # Regenerable LLM diary cache (keep only validated_diaries*.json)
 data/llm_diaries_gparis/prompt*.txt
 data/llm_diaries_gparis/raw_response*.json
@@ -35,3 +36,5 @@ data/**/*.npz
 # web app
 node_modules/
 data/.web_cache/
+
+data/mtus/

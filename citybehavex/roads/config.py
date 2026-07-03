@@ -14,4 +14,4 @@ class RoadNetworkConfig(BaseModel):
     edges_output: str = "data/road_graph_edges.parquet"
     snap_output: str = "data/road_graph_snap.parquet"
     snap_max_distance_m: float = 750.0
-    max_leg_waypoints: int = 16
+    max_leg_waypoints: int = 128

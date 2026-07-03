@@ -8,6 +8,26 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 Purpose = Literal["HOME", "WORK", "OTHER"]
 
+_PURPOSE_ALIASES = {
+    "HOME": "HOME",
+    "HOUSE": "HOME",
+    "RESIDENTIAL": "HOME",
+    "WORK": "WORK",
+    "OFFICE": "WORK",
+    "SCHOOL": "OTHER",
+    "STUDY": "OTHER",
+    "EDUCATION": "OTHER",
+    "PURCHASE": "OTHER",
+    "SHOPPING": "OTHER",
+    "ERRAND": "OTHER",
+    "ERRANDS": "OTHER",
+    "LEISURE": "OTHER",
+    "RECREATION": "OTHER",
+    "HEALTHCARE": "OTHER",
+    "SOCIAL": "OTHER",
+    "OTHER": "OTHER",
+}
+
 
 class DiaryValidationError(ValueError):
     """Raised when an LLM response or diary artifact fails validation."""
@@ -58,6 +78,13 @@ class DiaryEpisode(BaseModel):
     start: str
     end: str
     purpose: Purpose
+
+    @field_validator("purpose", mode="before")
+    @classmethod
+    def normalize_purpose(cls, value: object) -> object:
+        if not isinstance(value, str):
+            return value
+        return _PURPOSE_ALIASES.get(value.strip().upper(), value)
 
     @field_validator("start", "end")
     @classmethod

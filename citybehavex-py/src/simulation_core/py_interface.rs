@@ -86,7 +86,6 @@ pub fn simulation_core_simulate_agents<'py>(
         Bound<'py, PyArray1<i64>>,
         Bound<'py, PyArray1<i64>>,
         Bound<'py, PyArray1<i64>>,
-        Bound<'py, PyArray1<i64>>,
     ),
     (
         Bound<'py, PyArray1<i64>>,
@@ -95,6 +94,14 @@ pub fn simulation_core_simulate_agents<'py>(
         Bound<'py, PyArray1<i32>>,
         Bound<'py, PyArray1<f64>>,
         Bound<'py, PyArray1<f64>>,
+        Bound<'py, PyArray1<i64>>,
+    ),
+    (
+        Bound<'py, PyArray1<i64>>,
+        Bound<'py, PyArray1<i64>>,
+        Bound<'py, PyArray1<i32>>,
+        Bound<'py, PyArray1<i64>>,
+        Bound<'py, PyArray1<i64>>,
         Bound<'py, PyArray1<i64>>,
     ),
 )> {
@@ -277,7 +284,6 @@ pub fn simulation_core_simulate_agents<'py>(
             output.encounter_contact.into_pyarray(py),
             output.encounter_tile.into_pyarray(py),
             output.encounter_ts.into_pyarray(py),
-            output.activity.into_pyarray(py),
         ),
         (
             output.stop_id.into_pyarray(py),
@@ -287,6 +293,14 @@ pub fn simulation_core_simulate_agents<'py>(
             output.path_lat.into_pyarray(py),
             output.path_lng.into_pyarray(py),
             output.path_t.into_pyarray(py),
+        ),
+        (
+            output.act_agent.into_pyarray(py),
+            output.act_stop_id.into_pyarray(py),
+            output.act_seq.into_pyarray(py),
+            output.act_activity.into_pyarray(py),
+            output.act_arrival.into_pyarray(py),
+            output.act_departure.into_pyarray(py),
         ),
     ))
 }

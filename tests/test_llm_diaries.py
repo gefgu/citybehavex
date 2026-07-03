@@ -111,6 +111,15 @@ def test_parse_single_diary_response_accepts_fenced_json():
     assert diary.diary_id == "routine-1"
 
 
+def test_parse_single_diary_response_normalizes_known_purpose_aliases():
+    payload = _diary(1)
+    payload["episodes"][1]["purpose"] = "PURCHASE"
+
+    diary = parse_single_diary_response(_chat(payload))
+
+    assert diary.episodes[1].purpose == "OTHER"
+
+
 def test_truncated_lognormal_probabilities_and_allocations():
     probabilities = lognormal_location_probabilities(1.0, 0.5, 6)
 

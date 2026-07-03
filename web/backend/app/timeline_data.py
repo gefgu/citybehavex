@@ -1,11 +1,20 @@
 """DuckDB query layer for the timeline view.
 
-Trajectory parquets are stop tables (one row per activity episode), not
-continuous GPS: ``uid, datetime, lat, lng, arrival, departure,
-trip_duration_minutes, dwell_minutes, activity, purpose``. For agent ``uid``
-sorted by ``arrival``, the leg from the previous stop to a row travels in a
-straight line during ``[arrival - trip_duration_minutes*60s, arrival]``, then
-the agent dwells at that row's location during ``[arrival, departure]``.
+Trajectory parquets are stop tables (one row per real physical location
+visit), not continuous GPS: ``uid, datetime, lat, lng, arrival, departure,
+trip_duration_minutes, dwell_minutes, purpose``. For agent ``uid`` sorted by
+``arrival``, the leg from the previous stop to a row travels in a straight
+line during ``[arrival - trip_duration_minutes*60s, arrival]``, then the
+agent dwells at that row's location during ``[arrival, departure]``. Runs
+generated after the stop-table fix also have a sibling ``_activities.parquet``
+(one row per sampled micro-activity, keyed by ``stop_id``) — a single stop
+can span several micro-activities (e.g. sleep -> breakfast -> get ready, all
+at HOME); see ``query_stop_activities``. Legacy runs predating that fix have
+neither the sibling file nor this one-row-per-visit guarantee (a diary
+abstract-location change could commit a duplicate zero-travel row at the same
+lat/lng, each with its own inline ``activity`` column) — see
+``group_trips_by_location`` for the client-side workaround still used for
+those.
 
 Rendering a live, viewport/time-filtered view of this directly against the raw
 table would mean re-computing "each row's previous stop" (a ``LAG()`` window
@@ -17,6 +26,7 @@ index"); all live per-request queries filter that narrower artifact instead.
 
 from __future__ import annotations
 
+from collections import Counter
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -264,9 +274,10 @@ def query_agent_trips(trajectory_path: Path, uid: int) -> list[dict[str, Any]]:
         columns = _parquet_columns(con, trajectory_path)
         category_expr = "category" if "category" in columns else "NULL::VARCHAR AS category"
         activity_expr = "activity" if "activity" in columns else "NULL::BIGINT AS activity"
+        stop_id_expr = "stop_id" if "stop_id" in columns else "NULL::BIGINT AS stop_id"
         rows = con.execute(
             f"""SELECT arrival, departure, lat, lng, purpose, {category_expr},
-                       {activity_expr}, trip_duration_minutes, dwell_minutes
+                       {activity_expr}, {stop_id_expr}, trip_duration_minutes, dwell_minutes
                 FROM read_parquet('{quote_path(trajectory_path)}')
                 WHERE uid = $uid ORDER BY arrival""",
             {"uid": uid},
@@ -275,6 +286,98 @@ def query_agent_trips(trajectory_path: Path, uid: int) -> list[dict[str, Any]]:
     finally:
         con.close()
     return [dict(zip(cols, r)) for r in rows]
+
+
+def query_stop_activities(activities_path: Path, uid: int) -> dict[int, list[dict[str, Any]]]:
+    """Micro-activities for ``uid``'s stops, grouped by ``stop_id``.
+
+    Post-fix runs sample one or more micro-activities per real stop (kept in
+    this sibling ``_activities.parquet`` so the stop table itself stays a
+    clean one-row-per-visit table). Rows within each group are ordered by
+    ``seq``.
+    """
+    con = duckdb.connect()
+    try:
+        rows = con.execute(
+            f"""SELECT stop_id, seq, activity, arrival, departure
+                FROM read_parquet('{quote_path(activities_path)}')
+                WHERE uid = $uid ORDER BY stop_id, seq""",
+            {"uid": uid},
+        ).fetchall()
+        cols = [d[0] for d in con.description]
+    finally:
+        con.close()
+    by_stop: dict[int, list[dict[str, Any]]] = {}
+    for r in rows:
+        row = dict(zip(cols, r))
+        by_stop.setdefault(int(row["stop_id"]), []).append(row)
+    return by_stop
+
+
+def group_trips_by_location(trips: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Legacy-run fallback: collapse consecutive same-location stop rows into one visit.
+
+    Pre-fix runs (no sibling ``_activities.parquet``) had a simulation core
+    bug where a new stop row was committed whenever the diary's abstract-
+    location index changed, even when it resolved to the exact same (lat,
+    lng) as the agent's current stop (zero travel time in between). Each of
+    those rows independently sampled its own micro-activity and got its own
+    purpose re-annotated from the diary by timestamp, so a single real stay
+    (an overnight HOME stay, a workday) showed up as several short,
+    inconsistently-labeled entries.
+
+    The simulation core no longer does this — new runs get one stop row per
+    real physical visit, with micro-activities in their own table (see
+    ``query_stop_activities``). This function is now only exercised for runs
+    generated before that fix, as a best-effort client-side workaround: group
+    by adjacency + exact location so trip history still shows one entry per
+    apparent visit; the original per-row detail is kept under ``activities``
+    for the detail view.
+    """
+    groups: list[list[dict[str, Any]]] = []
+    for trip in trips:
+        if groups and groups[-1][-1]["lat"] == trip["lat"] and groups[-1][-1]["lng"] == trip["lng"]:
+            groups[-1].append(trip)
+        else:
+            groups.append([trip])
+
+    merged: list[dict[str, Any]] = []
+    for activities in groups:
+        first, last = activities[0], activities[-1]
+        purpose_counts = Counter(a["purpose"] for a in activities if a.get("purpose") is not None)
+        purpose = purpose_counts.most_common(1)[0][0] if purpose_counts else first.get("purpose")
+        merged.append(
+            {
+                "arrival": first["arrival"],
+                "departure": last["departure"],
+                "lat": first["lat"],
+                "lng": first["lng"],
+                "purpose": purpose,
+                "category": first.get("category"),
+                "trip_duration_minutes": first.get("trip_duration_minutes"),
+                "dwell_minutes": (last["departure"] - first["arrival"]).total_seconds() / 60.0,
+                "activities": activities,
+            }
+        )
+    return merged
+
+
+def query_activity_at_stop(activities_path: Path, uid: int, stop_id: int, ts: datetime) -> dict[str, Any] | None:
+    """The micro-activity active at ``ts`` within one specific stop, if any."""
+    con = duckdb.connect()
+    try:
+        row = con.execute(
+            f"""SELECT seq, activity, arrival, departure
+                FROM read_parquet('{quote_path(activities_path)}')
+                WHERE uid = $uid AND stop_id = $stop_id
+                  AND arrival <= $ts AND departure >= $ts
+                ORDER BY seq DESC LIMIT 1""",
+            {"uid": uid, "stop_id": stop_id, "ts": ts},
+        ).fetchone()
+        cols = [d[0] for d in con.description] if row is not None else []
+    finally:
+        con.close()
+    return dict(zip(cols, row)) if row is not None else None
 
 
 def query_agent_encounters(
@@ -288,6 +391,7 @@ def query_agent_encounters(
         columns = _parquet_columns(con, trajectory_path)
         category_expr = "t.category" if "category" in columns else "NULL::VARCHAR AS category"
         activity_expr = "t.activity" if "activity" in columns else "NULL::BIGINT AS activity"
+        stop_id_expr = "t.stop_id" if "stop_id" in columns else "NULL::BIGINT AS stop_id"
         rows = con.execute(
             f"""
                 WITH recent AS (
@@ -300,7 +404,7 @@ def query_agent_encounters(
                 matched AS (
                     SELECT recent.contact_uid, recent.ts, recent.tile,
                            t.arrival AS stop_arrival, t.departure AS stop_departure,
-                           t.lat, t.lng, t.purpose, {category_expr}, {activity_expr},
+                           t.lat, t.lng, t.purpose, {category_expr}, {activity_expr}, {stop_id_expr},
                            t.trip_duration_minutes, t.dwell_minutes,
                            row_number() OVER (
                                PARTITION BY recent.contact_uid, recent.ts, recent.tile
@@ -313,7 +417,7 @@ def query_agent_encounters(
                      AND t.departure >= recent.ts
                 )
                 SELECT contact_uid, ts, tile, stop_arrival, stop_departure,
-                       lat, lng, purpose, category, activity,
+                       lat, lng, purpose, category, activity, stop_id,
                        trip_duration_minutes, dwell_minutes
                 FROM matched
                 WHERE rn = 1

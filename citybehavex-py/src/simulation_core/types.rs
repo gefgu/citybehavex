@@ -112,6 +112,9 @@ pub(crate) struct AgentParData {
     pub(crate) encounters: Vec<Encounter>,
     pub(crate) activity_counts: Vec<u32>,
     pub(crate) pending_departure: i64,
+    /// Ordinal of the next micro-activity sampled within the currently-open
+    /// stop; reset to 0 whenever a real relocation opens a new stop.
+    pub(crate) activity_seq: i32,
     /// Cached CDF for gravity-exploration of unvisited tiles.
     /// Keyed by (source_tile, s_at_build); invalidated when either changes.
     pub(crate) explore_cache: Option<(usize, f64, Vec<usize>, Vec<f64>)>,
