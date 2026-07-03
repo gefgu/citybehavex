@@ -10,9 +10,31 @@ from citybehavex.activities import (
     build_eligibility_csr,
 )
 from citybehavex.simulation.core import simulate_agents
+from citybehavex.simulation.core import build_social_graph_artifact
 
 _SLOT = 900
 _SPEED = 50.0
+
+
+def test_build_social_graph_artifact_packs_csr_graph():
+    artifact = build_social_graph_artifact(
+        np.array([0, 2, 3, 3], dtype=np.int64),
+        np.array([1, 2, 2], dtype=np.int64),
+        np.array([0.9, 0.4, 0.8], dtype=np.float64),
+        n_agents=3,
+        random_state=7,
+        social_graph_k=2,
+        profile_embeddings=np.array([[1.0, 0.0], [0.8, 0.2], [0.0, 1.0]], dtype=np.float64),
+        profile_types=["worker", "student", "retired"],
+    )
+    payload = artifact.to_dict()
+
+    assert payload["node_count"] == 3
+    assert payload["edge_count"] == 3
+    assert payload["layout"] == "profile_svd"
+    assert payload["degrees"] == [2, 1, 0]
+    assert payload["nodes"][0][3:] == [1, "worker"]
+    assert payload["edges"][0] == [0, 1, 0.9]
 
 
 def _run(
@@ -278,6 +300,56 @@ def test_simulate_agents_returns_trip_columns():
     assert pd.api.types.is_datetime64_any_dtype(df["arrival"])
     assert isinstance(moving, pd.DataFrame)
     assert isinstance(activities, pd.DataFrame)
+
+
+def test_simulate_agents_can_return_social_graph_artifact():
+    tess = pd.DataFrame(
+        {
+            "tile_id": [0, 1],
+            "lat": [48.8566, 48.95],
+            "lng": [2.3522, 2.55],
+            "relevance": [1.0, 1.0],
+        }
+    )
+    diary_arrays = (
+        np.array([0, 8 * 3600, 18 * 3600], dtype=np.int64),
+        np.array([0, 1, 0], dtype=np.int32),
+        np.array([0, 0], dtype=np.int64),
+        np.array([3, 3], dtype=np.int64),
+    )
+    default_result = simulate_agents(
+        tess,
+        "relevance",
+        diary_arrays,
+        start_ts=0,
+        end_ts=86400,
+        slot_seconds=_SLOT,
+        car_speed_kmh=_SPEED,
+        n_agents=2,
+        random_state=42,
+        social_graph_k=1,
+    )
+    assert len(default_result) == 4
+
+    result = simulate_agents(
+        tess,
+        "relevance",
+        diary_arrays,
+        start_ts=0,
+        end_ts=86400,
+        slot_seconds=_SLOT,
+        car_speed_kmh=_SPEED,
+        n_agents=2,
+        random_state=42,
+        social_graph_k=1,
+        return_social_graph=True,
+        social_node_profiles=["worker", "student"],
+    )
+    assert len(result) == 5
+    artifact = result[4].to_dict()
+    assert artifact["node_count"] == 2
+    assert artifact["edge_count"] == 2
+    assert artifact["nodes"][0][4] == "worker"
 
 
 def test_simulate_agents_encounters_has_expected_columns():

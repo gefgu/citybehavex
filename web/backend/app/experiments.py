@@ -64,6 +64,10 @@ class Run:
     def activities_path(self) -> Path:
         return self.path.with_name(f"{self.path.stem}_activities{self.path.suffix}")
 
+    @property
+    def social_network_path(self) -> Path:
+        return self.path.with_name(f"{self.path.stem}_social_network.json")
+
     def to_dict(self, with_summary: bool = False) -> dict[str, Any]:
         d: dict[str, Any] = {
             "run_id": self.run_id,
@@ -268,7 +272,7 @@ def delete_run(exp_id: str, run_id: str) -> list[Path]:
         raise FileNotFoundError(run_id)
 
     deleted: list[Path] = []
-    for path in (run.path, run.encounters_path, run.moving_path):
+    for path in (run.path, run.encounters_path, run.moving_path, run.activities_path, run.social_network_path):
         if path.exists():
             path.unlink()
             deleted.append(path)

@@ -14,6 +14,8 @@ arrays.
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
 from typing import Any, Optional
 
 import numpy as np
@@ -59,6 +61,7 @@ from .reports_bridge import (
     load_trajectory,
     waiting_times_minutes,
 )
+from citybehavex.simulation.core import social_network_sidecar_path
 
 # STVD bivariate palette (volume-diff bin x peak-shift bin), matching
 # skmob_vis.stvd.STVD_COLORS so the map reads identically to the HTML report.
@@ -283,6 +286,31 @@ def _annotate_stvd(layers: dict[int, dict]) -> dict[str, Any]:
             "threshold": STVD_VOLUME_THRESHOLD}
 
 
+def _load_social_network_sidecar(synthetic_path: str) -> dict[str, Any] | None:
+    path = social_network_sidecar_path(synthetic_path)
+    if not path.exists():
+        return None
+    data = json.loads(Path(path).read_text(encoding="utf-8"))
+    nodes = data.get("nodes")
+    edges = data.get("edges")
+    degrees = data.get("degrees")
+    node_count = int(data.get("node_count", -1))
+    edge_count = int(data.get("edge_count", -1))
+    if not isinstance(nodes, list) or not isinstance(edges, list):
+        raise ValueError(f"invalid social network sidecar arrays: {path}")
+    if node_count != len(nodes) or edge_count != len(edges):
+        raise ValueError(f"social network sidecar count mismatch: {path}")
+    if degrees is not None and (not isinstance(degrees, list) or len(degrees) != len(nodes)):
+        raise ValueError(f"social network sidecar degree count mismatch: {path}")
+    for row in nodes[:10]:
+        if not isinstance(row, list) or len(row) < 4:
+            raise ValueError(f"invalid social network node row: {path}")
+    for row in edges[:10]:
+        if not isinstance(row, list) or len(row) < 2:
+            raise ValueError(f"invalid social network edge row: {path}")
+    return data
+
+
 # --------------------------------------------------------------------------- #
 # main entry
 # --------------------------------------------------------------------------- #
@@ -470,6 +498,9 @@ def build_comparison_payload(
     if traj.lat_col and traj.lng_col and real_traj.lat_col and real_traj.lng_col:
         stvd = guard("stvd", lambda: _annotate_stvd(_compute_stvd_layers(traj, real_traj, resolutions=[7, 9])))
 
+    # ---- social network --------------------------------------------------- #
+    social_network = guard("social_network", lambda: _load_social_network_sidecar(synthetic_path))
+
     return {
         "labels": labels,
         "metrics": {"wasserstein": wasserstein, "jsd": jsd,
@@ -480,6 +511,7 @@ def build_comparison_payload(
         "profiles": profiles,
         "motifs": motifs,
         "stvd": stvd,
+        "social_network": social_network,
         "warnings": warnings,
     }
 

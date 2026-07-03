@@ -19,7 +19,7 @@ from citybehavex.llm_diaries.training import annotate_trajectory_purposes_ddcrp
 from citybehavex.profiles import AgentProfile, generate_profiles, load_profiles, profile_to_narrative, profiles_to_frame
 from citybehavex.roads import build_road_graph, snap_locations_to_graph
 from citybehavex.schedules import DiaryBank, build_ddcrp_diary, build_diary_bank
-from citybehavex.simulation.core import CoreTiming, simulate_agents
+from citybehavex.simulation.core import CoreTiming, simulate_agents, social_network_sidecar_path
 from citybehavex.tessellation import build_poi_tessellation, build_tessellation, purpose_distribution
 
 
@@ -369,7 +369,8 @@ def _run_simulation_core(
             max_leg_waypoints=rn.max_leg_waypoints,
         )
 
-    df, encounters, moving, activities = simulate_agents(
+    profile_types = [p.job for p in profiles] if profiles is not None else None
+    df, encounters, moving, activities, social_graph = simulate_agents(
         tessellation_df,
         relevance_column,
         diary_arrays,
@@ -392,20 +393,26 @@ def _run_simulation_core(
         purpose_acts=purpose_acts,
         act_kappa=config.activities.kappa,
         act_temp=config.activities.temperature,
+        return_social_graph=True,
+        social_node_profiles=profile_types,
         **road_kwargs,
     )
+    base = output_path or config.simulation.output
+    social_path = social_network_sidecar_path(base)
+    social_graph.write_json(social_path)
+    typer.echo(
+        f"Saved social network ({social_graph.metadata['node_count']:,} nodes, "
+        f"{social_graph.metadata['edge_count']:,} edges) -> {social_path}"
+    )
     if len(encounters) > 0:
-        base = output_path or config.simulation.output
         enc_path = base.replace(".parquet", "_encounters.parquet")
         encounters.to_parquet(enc_path, index=False)
         typer.echo(f"Saved {len(encounters):,} encounters -> {enc_path}")
     if rn.enabled and len(moving) > 0:
-        base = output_path or config.simulation.output
         moving_path = base.replace(".parquet", "_moving.parquet")
         moving.to_parquet(moving_path, index=False)
         typer.echo(f"Saved {len(moving):,} waypoints -> {moving_path}")
     if config.activities.enabled and len(activities) > 0:
-        base = output_path or config.simulation.output
         act_path = base.replace(".parquet", "_activities.parquet")
         activities.to_parquet(act_path, index=False)
         typer.echo(f"Saved {len(activities):,} activities -> {act_path}")

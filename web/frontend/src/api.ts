@@ -317,6 +317,17 @@ export interface StvdBlock {
   colors: string[][];
   threshold: number;
 }
+export interface SocialNetworkBlock {
+  kind: string;
+  node_count: number;
+  edge_count: number;
+  layout: string;
+  directed: boolean;
+  social_graph_k: number;
+  nodes: ([number, number, number, number] | [number, number, number, number, string])[];
+  edges: [number, number, number?][];
+  degrees?: number[];
+}
 export interface ChartPayload {
   run_id: string;
   labels: { synthetic: string; observed: string };
@@ -331,5 +342,6 @@ export interface ChartPayload {
   profiles: ProfilesBlock | null;
   motifs: MotifsBlock | null;
   stvd: StvdBlock | null;
+  social_network: SocialNetworkBlock | null;
   warnings: string[];
 }

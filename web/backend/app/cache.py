@@ -14,10 +14,21 @@ from typing import Any, Callable
 from .config import CACHE_DIR
 
 
-def _key(exp_id: str, run_id: str, synthetic: Path, observed: Path) -> str:
+def _key(
+    exp_id: str,
+    run_id: str,
+    synthetic: Path,
+    observed: Path,
+    extra_paths: tuple[Path, ...] = (),
+) -> str:
     syn_mtime = int(synthetic.stat().st_mtime)
     obs_mtime = int(observed.stat().st_mtime)
-    return f"{exp_id}__{run_id}__{syn_mtime}__{obs_mtime}.json"
+    extra = "__".join(
+        f"{path.stem}-{int(path.stat().st_mtime) if path.exists() else 'missing'}"
+        for path in extra_paths
+    )
+    suffix = f"__{extra}" if extra else ""
+    return f"{exp_id}__{run_id}__{syn_mtime}__{obs_mtime}{suffix}.json"
 
 
 def get_or_build(
@@ -28,9 +39,10 @@ def get_or_build(
     build: Callable[[], dict[str, Any]],
     *,
     refresh: bool = False,
+    extra_paths: tuple[Path, ...] = (),
 ) -> dict[str, Any]:
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
-    cache_file = CACHE_DIR / _key(exp_id, run_id, synthetic, observed)
+    cache_file = CACHE_DIR / _key(exp_id, run_id, synthetic, observed, extra_paths)
     if cache_file.exists() and not refresh:
         return json.loads(cache_file.read_text())
     payload = build()

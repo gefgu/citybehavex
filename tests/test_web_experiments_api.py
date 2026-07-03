@@ -88,8 +88,9 @@ def test_delete_run_removes_only_selected_run_files(monkeypatch, tmp_path):
     selected = output.with_name("trajectories_20260101T010203.parquet")
     selected_encounters = output.with_name("trajectories_20260101T010203_encounters.parquet")
     selected_moving = output.with_name("trajectories_20260101T010203_moving.parquet")
+    selected_social = output.with_name("trajectories_20260101T010203_social_network.json")
     other_run = output.with_name("trajectories_20260102T010203.parquet")
-    for path in (selected, selected_encounters, selected_moving, other_run):
+    for path in (selected, selected_encounters, selected_moving, selected_social, other_run):
         path.write_text("placeholder", encoding="utf-8")
 
     response = client.delete(f"/api/experiments/{exp_id}/runs/20260101T010203")
@@ -98,6 +99,7 @@ def test_delete_run_removes_only_selected_run_files(monkeypatch, tmp_path):
     assert not selected.exists()
     assert not selected_encounters.exists()
     assert not selected_moving.exists()
+    assert not selected_social.exists()
     assert other_run.exists()
     assert (tmp_path / "configs" / f"{exp_id}.yaml").exists()
 

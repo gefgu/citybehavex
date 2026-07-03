@@ -42,6 +42,7 @@ def get_charts(
             str(selected.path), str(experiment.observed_path), experiment.label
         ),
         refresh=refresh,
+        extra_paths=(selected.social_network_path,),
     )
     payload = {**payload, "run_id": selected.run_id}
     return ApiResponseWrapper(data=payload)

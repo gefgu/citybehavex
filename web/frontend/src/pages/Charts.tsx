@@ -3,6 +3,7 @@ import { Link, useParams, useSearchParams } from "react-router-dom";
 import type { EChartsOption } from "echarts";
 import { fetchCharts, type ChartPayload } from "../api";
 import { EChart } from "../charts/EChart";
+import { SocialNetworkGraph } from "../components/SocialNetworkGraph";
 import { StvdMap } from "../components/StvdMap";
 import {
   dailyActivityOption,
@@ -218,6 +219,16 @@ export function Charts() {
           <div className="section-header">Spatial-temporal volume difference</div>
           <StvdMap block={payload.stvd} />
         </>
+      )}
+
+      <div className="section-header">Social network</div>
+      {payload.social_network ? (
+        <SocialNetworkGraph block={payload.social_network} />
+      ) : (
+        <div className="network-empty">
+          No social network sidecar found for this run. Re-run the simulation with the latest code,
+          then refresh the chart payload.
+        </div>
       )}
 
       <div style={{ height: 96 }} />
