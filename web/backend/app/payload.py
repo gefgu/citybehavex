@@ -35,6 +35,7 @@ from skmob2 import (
 from skmob_vis._core import compute_ecdf
 from skmob_vis.motifs import (
     _literature_distribution_rows,
+    _motif_axis_label_styles,
     map_motif_distribution_to_literature_basis,
 )
 
@@ -655,22 +656,31 @@ def _motif_distribution(visits: pd.DataFrame):
 def _build_motifs_block(observed_label, observed_visits, synthetic_visits, jsd) -> dict[str, Any]:
     literature_rows = _literature_distribution_rows(None)
     categories = [row["hex_id"] for row in literature_rows]
+    motif_label_keys, motif_label_styles = _motif_axis_label_styles()
 
     def _values(rows):
         by_hex = {row["hex_id"]: round(float(row["percentage"]), 2) for row in rows}
         return [by_hex.get(hexid, 0.0) for hexid in categories]
 
-    series = [{"name": "Literature", "role": "reference", "values": _values(literature_rows)}]
+    def _series(name: str, role: str, rows: list[dict[str, Any]]) -> dict[str, Any]:
+        return {
+            "name": name,
+            "role": role,
+            "values": _values(rows),
+            "rows": rows,
+        }
+
+    series = [_series("Literature", "reference", literature_rows)]
 
     obs_dist = _motif_distribution(observed_visits) if observed_visits is not None else None
     synth_dist = _motif_distribution(synthetic_visits) if synthetic_visits is not None else None
 
     if obs_dist is not None:
-        series.append({"name": observed_label, "role": "observed",
-                       "values": _values(map_motif_distribution_to_literature_basis(obs_dist))})
+        series.append(_series(observed_label, "observed",
+                              map_motif_distribution_to_literature_basis(obs_dist)))
     if synth_dist is not None:
-        series.append({"name": "synthetic", "role": "synthetic",
-                       "values": _values(map_motif_distribution_to_literature_basis(synth_dist))})
+        series.append(_series("synthetic", "synthetic",
+                              map_motif_distribution_to_literature_basis(synth_dist)))
         if obs_dist is not None:
             left = dict(zip(synth_dist["motif_id"], synth_dist["count"]))
             right = dict(zip(obs_dist["motif_id"], obs_dist["count"]))
@@ -678,4 +688,9 @@ def _build_motifs_block(observed_label, observed_visits, synthetic_visits, jsd) 
             jsd.append({"name": "Daily motifs", "value": float(jensen_shannon_divergence(
                 [left.get(k, 0) for k in keys], [right.get(k, 0) for k in keys]))})
 
-    return {"categories": categories, "series": series}
+    return {
+        "categories": categories,
+        "series": series,
+        "motif_label_keys": motif_label_keys,
+        "motif_label_styles": motif_label_styles,
+    }
