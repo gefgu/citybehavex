@@ -305,10 +305,8 @@ pub(crate) fn choose_location_local<R: Rng>(mut ctx: LocationChoiceContext<'_, R
     if abstract_location == 0 {
         return ctx.agents[ctx.agent].home_location;
     }
-    if abstract_location == WORK_CODE
-        && let Some(wl) = ctx.agents[ctx.agent].work_location
-    {
-        return wl;
+    if abstract_location == WORK_CODE {
+        return ctx.agents[ctx.agent].work_location;
     }
 
     let s = ctx.agents[ctx.agent].s.max(1.0);

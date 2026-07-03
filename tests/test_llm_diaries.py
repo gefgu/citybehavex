@@ -2,11 +2,12 @@ from __future__ import annotations
 
 import json
 
+import numpy as np
 import pandas as pd
 import pytest
 
 from citybehavex.llm import LLMConfig
-from citybehavex.llm_diaries.training import diary_batch_to_markov_training
+from citybehavex.llm_diaries.training import annotate_trajectory_purposes_ddcrp, diary_batch_to_markov_training
 from citybehavex.llm_diaries import (
     Diary,
     DiaryBatch,
@@ -397,3 +398,23 @@ def test_markov_training_requires_validated_batch():
     assert list(training.columns) == ["uid", "datetime", "location", "purpose"]
     assert training["uid"].nunique() == 10
     assert pd.api.types.is_datetime64_any_dtype(training["datetime"])
+
+
+def test_ddcrp_annotation_preserves_engine_purpose_column():
+    batch = DiaryBatch.model_validate(_batch())
+    traj = pd.DataFrame(
+        {
+            "uid": [1],
+            "datetime": [pd.Timestamp("2026-01-01 08:30:00")],
+            "purpose": ["OTHER"],
+        }
+    )
+
+    annotated = annotate_trajectory_purposes_ddcrp(
+        traj,
+        bank=type("Bank", (), {"diaries": batch.diaries})(),
+        chosen=np.array([[0]], dtype=np.int64),
+        start_date=pd.Timestamp("2026-01-01"),
+    )
+
+    assert annotated["purpose"].tolist() == ["OTHER"]

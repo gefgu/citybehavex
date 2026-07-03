@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import datetime as _dt
+from html import escape
 from pathlib import Path
 from typing import Optional
 
 import h3
 import numpy as np
 import pandas as pd
+import plotly.graph_objects as go
 import skmob2
 import typer
 from skmob2 import (
@@ -45,6 +48,7 @@ from skmob_vis import (
     plot_visits_frequency_ecdf,
 )
 
+from citybehavex.activities import build_catalog
 from citybehavex.profiles import PROFILE_METRICS, compute_profiles
 
 _DATETIME_CANDIDATES = [
@@ -63,6 +67,13 @@ _END_TS_CANDIDATES = ["end_timestamp", "_end_time", "end_time"]
 # duration comparison. Matches the synthetic SimulationConfig.car_speed_kmh default.
 CAR_SPEED_KMH = 50.0
 CPC_H3_RESOLUTIONS = (7, 8, 9)
+
+
+@dataclass(frozen=True)
+class ActivityVisitsResult:
+    visits: pd.DataFrame
+    used_heuristic: bool
+    warning: Optional[str] = None
 
 
 def detect_column(df: pd.DataFrame, candidates: list[str]) -> Optional[str]:
@@ -179,24 +190,30 @@ def _visits_for_comparison(
     *,
     uid_col: str,
     datetime_col: str,
-    activity_col: str,
+    activity_col: Optional[str] = None,
     location_col: Optional[str] = None,
     location_resolution: int = 10,
     end_col: Optional[str] = None,
+    lat_col: Optional[str] = None,
+    lng_col: Optional[str] = None,
 ) -> pd.DataFrame:
     visits = pd.DataFrame(
         {
             "uid": df[uid_col],
             "start_timestamp": pd.to_datetime(df[datetime_col]),
-            "purpose": df[activity_col],
         }
     )
+    if activity_col:
+        visits["purpose"] = df[activity_col]
+
     if location_col:
         visits["location_id"] = df[location_col].astype(str)
     else:
+        lat_name = lat_col or detect_column(df, _LAT_CANDIDATES) or "lat"
+        lng_name = lng_col or detect_column(df, _LNG_CANDIDATES) or "lng"
         visits["location_id"] = [
             h3.latlng_to_cell(lat, lng, location_resolution)
-            for lat, lng in zip(df["lat"], df["lng"])
+            for lat, lng in zip(df[lat_name], df[lng_name])
         ]
 
     if end_col:
@@ -208,6 +225,110 @@ def _visits_for_comparison(
             visits["start_timestamp"].dt.normalize() + pd.Timedelta(days=1)
         )
     return visits
+
+
+def _collapse_purpose_group(value: object) -> str:
+    if isinstance(value, str):
+        normalized = value.strip().upper()
+        if normalized in {"HOME", "WORK"}:
+            return normalized
+    return "OTHER"
+
+
+def _collapse_explicit_purposes(visits: pd.DataFrame) -> pd.DataFrame:
+    grouped = visits.copy()
+    grouped["purpose"] = grouped["purpose"].map(_collapse_purpose_group)
+    return grouped
+
+
+def _most_frequent_location(
+    rows: pd.DataFrame,
+    *,
+    exclude: Optional[object] = None,
+) -> Optional[object]:
+    if rows.empty:
+        return None
+    locations = rows["location_id"]
+    if exclude is not None:
+        locations = locations[locations.ne(exclude)]
+    if locations.empty:
+        return None
+    return locations.value_counts(sort=True).index[0]
+
+
+def _derive_purpose_groups_from_heuristic(visits: pd.DataFrame) -> pd.DataFrame:
+    derived = visits.copy()
+    derived["purpose"] = "OTHER"
+    derived["_hour"] = derived["start_timestamp"].dt.hour
+
+    for uid, user_rows in derived.groupby("uid", sort=False):
+        home_rows = user_rows[user_rows["_hour"].between(2, 5)]
+        home_location = _most_frequent_location(home_rows)
+
+        work_rows = user_rows[
+            user_rows["_hour"].eq(10) | user_rows["_hour"].between(14, 16)
+        ]
+        work_location = _most_frequent_location(work_rows, exclude=home_location)
+
+        user_mask = derived["uid"].eq(uid)
+        if home_location is not None:
+            derived.loc[user_mask & derived["location_id"].eq(home_location), "purpose"] = "HOME"
+        if work_location is not None:
+            derived.loc[user_mask & derived["location_id"].eq(work_location), "purpose"] = "WORK"
+
+    return derived.drop(columns=["_hour"])
+
+
+def _prepare_activity_visits(
+    df: pd.DataFrame,
+    *,
+    label: str,
+    uid_col: Optional[str],
+    datetime_col: Optional[str],
+    activity_col: Optional[str],
+    location_col: Optional[str],
+    lat_col: Optional[str],
+    lng_col: Optional[str],
+    location_resolution: int = 10,
+    end_col: Optional[str] = None,
+) -> Optional[ActivityVisitsResult]:
+    if uid_col is None or datetime_col is None:
+        return None
+    if location_col is None and (lat_col is None or lng_col is None):
+        return None
+
+    resolved_activity_col = (
+        activity_col if activity_col is not None and activity_col in df.columns else None
+    )
+    visits = _visits_for_comparison(
+        df,
+        uid_col=uid_col,
+        datetime_col=datetime_col,
+        activity_col=resolved_activity_col,
+        location_col=location_col,
+        location_resolution=location_resolution,
+        end_col=end_col,
+        lat_col=lat_col,
+        lng_col=lng_col,
+    )
+    visits = visits.dropna(
+        subset=["uid", "start_timestamp", "location_id"]
+    ).reset_index(drop=True)
+    if visits.empty:
+        return None
+
+    if resolved_activity_col:
+        return ActivityVisitsResult(_collapse_explicit_purposes(visits), False)
+
+    warning = (
+        f"{label} has no explicit purpose column; derived HOME/WORK/OTHER "
+        "with time-of-day and repeated-location heuristics."
+    )
+    return ActivityVisitsResult(
+        _derive_purpose_groups_from_heuristic(visits),
+        True,
+        warning,
+    )
 
 
 def _collapse_to_stays(
@@ -344,6 +465,7 @@ def _activity_comparison_section_html(
     observed_visits: Optional[pd.DataFrame],
     synthetic_visits: Optional[pd.DataFrame],
     observed_label: str,
+    warnings: Optional[list[str]] = None,
 ) -> str:
     if observed_visits is None or synthetic_visits is None:
         return ""
@@ -370,11 +492,165 @@ def _activity_comparison_section_html(
             bundle_libs=False,
         )._repr_html_()
     )
+    warning_html = _activity_warning_html(warnings or [])
     return f"""
   <div class="section-header">
     <span>Activity comparison &mdash; {observed_label} vs synthetic</span>
   </div>
+  {warning_html}
   <div class="charts">{charts_html}</div>"""
+
+
+def _activity_warning_html(warnings: list[str]) -> str:
+    if not warnings:
+        return ""
+    items = "".join(f"<li>{escape(message)}</li>" for message in warnings)
+    return f"""
+  <div class="report-warning">
+    <strong>Purpose heuristic warning</strong>
+    <ul>{items}</ul>
+  </div>"""
+
+
+def _activities_sidecar_path(synthetic_path: str) -> str:
+    path = Path(synthetic_path)
+    return str(path.with_name(f"{path.stem}_activities{path.suffix}"))
+
+
+def _micro_activity_daily_usage_figure(
+    activities: pd.DataFrame,
+    *,
+    bin_size_minutes: int = 10,
+) -> go.Figure:
+    usage = _micro_activity_daily_usage_data(
+        activities,
+        bin_size_minutes=bin_size_minutes,
+    )
+    fig = go.Figure()
+    for series in usage["series"]:
+        fig.add_trace(
+            go.Scatter(
+                x=usage["x"],
+                y=series["values"],
+                mode="lines",
+                stackgroup="micro_activity_usage",
+                name=series["name"],
+            )
+        )
+    fig.update_layout(
+        title="Synthetic micro-activity mean daily usage",
+        xaxis_title="Time of day",
+        yaxis_title="Share of synthetic micro-activity time (%)",
+        hovermode="x unified",
+        template="plotly_white",
+        legend_title_text="Micro-activity",
+        height=460,
+        margin=dict(l=48, r=24, t=64, b=48),
+    )
+    fig.update_xaxes(tickmode="array", tickvals=usage["x"][::6], tickangle=0)
+    return fig
+
+
+def _micro_activity_daily_usage_data(
+    activities: pd.DataFrame,
+    *,
+    bin_size_minutes: int = 10,
+) -> dict[str, object]:
+    required = ["uid", "activity", "arrival", "departure"]
+    missing = sorted(set(required) - set(activities.columns))
+    if missing:
+        raise ValueError(f"activities table missing columns: {', '.join(missing)}")
+    if bin_size_minutes <= 0 or 1440 % bin_size_minutes != 0:
+        raise ValueError("bin_size_minutes must be a positive divisor of 1440")
+
+    work = activities[required].copy()
+    work["arrival"] = pd.to_datetime(work["arrival"], errors="coerce")
+    work["departure"] = pd.to_datetime(work["departure"], errors="coerce")
+    work["activity"] = pd.to_numeric(work["activity"], errors="coerce")
+    work = work.dropna(subset=["arrival", "departure", "activity"])
+    work = work[work["departure"] > work["arrival"]]
+    if work.empty:
+        raise ValueError("activities table has no valid intervals")
+
+    catalog = build_catalog()
+    labels = {activity.idx: activity.name for activity in catalog}
+    activity_ids = [activity.idx for activity in catalog]
+    n_bins = 1440 // bin_size_minutes
+    seconds = np.zeros((len(activity_ids), n_bins), dtype=float)
+    id_to_row = {activity_id: row for row, activity_id in enumerate(activity_ids)}
+
+    bin_seconds = bin_size_minutes * 60
+    for row in work.itertuples(index=False):
+        activity_id = int(row.activity)
+        if activity_id not in id_to_row:
+            continue
+        arrival = row.arrival.to_pydatetime()
+        departure = row.departure.to_pydatetime()
+        current = pd.Timestamp(arrival)
+        end = pd.Timestamp(departure)
+        while current < end:
+            midnight = current.normalize()
+            next_midnight = midnight + pd.Timedelta(days=1)
+            segment_end = min(end, next_midnight)
+            start_second = int((current - midnight).total_seconds())
+            end_second = int((segment_end - midnight).total_seconds())
+            start_bin = start_second // bin_seconds
+            end_bin = max(start_bin, (end_second - 1) // bin_seconds)
+            for bin_idx in range(start_bin, min(end_bin + 1, n_bins)):
+                bin_start = midnight + pd.Timedelta(seconds=bin_idx * bin_seconds)
+                bin_end = bin_start + pd.Timedelta(seconds=bin_seconds)
+                overlap = (min(segment_end, bin_end) - max(current, bin_start)).total_seconds()
+                if overlap > 0:
+                    seconds[id_to_row[activity_id], bin_idx] += overlap
+            current = segment_end
+
+    totals = seconds.sum(axis=0)
+    percentages = np.divide(
+        seconds * 100.0,
+        totals,
+        out=np.zeros_like(seconds),
+        where=totals > 0,
+    )
+    x = [
+        f"{minute // 60:02d}:{minute % 60:02d}"
+        for minute in range(0, 1440, bin_size_minutes)
+    ]
+    return {
+        "bin_size_minutes": bin_size_minutes,
+        "n_bins": n_bins,
+        "x": x,
+        "series": [
+            {
+                "activity_id": activity_id,
+                "name": labels[activity_id],
+                "values": percentages[id_to_row[activity_id]].round(6).tolist(),
+            }
+            for activity_id in activity_ids
+        ],
+    }
+
+
+def _micro_activity_section_html(activities_path: Optional[str]) -> str:
+    if not activities_path:
+        return ""
+    path = Path(activities_path)
+    if not path.exists():
+        typer.echo(f"Warning: micro-activity chart skipped: {path} not found", err=True)
+        return ""
+    try:
+        activities = pd.read_parquet(path)
+        if activities.empty:
+            raise ValueError("activities table is empty")
+        fig = _micro_activity_daily_usage_figure(activities)
+    except Exception as exc:
+        typer.echo(f"Warning: micro-activity chart skipped: {exc}", err=True)
+        return ""
+
+    return f"""
+  <div class="section-header">
+    <span>Synthetic micro-activity usage</span>
+  </div>
+  <div class="charts">{fig.to_html(full_html=False, include_plotlyjs=True)}</div>"""
 
 
 def _mobility_law_visits(
@@ -671,6 +947,7 @@ def generate_comparison_report_from_paths(
         observed_label=observed_label,
         output_path=output_path,
         synth_activity_col=synth_activity_col,
+        synthetic_activities_path=_activities_sidecar_path(synthetic_path),
     )
 
 
@@ -680,6 +957,7 @@ def generate_comparison_report(
     observed_label: str,
     output_path: str,
     synth_activity_col: Optional[str] = None,
+    synthetic_activities_path: Optional[str] = None,
 ) -> None:
     typer.echo(f"Loading observed trajectories from {real_path} ...")
     real_df = pd.read_parquet(real_path)
@@ -759,57 +1037,82 @@ def generate_comparison_report(
     js_rows: list[tuple[str, str, str]] = []
     synthetic_visits = None
     observed_visits = None
-    if synth_activity_col and synth_activity_col in traj.df.columns:
-        real_activity_col = detect_column(real_df, _ACTIVITY_CANDIDATES)
-        real_start_col = detect_column(real_df, _DATETIME_CANDIDATES)
-        real_end_col = detect_column(real_df, _END_TS_CANDIDATES)
-        real_location_col = detect_column(real_df, _LOCATION_CANDIDATES)
-        if real_activity_col and real_start_col:
-            location_resolution = _location_resolution(real_df, real_location_col)
-            synthetic_visits = _visits_for_comparison(
-                traj.df,
-                uid_col=traj.uid_col,
-                datetime_col=traj.datetime_col,
-                activity_col=synth_activity_col,
-                location_resolution=location_resolution,
+    activity_warnings: list[str] = []
+    real_activity_col = detect_column(real_df, _ACTIVITY_CANDIDATES)
+    real_start_col = detect_column(real_df, _DATETIME_CANDIDATES)
+    real_end_col = detect_column(real_df, _END_TS_CANDIDATES)
+    real_location_col = detect_column(real_df, _LOCATION_CANDIDATES)
+    synth_location_col = detect_column(traj.df, _LOCATION_CANDIDATES)
+    location_resolution = _location_resolution(real_df, real_location_col)
+
+    synthetic_visit_result = _prepare_activity_visits(
+        traj.df,
+        label="synthetic",
+        uid_col=traj.uid_col,
+        datetime_col=traj.datetime_col,
+        activity_col=(
+            synth_activity_col
+            if synth_activity_col and synth_activity_col in traj.df.columns
+            else None
+        ),
+        location_col=synth_location_col,
+        lat_col=traj.lat_col,
+        lng_col=traj.lng_col,
+        location_resolution=location_resolution,
+    )
+    observed_visit_result = _prepare_activity_visits(
+        real_df,
+        label=observed_label,
+        uid_col=real_traj.uid_col,
+        datetime_col=real_start_col,
+        activity_col=real_activity_col,
+        location_col=real_location_col,
+        lat_col=real_traj.lat_col,
+        lng_col=real_traj.lng_col,
+        location_resolution=location_resolution,
+        end_col=real_end_col,
+    )
+    if synthetic_visit_result is not None:
+        synthetic_visits = synthetic_visit_result.visits
+        if synthetic_visit_result.warning:
+            activity_warnings.append(synthetic_visit_result.warning)
+    if observed_visit_result is not None:
+        observed_visits = observed_visit_result.visits
+        if observed_visit_result.warning:
+            activity_warnings.append(observed_visit_result.warning)
+    for warning in activity_warnings:
+        typer.echo(f"Warning: {warning}", err=True)
+
+    if synthetic_visits is not None and observed_visits is not None:
+        js_rows.append(
+            (
+                "Activity distribution",
+                f"{activity_distribution_jensen_shannon_divergence(synthetic_visits, observed_visits):.4f}",
+                "",
             )
-            observed_visits = _visits_for_comparison(
-                real_df,
-                uid_col=real_traj.uid_col,
-                datetime_col=real_start_col,
-                activity_col=real_activity_col,
-                location_col=real_location_col,
-                end_col=real_end_col,
+        )
+        synth_transition = activity_transition_matrix(synthetic_visits)
+        real_transition = activity_transition_matrix(observed_visits)
+        js_rows.append(
+            (
+                "Activity transitions",
+                f"{activity_transition_matrix_jensen_shannon_divergence(synth_transition, real_transition):.4f}",
+                "",
             )
-            js_rows.append(
-                (
-                    "Activity distribution",
-                    f"{activity_distribution_jensen_shannon_divergence(synthetic_visits, observed_visits):.4f}",
-                    "",
-                )
+        )
+        synth_daily, synth_categories, _ = daily_activity_distribution(
+            synthetic_visits
+        )
+        real_daily, real_categories, _ = daily_activity_distribution(
+            observed_visits
+        )
+        js_rows.append(
+            (
+                "Daily activity profile",
+                f"{time_bin_matrix_jensen_shannon_divergence(synth_daily, real_daily, synth_categories, real_categories):.4f}",
+                "",
             )
-            synth_transition = activity_transition_matrix(synthetic_visits)
-            real_transition = activity_transition_matrix(observed_visits)
-            js_rows.append(
-                (
-                    "Activity transitions",
-                    f"{activity_transition_matrix_jensen_shannon_divergence(synth_transition, real_transition):.4f}",
-                    "",
-                )
-            )
-            synth_daily, synth_categories, _ = daily_activity_distribution(
-                synthetic_visits
-            )
-            real_daily, real_categories, _ = daily_activity_distribution(
-                observed_visits
-            )
-            js_rows.append(
-                (
-                    "Daily activity profile",
-                    f"{time_bin_matrix_jensen_shannon_divergence(synth_daily, real_daily, synth_categories, real_categories):.4f}",
-                    "",
-                )
-            )
+        )
 
     typer.echo("Rendering distribution charts ...")
     fig_jump = plot_jump_lengths_ecdf(synth_jumps, real_jumps, labels=labels, bundle_libs=False)
@@ -831,7 +1134,6 @@ def generate_comparison_report(
 
     typer.echo("Rendering mobility-law charts ...")
     real_location_col = detect_column(real_df, _LOCATION_CANDIDATES)
-    synth_location_col = detect_column(traj.df, _LOCATION_CANDIDATES)
     real_activity_col = detect_column(real_df, _ACTIVITY_CANDIDATES)
     mobility_observed_visits = _mobility_law_visits(
         real_df,
@@ -873,7 +1175,9 @@ def generate_comparison_report(
         observed_visits,
         synthetic_visits,
         observed_label,
+        activity_warnings,
     )
+    micro_activity_section_html = _micro_activity_section_html(synthetic_activities_path)
 
     motif_section_html = ""
     try:
@@ -1004,6 +1308,9 @@ def generate_comparison_report(
     .fit-parameters table{{border-collapse:collapse;}}
     .fit-parameters td{{padding:2px 18px 2px 0;}}
     .fit-parameters td:first-child{{font-weight:600;}}
+    .report-warning{{margin:16px 32px 0;padding:12px 16px;border:1px solid #d5a33d;background:#fff7df;color:#4b3511;font-size:13px;}}
+    .report-warning strong{{display:block;margin-bottom:6px;}}
+    .report-warning ul{{margin:0;padding-left:18px;}}
     .metrics{{display:flex;flex-wrap:wrap;gap:64px;padding:24px 32px 32px;border-bottom:1px solid #dcd5c4;}}
     .metrics h2{{margin:0 0 14px;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.1em;color:#6b5e4c;}}
     .metrics table{{border-collapse:collapse;font-family:monospace;font-size:13px;}}
@@ -1016,7 +1323,7 @@ def generate_comparison_report(
     <p>Generated {generated_at}</p>
   </div>{metrics_html}
   <div class="section-header">Distribution comparisons</div>
-  <div class="charts">{ecdf_charts_html}</div>{mobility_laws_section_html}{activity_section_html}{profiles_section_html}{motif_section_html}{stvd_section_html}
+  <div class="charts">{ecdf_charts_html}</div>{mobility_laws_section_html}{activity_section_html}{micro_activity_section_html}{profiles_section_html}{motif_section_html}{stvd_section_html}
 </body>
 </html>
 """

@@ -14,6 +14,7 @@ from sklearn.decomposition import TruncatedSVD
 
 import citybehavex._core as _cbx_core
 
+from citybehavex.math import sample_weighted_indices
 from citybehavex.schedules import DiaryArrays
 from citybehavex.simulation.social_graph import (
     build_knn_fallback_social_graph,
@@ -242,10 +243,17 @@ def simulate_agents(
         if starting_locs is not None
         else None
     )
+    # WORK is pinned to a single tile per agent for the whole simulation (the
+    # Rust core requires it), so when the caller hasn't supplied one (e.g. no
+    # agent profiles were generated), sample it here the same way
+    # `citybehavex.profiles.agents` does: relevance-weighted (commercial bias).
     wt = (
         np.ascontiguousarray(work_tiles, dtype=np.int64)
         if work_tiles is not None
-        else None
+        else np.ascontiguousarray(
+            sample_weighted_indices(relevances, n_agents, np.random.default_rng(random_state)),
+            dtype=np.int64,
+        )
     )
     eps = edge_weights if len(edge_weights) == len(neighbors) else None
 
@@ -295,7 +303,7 @@ def simulate_agents(
     (
         (
             agent_ids, out_lats, out_lngs, arrival, departure, trip_dur,
-            enc_agent, enc_contact, enc_tile, enc_ts,
+            enc_agent, enc_contact, enc_tile, enc_ts, stop_abstract_loc,
         ),
         (
             stop_id, path_agent, path_stop_id, path_seq, path_lat, path_lng, path_t,
@@ -354,6 +362,15 @@ def simulate_agents(
     arrival = np.asarray(arrival, dtype=np.int64)
     departure = np.asarray(departure, dtype=np.int64)
     trip_dur = np.asarray(trip_dur, dtype=float)
+    # Purpose comes straight from the abstract-location code that drove each
+    # stop in the Rust engine (0=HOME, 1=WORK, everything else=OTHER) --
+    # matches citybehavex.schedules.ddcrp._PURPOSE_CODE exactly, so it always
+    # reflects the actual routing decision instead of being re-derived from
+    # a stop's (possibly slot-shifted) arrival timestamp.
+    abstract_loc_arr = np.asarray(stop_abstract_loc, dtype=np.int32)
+    purpose = np.where(
+        abstract_loc_arr == 0, "HOME", np.where(abstract_loc_arr == 1, "WORK", "OTHER")
+    )
     trajectories = pd.DataFrame(
         {
             "uid": np.asarray(agent_ids, dtype=np.int64),
@@ -365,6 +382,7 @@ def simulate_agents(
             "departure": departure.astype("datetime64[s]"),
             "trip_duration_minutes": trip_dur / 60.0,
             "dwell_minutes": (departure - arrival) / 60.0,
+            "purpose": purpose,
         }
     )
 

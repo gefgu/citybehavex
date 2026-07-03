@@ -8,9 +8,11 @@ import type { EChartsOption } from "echarts";
 export function EChart({
   option,
   className = "echart",
+  preventPageScrollOnWheel = false,
 }: {
   option: EChartsOption;
   className?: string;
+  preventPageScrollOnWheel?: boolean;
 }) {
   const ref = useRef<HTMLDivElement | null>(null);
   const chartRef = useRef<echarts.ECharts | null>(null);
@@ -31,6 +33,19 @@ export function EChart({
   useEffect(() => {
     chartRef.current?.setOption(option, true);
   }, [option]);
+
+  useEffect(() => {
+    if (!ref.current || !preventPageScrollOnWheel) return;
+
+    const el = ref.current;
+    const preventWheelScroll = (event: WheelEvent) => {
+      event.preventDefault();
+    };
+    el.addEventListener("wheel", preventWheelScroll, { passive: false });
+    return () => {
+      el.removeEventListener("wheel", preventWheelScroll);
+    };
+  }, [preventPageScrollOnWheel]);
 
   return <div ref={ref} className={className} />;
 }

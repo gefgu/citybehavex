@@ -9,6 +9,7 @@ import {
   dailyActivityOption,
   ecdfOption,
   lawOption,
+  microActivityUsageOption,
   motifOption,
   profileBoxOption,
   profileScatterOption,
@@ -178,6 +179,19 @@ export function Charts() {
                 option={dailyActivityOption(payload.activity.daily_activity_difference)}
               />
             )}
+          </div>
+        </>
+      )}
+
+      {payload.micro_activity_usage && (
+        <>
+          <div className="section-header">Synthetic micro-activity usage</div>
+          <div className="chart-grid">
+            <ChartCard
+              title="Mean daily usage over the day"
+              option={microActivityUsageOption(payload.micro_activity_usage)}
+              wide
+            />
           </div>
         </>
       )}

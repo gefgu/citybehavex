@@ -8,6 +8,32 @@ use crate::simulation_core::inputs::{
     RoadNetworkInputs, SimulationParams, SocialGraphInputs,
 };
 
+/// Borrowed slice from an optional numpy array, or an empty slice when absent.
+fn opt_slice<'a, T: numpy::Element>(v: &'a Option<PyReadonlyArray1<'_, T>>) -> PyResult<&'a [T]> {
+    match v {
+        Some(arr) => Ok(arr.as_slice()?),
+        None => Ok(&[]),
+    }
+}
+
+/// A required i64 numpy array, clamped non-negative and cast to `usize`
+/// (indices/counts from Python are never negative in practice, but numpy
+/// int arrays don't enforce that at the type level).
+fn i64_as_usize_vec(arr: &PyReadonlyArray1<'_, i64>) -> PyResult<Vec<usize>> {
+    Ok(arr.as_slice()?.iter().map(|&x| x.max(0) as usize).collect())
+}
+
+/// Same clamp-and-cast as `i64_as_usize_vec`, for an optional numpy array;
+/// `None` when the array itself is absent.
+fn opt_i64_as_usize_vec(v: &Option<PyReadonlyArray1<'_, i64>>) -> PyResult<Option<Vec<usize>>> {
+    match v {
+        Some(arr) => Ok(Some(
+            arr.as_slice()?.iter().map(|&x| x.max(0) as usize).collect(),
+        )),
+        None => Ok(None),
+    }
+}
+
 #[pyfunction]
 #[allow(clippy::too_many_arguments, clippy::type_complexity)]
 #[pyo3(signature = (
@@ -86,6 +112,7 @@ pub fn simulation_core_simulate_agents<'py>(
         Bound<'py, PyArray1<i64>>,
         Bound<'py, PyArray1<i64>>,
         Bound<'py, PyArray1<i64>>,
+        Bound<'py, PyArray1<i32>>,
     ),
     (
         Bound<'py, PyArray1<i64>>,
@@ -109,108 +136,40 @@ pub fn simulation_core_simulate_agents<'py>(
     let lngs = longitudes.as_slice()?;
     let rels = relevances.as_slice()?;
     let dists = distances.as_slice()?;
-    let ns_raw = neighbor_starts.as_slice()?;
-    let nb_raw = neighbors.as_slice()?;
     let dt_raw = diary_timestamps.as_slice()?;
     let da_raw = diary_abs_locs.as_slice()?;
-    let ds_raw = diary_starts.as_slice()?;
-    let de_raw = diary_ends.as_slice()?;
 
-    let ns: Vec<usize> = ns_raw.iter().map(|&v| v.max(0) as usize).collect();
-    let nb: Vec<usize> = nb_raw.iter().map(|&v| v.max(0) as usize).collect();
-    let ds: Vec<usize> = ds_raw.iter().map(|&v| v.max(0) as usize).collect();
-    let de: Vec<usize> = de_raw.iter().map(|&v| v.max(0) as usize).collect();
+    let ns = i64_as_usize_vec(&neighbor_starts)?;
+    let nb = i64_as_usize_vec(&neighbors)?;
+    let ds = i64_as_usize_vec(&diary_starts)?;
+    let de = i64_as_usize_vec(&diary_ends)?;
 
-    let sl_buf: Vec<usize>;
-    let sl: Option<&[usize]> = match &starting_locs {
-        Some(v) => {
-            sl_buf = v.as_slice()?.iter().map(|&x| x.max(0) as usize).collect();
-            Some(&sl_buf)
-        }
-        None => None,
-    };
+    let sl_buf = opt_i64_as_usize_vec(&starting_locs)?;
+    let sl: Option<&[usize]> = sl_buf.as_deref();
 
-    let wt_buf: Vec<usize>;
-    let wt_empty: &[usize] = &[];
-    let wt: &[usize] = match &work_tiles {
-        Some(v) => {
-            wt_buf = v.as_slice()?.iter().map(|&x| x.max(0) as usize).collect();
-            &wt_buf
-        }
-        None => wt_empty,
-    };
+    let wt_buf = opt_i64_as_usize_vec(&work_tiles)?.unwrap_or_default();
+    let wt: &[usize] = &wt_buf;
 
-    let eps_buf: Vec<f64>;
-    let eps_empty: &[f64] = &[];
-    let eps: &[f64] = match &edge_profile_sim {
-        Some(v) => {
-            eps_buf = v.as_slice()?.to_vec();
-            &eps_buf
-        }
-        None => eps_empty,
-    };
+    // Owned copy (unlike the other optional f64 arrays below) since it's
+    // built from a slice borrowed from a short-lived `Option` match arm.
+    let eps_buf = opt_slice(&edge_profile_sim)?.to_vec();
+    let eps: &[f64] = &eps_buf;
 
-    let act_embs_empty: &[f64] = &[];
-    let act_embs_s = match &act_embs {
-        Some(v) => v.as_slice()?,
-        None => act_embs_empty,
-    };
-    let act_dur_mu_empty: &[f64] = &[];
-    let act_dur_mu_s = match &act_dur_mu {
-        Some(v) => v.as_slice()?,
-        None => act_dur_mu_empty,
-    };
-    let act_dur_sigma_empty: &[f64] = &[];
-    let act_dur_sigma_s = match &act_dur_sigma {
-        Some(v) => v.as_slice()?,
-        None => act_dur_sigma_empty,
-    };
-    let profile_embs_empty: &[f64] = &[];
-    let profile_embs_s = match &profile_embs {
-        Some(v) => v.as_slice()?,
-        None => profile_embs_empty,
-    };
-    let profile_act_sims_empty: &[f64] = &[];
-    let profile_act_sims_s = match &profile_act_sims {
-        Some(v) => v.as_slice()?,
-        None => profile_act_sims_empty,
-    };
-    let purpose_act_starts_v: Vec<usize> = match &purpose_act_starts {
-        Some(v) => v.as_slice()?.iter().map(|&x| x.max(0) as usize).collect(),
-        None => Vec::new(),
-    };
-    let purpose_acts_v: Vec<usize> = match &purpose_acts {
-        Some(v) => v.as_slice()?.iter().map(|&x| x.max(0) as usize).collect(),
-        None => Vec::new(),
-    };
+    let act_embs_s = opt_slice(&act_embs)?;
+    let act_dur_mu_s = opt_slice(&act_dur_mu)?;
+    let act_dur_sigma_s = opt_slice(&act_dur_sigma)?;
+    let profile_embs_s = opt_slice(&profile_embs)?;
+    let profile_act_sims_s = opt_slice(&profile_act_sims)?;
 
-    let road_edge_from_v: Vec<usize> = match &road_edge_from {
-        Some(v) => v.as_slice()?.iter().map(|&x| x.max(0) as usize).collect(),
-        None => Vec::new(),
-    };
-    let road_edge_to_v: Vec<usize> = match &road_edge_to {
-        Some(v) => v.as_slice()?.iter().map(|&x| x.max(0) as usize).collect(),
-        None => Vec::new(),
-    };
-    let road_edge_weight_v: Vec<usize> = match &road_edge_weight_ds {
-        Some(v) => v.as_slice()?.iter().map(|&x| x.max(0) as usize).collect(),
-        None => Vec::new(),
-    };
-    let road_node_lats_empty: &[f64] = &[];
-    let road_node_lats_s = match &road_node_lats {
-        Some(v) => v.as_slice()?,
-        None => road_node_lats_empty,
-    };
-    let road_node_lngs_empty: &[f64] = &[];
-    let road_node_lngs_s = match &road_node_lngs {
-        Some(v) => v.as_slice()?,
-        None => road_node_lngs_empty,
-    };
-    let location_road_node_empty: &[i64] = &[];
-    let location_road_node_s = match &location_road_node {
-        Some(v) => v.as_slice()?,
-        None => location_road_node_empty,
-    };
+    let purpose_act_starts_v = opt_i64_as_usize_vec(&purpose_act_starts)?.unwrap_or_default();
+    let purpose_acts_v = opt_i64_as_usize_vec(&purpose_acts)?.unwrap_or_default();
+
+    let road_edge_from_v = opt_i64_as_usize_vec(&road_edge_from)?.unwrap_or_default();
+    let road_edge_to_v = opt_i64_as_usize_vec(&road_edge_to)?.unwrap_or_default();
+    let road_edge_weight_v = opt_i64_as_usize_vec(&road_edge_weight_ds)?.unwrap_or_default();
+    let road_node_lats_s = opt_slice(&road_node_lats)?;
+    let road_node_lngs_s = opt_slice(&road_node_lngs)?;
+    let location_road_node_s = opt_slice(&location_road_node)?;
 
     let output = simulate(CoreInputs {
         locations: LocationInputs {
@@ -284,6 +243,7 @@ pub fn simulation_core_simulate_agents<'py>(
             output.encounter_contact.into_pyarray(py),
             output.encounter_tile.into_pyarray(py),
             output.encounter_ts.into_pyarray(py),
+            output.stop_abstract_loc.into_pyarray(py),
         ),
         (
             output.stop_id.into_pyarray(py),

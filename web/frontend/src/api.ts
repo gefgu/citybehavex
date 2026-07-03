@@ -292,6 +292,12 @@ export interface ActivityBlock {
     limit: number;
   } | null;
 }
+export interface MicroActivityUsageBlock {
+  bin_size_minutes: number;
+  n_bins: number;
+  x: string[];
+  series: { activity_id: number; name: string; values: number[] }[];
+}
 export interface ProfilesBlock {
   scatter: { name: string; points: { x: number; y: number; profile: string }[] }[];
   profile_order: string[];
@@ -348,6 +354,7 @@ export interface ChartPayload {
   ecdf: Record<string, EcdfBlock>;
   mobility_laws: Record<string, LawBlock> | null;
   activity: ActivityBlock | null;
+  micro_activity_usage: MicroActivityUsageBlock | null;
   profiles: ProfilesBlock | null;
   motifs: MotifsBlock | null;
   stvd: StvdBlock | null;

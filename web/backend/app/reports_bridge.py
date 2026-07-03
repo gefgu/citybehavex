@@ -24,6 +24,8 @@ from citybehavex.reports.comparison import (  # noqa: F401
     _location_resolution,
     _mobility_law_visits,
     _motif_visits,
+    _micro_activity_daily_usage_data,
+    _prepare_activity_visits,
     _truncated_powerlaw_dataset,
     _visits_for_comparison,
     detect_column,
