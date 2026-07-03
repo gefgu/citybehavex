@@ -4,6 +4,7 @@ import type {
   BarSeries,
   EcdfBlock,
   LawBlock,
+  MicroActivityUsageBlock,
   MotifsBlock,
   ProfilesBlock,
   SeriesPoints,
@@ -243,6 +244,60 @@ export function dailyActivityOption(
   const opt = diffHeatmap(xLabels, block.categories, block.matrix, block.limit, block.labels, "time of day");
   (opt.series as { label: { show: boolean } }[])[0].label.show = false;
   return opt;
+}
+
+export function microActivityUsageOption(block: MicroActivityUsageBlock): EChartsOption {
+  const palette = [
+    COLORS.coral,
+    COLORS.forest,
+    COLORS.mustard,
+    COLORS.info,
+    COLORS.peach,
+    COLORS.mint,
+    COLORS.yellow,
+    "#6b5b95",
+    "#008c95",
+    "#9a6324",
+    "#7b3f61",
+    "#2f4f4f",
+    "#bc5090",
+    "#58508d",
+    "#006d2c",
+  ];
+  return {
+    ...baseOption(),
+    tooltip: {
+      ...baseOption().tooltip,
+      trigger: "axis",
+      valueFormatter: (value: unknown) => `${Number(value).toFixed(2)}%`,
+    },
+    legend: { ...baseOption().legend, type: "scroll", top: 8 },
+    xAxis: {
+      type: "category",
+      data: block.x,
+      name: "TIME OF DAY",
+      nameLocation: "middle",
+      nameGap: 40,
+      axisLabel: {
+        color: COLORS.muted,
+        fontSize: 11,
+        interval: Math.max(0, Math.round(block.n_bins / 12) - 1),
+      },
+      axisLine: { lineStyle: { color: COLORS.hairline } },
+    },
+    yAxis: { ...axisCommon("% of micro-activity time"), min: 0 },
+    series: block.series.map((s, i) => ({
+      name: s.name,
+      type: "line",
+      data: s.values,
+      stack: "micro-activity usage",
+      showSymbol: false,
+      areaStyle: { opacity: 0.72 },
+      emphasis: { focus: "series" },
+      lineStyle: { color: palette[i % palette.length], width: 2 },
+      itemStyle: { color: palette[i % palette.length] },
+    })),
+  };
 }
 
 export function profileScatterOption(block: ProfilesBlock): EChartsOption {

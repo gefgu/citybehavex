@@ -12,6 +12,10 @@ pub(crate) struct SimulationOutput {
     pub(crate) encounter_tile: Vec<i64>,
     pub(crate) encounter_ts: Vec<i64>,
     pub(crate) stop_id: Vec<i64>,
+    /// The diary abstract-location code (0=HOME, 1=WORK, 2+=OTHER) that
+    /// actually drove each stop, so callers can label purpose without
+    /// re-deriving it from a stop's (possibly slot-shifted) arrival time.
+    pub(crate) stop_abstract_loc: Vec<i32>,
     pub(crate) path_agent: Vec<i64>,
     pub(crate) path_stop_id: Vec<i64>,
     pub(crate) path_seq: Vec<i32>,
@@ -40,6 +44,7 @@ impl SimulationOutput {
             encounter_tile: Vec::new(),
             encounter_ts: Vec::new(),
             stop_id: Vec::new(),
+            stop_abstract_loc: Vec::new(),
             path_agent: Vec::new(),
             path_stop_id: Vec::new(),
             path_seq: Vec::new(),
@@ -122,7 +127,14 @@ pub(crate) struct RoadPathOutputBuffers {
 }
 
 impl RoadPathOutputBuffers {
-    pub(crate) fn push_leg(&mut self, agent: i64, dest_stop_id: i64, lats: &[f64], lngs: &[f64], times: &[i64]) {
+    pub(crate) fn push_leg(
+        &mut self,
+        agent: i64,
+        dest_stop_id: i64,
+        lats: &[f64],
+        lngs: &[f64],
+        times: &[i64],
+    ) {
         for (seq, ((&lat, &lng), &t)) in lats.iter().zip(lngs).zip(times).enumerate() {
             self.agent.push(agent);
             self.dest_stop_id.push(dest_stop_id);
@@ -142,6 +154,9 @@ pub(crate) struct TripOutputBuffers {
     pub(crate) departure: Vec<i64>,
     pub(crate) duration: Vec<f64>,
     pub(crate) stop_id: Vec<i64>,
+    /// Abstract-location code that opened each stop (0=HOME, 1=WORK,
+    /// 2+=OTHER); mirrors `SimulationOutput.stop_abstract_loc`.
+    pub(crate) abstract_loc: Vec<i32>,
     pub(crate) last_output_idx: Vec<usize>,
 }
 
@@ -161,6 +176,7 @@ impl TripOutputBuffers {
             departure: Vec::with_capacity(n_agents),
             duration: Vec::with_capacity(n_agents),
             stop_id: Vec::with_capacity(n_agents),
+            abstract_loc: Vec::with_capacity(n_agents),
             last_output_idx: Vec::with_capacity(n_agents),
         };
 
@@ -174,6 +190,8 @@ impl TripOutputBuffers {
             out.departure.push(start_ts);
             out.duration.push(0.0);
             out.stop_id.push(stop_id);
+            // Bootstrap stop: every agent starts at their fixed home tile.
+            out.abstract_loc.push(0);
         }
 
         out
@@ -200,6 +218,7 @@ impl TripOutputBuffers {
             encounter_tile,
             encounter_ts,
             stop_id: self.stop_id,
+            stop_abstract_loc: self.abstract_loc,
             path_agent: paths.agent,
             path_stop_id: paths.dest_stop_id,
             path_seq: paths.seq,

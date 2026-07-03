@@ -53,10 +53,11 @@ from .reports_bridge import (
     _daily_location_lognormal_dataset,
     _distance_frequency_dataset,
     _location_resolution,
+    _micro_activity_daily_usage_data,
     _mobility_law_visits,
     _motif_visits,
+    _prepare_activity_visits,
     _truncated_powerlaw_dataset,
-    _visits_for_comparison,
     compute_profiles,
     detect_column,
     load_trajectory,
@@ -319,6 +320,7 @@ def build_comparison_payload(
     synthetic_path: str,
     observed_path: str,
     observed_label: str,
+    synthetic_activities_path: Optional[str] = None,
 ) -> dict[str, Any]:
     warnings: list[str] = []
 
@@ -410,21 +412,48 @@ def build_comparison_payload(
     # ---- activity visits (shared by activity/profiles/motifs/JSD) -------- #
     synthetic_visits = observed_visits = None
     jsd: list[dict[str, Any]] = []
-    if synth_activity_col and synth_activity_col in traj.df.columns:
-        real_activity_col = detect_column(real_df, _ACTIVITY_CANDIDATES)
-        real_start_col = detect_column(real_df, _DATETIME_CANDIDATES)
-        real_end_col = detect_column(real_df, _END_TS_CANDIDATES)
-        real_location_col = detect_column(real_df, _LOCATION_CANDIDATES)
-        if real_activity_col and real_start_col:
-            resolution = _location_resolution(real_df, real_location_col)
-            synthetic_visits = _visits_for_comparison(
-                traj.df, uid_col=traj.uid_col, datetime_col=traj.datetime_col,
-                activity_col=synth_activity_col, location_resolution=resolution,
-            )
-            observed_visits = _visits_for_comparison(
-                real_df, uid_col=real_traj.uid_col, datetime_col=real_start_col,
-                activity_col=real_activity_col, location_col=real_location_col, end_col=real_end_col,
-            )
+    real_activity_col = detect_column(real_df, _ACTIVITY_CANDIDATES)
+    real_start_col = detect_column(real_df, _DATETIME_CANDIDATES)
+    real_end_col = detect_column(real_df, _END_TS_CANDIDATES)
+    real_location_col = detect_column(real_df, _LOCATION_CANDIDATES)
+    synth_location_col = detect_column(traj.df, _LOCATION_CANDIDATES)
+    resolution = _location_resolution(real_df, real_location_col)
+
+    synthetic_visit_result = _prepare_activity_visits(
+        traj.df,
+        label="synthetic",
+        uid_col=traj.uid_col,
+        datetime_col=traj.datetime_col,
+        activity_col=(
+            synth_activity_col
+            if synth_activity_col and synth_activity_col in traj.df.columns
+            else None
+        ),
+        location_col=synth_location_col,
+        lat_col=traj.lat_col,
+        lng_col=traj.lng_col,
+        location_resolution=resolution,
+    )
+    observed_visit_result = _prepare_activity_visits(
+        real_df,
+        label=observed_label,
+        uid_col=real_traj.uid_col,
+        datetime_col=real_start_col,
+        activity_col=real_activity_col,
+        location_col=real_location_col,
+        lat_col=real_traj.lat_col,
+        lng_col=real_traj.lng_col,
+        location_resolution=resolution,
+        end_col=real_end_col,
+    )
+    if synthetic_visit_result is not None:
+        synthetic_visits = synthetic_visit_result.visits
+        if synthetic_visit_result.warning:
+            warnings.append(synthetic_visit_result.warning)
+    if observed_visit_result is not None:
+        observed_visits = observed_visit_result.visits
+        if observed_visit_result.warning:
+            warnings.append(observed_visit_result.warning)
 
     activity = None
     if synthetic_visits is not None and observed_visits is not None:
@@ -448,10 +477,22 @@ def build_comparison_payload(
             )
         activity = guard("activity", _activity)
 
+    def _micro_activity_usage():
+        if synthetic_activities_path is None:
+            return None
+        path = Path(synthetic_activities_path)
+        if not path.exists():
+            return None
+        activities = pd.read_parquet(path)
+        if activities.empty:
+            return None
+        return _micro_activity_daily_usage_data(activities)
+
+    micro_activity_usage = guard("micro_activity_usage", _micro_activity_usage)
+
     # ---- mobility laws --------------------------------------------------- #
     def _mobility_laws():
         real_location_col = detect_column(real_df, _LOCATION_CANDIDATES)
-        synth_location_col = detect_column(traj.df, _LOCATION_CANDIDATES)
         real_activity_col = detect_column(real_df, _ACTIVITY_CANDIDATES)
         obs_law_visits = _mobility_law_visits(
             real_df, uid_col=real_traj.uid_col, datetime_col=real_traj.datetime_col,
@@ -509,6 +550,7 @@ def build_comparison_payload(
         "ecdf": ecdf,
         "mobility_laws": mobility_laws,
         "activity": activity,
+        "micro_activity_usage": micro_activity_usage,
         "profiles": profiles,
         "motifs": motifs,
         "stvd": stvd,

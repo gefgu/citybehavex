@@ -1,15 +1,12 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING, Optional
+from typing import Optional
 
 import numpy as np
 import pandas as pd
 
 from .models import DiaryBatch
-
-if TYPE_CHECKING:
-    from citybehavex.schedules import DiaryBank
 
 
 def diary_batch_to_markov_training(
@@ -76,6 +73,8 @@ def annotate_trajectory_purposes_ddcrp(
     agent (1-based ``uid``) on ``day_index = (date - start_date).days``.
     """
     out = traj_df.copy()
+    if "purpose" in out.columns:
+        return out
     if uid_col not in out.columns or datetime_col not in out.columns:
         return out
 

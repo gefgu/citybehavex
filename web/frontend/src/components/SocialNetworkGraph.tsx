@@ -87,7 +87,7 @@ export function SocialNetworkGraph({ block }: { block: SocialNetworkBlock }) {
         <span>{block.layout}</span>
         <span>k={block.social_graph_k}</span>
       </div>
-      <EChart option={option} className="network-graph" />
+      <EChart option={option} className="network-graph" preventPageScrollOnWheel />
     </div>
   );
 }

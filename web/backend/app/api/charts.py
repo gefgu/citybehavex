@@ -39,10 +39,13 @@ def get_charts(
         selected.path,
         experiment.observed_path,
         build=lambda: build_comparison_payload(
-            str(selected.path), str(experiment.observed_path), experiment.label
+            str(selected.path),
+            str(experiment.observed_path),
+            experiment.label,
+            synthetic_activities_path=str(selected.activities_path),
         ),
         refresh=refresh,
-        extra_paths=(selected.social_network_path,),
+        extra_paths=(selected.social_network_path, selected.activities_path),
     )
     payload = {**payload, "run_id": selected.run_id}
     return ApiResponseWrapper(data=payload)

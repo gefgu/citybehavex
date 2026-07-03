@@ -39,7 +39,7 @@ impl DiaryState {
 pub(crate) struct AgentState {
     pub(crate) current_location: usize,
     pub(crate) home_location: usize,
-    pub(crate) work_location: Option<usize>,
+    pub(crate) work_location: usize,
     pub(crate) visited_locs: Vec<usize>,
     pub(crate) visit_counts: Vec<u32>,
     pub(crate) total_visits: f64,
@@ -52,7 +52,7 @@ impl AgentState {
         Self {
             current_location: 0,
             home_location: 0,
-            work_location: None,
+            work_location: 0,
             visited_locs: Vec::with_capacity(200),
             visit_counts: vec![0u32; n_locations],
             total_visits: 0.0,
@@ -105,7 +105,6 @@ pub(crate) struct AgentParData {
     pub(crate) moves: Vec<(usize, i64, i32)>,
     pub(crate) active_day: i64,
     pub(crate) active_abs_loc: i32,
-    pub(crate) abstract_loc_cache: Vec<(i32, usize)>,
     pub(crate) neighbor_indices: Vec<usize>,
     pub(crate) edge_sim: Vec<f64>,
     pub(crate) edge_upd: Vec<i64>,

@@ -15,7 +15,6 @@ from citybehavex.activities import activity_descriptions, activity_duration_arra
 from citybehavex.config import CityBehavExConfig
 from citybehavex.embedding import embed_profiles, embed_texts
 from citybehavex.llm_diaries import DiaryBatch, LLMStats, allocate_location_counts, fetch_diary_batch
-from citybehavex.llm_diaries.training import annotate_trajectory_purposes_ddcrp
 from citybehavex.profiles import AgentProfile, generate_profiles, load_profiles, profile_to_narrative, profiles_to_frame
 from citybehavex.roads import build_road_graph, snap_locations_to_graph
 from citybehavex.schedules import DiaryBank, build_ddcrp_diary, build_diary_bank
@@ -314,9 +313,7 @@ def _run_simulation_core(
     relevance_column: str,
     start_date: pd.Timestamp,
     end_date: pd.Timestamp,
-    bank: DiaryBank,
     diary_arrays: tuple,
-    chosen: np.ndarray,
     timing: CoreTiming,
     profiles: Optional[list[AgentProfile]] = None,
     profile_embeddings: Optional[np.ndarray] = None,
@@ -417,7 +414,6 @@ def _run_simulation_core(
         activities.to_parquet(act_path, index=False)
         typer.echo(f"Saved {len(activities):,} activities -> {act_path}")
     df = _merge_tessellation_metadata(df, tessellation_df, ["tile_id", "category"])
-    df = annotate_trajectory_purposes_ddcrp(df, bank, chosen, start_date)
     traj = skmob2.TrajDataFrame(
         df, datetime_col="datetime", lat_col="lat", lng_col="lng", uid_col="uid"
     )
@@ -478,7 +474,7 @@ def run_simulation(config: CityBehavExConfig) -> skmob2.TrajDataFrame:
             f"LLM diary phase: {llm_seconds:.2f}s, {llm_stats.calls:,} chat completion calls"
             f"{cache_text}"
         )
-        bank, diary_arrays, chosen, profile_embeddings = _build_schedule(
+        _, diary_arrays, _, profile_embeddings = _build_schedule(
             config, diary_batches, start_date, profiles=profiles
         )
         traj, synth_activity_col = _run_simulation_core(
@@ -487,9 +483,7 @@ def run_simulation(config: CityBehavExConfig) -> skmob2.TrajDataFrame:
             relevance_column,
             start_date,
             end_date,
-            bank,
             diary_arrays,
-            chosen,
             core_timing,
             profiles=profiles,
             profile_embeddings=profile_embeddings,
@@ -512,5 +506,9 @@ def run_simulation(config: CityBehavExConfig) -> skmob2.TrajDataFrame:
             observed_label=config.comparison.label,
             output_path=stamped_html,
             synth_activity_col=synth_activity_col,
+            synthetic_activities_path=stamped_output.replace(
+                ".parquet",
+                "_activities.parquet",
+            ),
         )
     return traj

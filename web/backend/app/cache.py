@@ -13,7 +13,7 @@ from typing import Any, Callable
 
 from .config import CACHE_DIR
 
-PAYLOAD_CACHE_VERSION = "v2"
+PAYLOAD_CACHE_VERSION = "v3"
 
 
 def _key(

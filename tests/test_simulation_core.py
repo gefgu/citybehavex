@@ -51,15 +51,16 @@ def _run(
     act_dur_sigma=None,
     purpose_act_starts=None,
     purpose_acts=None,
+    work_tile=1,
 ):
     diary_ts = np.asarray(slot_times, dtype=np.int64)
     diary_loc = np.asarray(abs_locs, dtype=np.int32)
     starts = np.array([0], dtype=np.int64)
     ends = np.array([len(diary_ts)], dtype=np.int64)
     rels = np.ones(len(lats), dtype=float) if relevances is None else np.asarray(relevances, dtype=float)
-    # Returns a 3-tuple of tuples: (10 trip arrays), (7 path arrays), (6 activity arrays).
+    # Returns a 3-tuple of tuples: (11 trip arrays), (7 path arrays), (6 activity arrays).
     # Trip: agents, lats, lngs, arrival, departure, duration,
-    #       enc_agent, enc_contact, enc_tile, enc_ts
+    #       enc_agent, enc_contact, enc_tile, enc_ts, stop_abstract_loc
     # Paths: stop_id, path_agent, path_stop_id, path_seq, path_lat, path_lng, path_t
     # Activities: act_agent, act_stop_id, act_seq, act_activity, act_arrival, act_departure
     return core.simulation_core_simulate_agents(
@@ -86,6 +87,7 @@ def _run(
         master_seed=42,
         starting_locs=np.array([0], dtype=np.int64),
         starting_locs_mode_relevance=False,
+        work_tiles=np.array([work_tile], dtype=np.int64),
         act_dur_mu=act_dur_mu,
         act_dur_sigma=act_dur_sigma,
         purpose_act_starts=purpose_act_starts,
@@ -155,7 +157,10 @@ def test_simulation_core_keeps_one_location_for_continuous_abstract_block():
     assert len(ag) == 3
 
 
-def test_simulation_core_reuses_same_day_location_for_abstract_code():
+def test_work_code_always_resolves_to_fixed_work_tile():
+    """WORK (abstract code 1) is pinned to a single tile per agent for the
+    whole simulation -- every occurrence of the WORK code, even non-adjacent
+    ones on the same day, must resolve to that same fixed tile."""
     lats = [48.8566, 48.8580, 48.8610, 48.8640]
     lngs = [2.3522, 2.3540, 2.3580, 2.3620]
     slot_times = [
@@ -186,6 +191,41 @@ def test_simulation_core_reuses_same_day_location_for_abstract_code():
     assert out_lngs[1] == out_lngs[3]
 
 
+def test_other_code_does_not_reuse_a_cached_location_within_a_day():
+    """OTHER abstract codes (2-6) must resolve fresh via the EPR return/
+    exploration decision every time, never memoized per day. With rho=1.0
+    (always explore), exploration excludes already-visited tiles, so two
+    non-adjacent occurrences of the same OTHER code must land on different
+    physical tiles -- a per-day cache would have forced them to match."""
+    lats = [48.8566, 48.8580, 48.8610, 48.8640]
+    lngs = [2.3522, 2.3540, 2.3580, 2.3620]
+    slot_times = [
+        0,
+        8 * 3600,
+        8 * 3600 + _SLOT,
+        10 * 3600,
+        14 * 3600,
+        14 * 3600 + _SLOT,
+        18 * 3600,
+    ]
+    abs_locs = [0, 2, 2, 0, 2, 2, 0]
+
+    trip, _, _ = _run(
+        lats,
+        lngs,
+        abs_locs,
+        slot_times,
+        end_ts=86400,
+        rho=1.0,
+        gamma=0.0,
+    )
+
+    out_lats = np.asarray(trip[1])
+    out_lngs = np.asarray(trip[2])
+    assert len(out_lats) == 5
+    assert out_lats[1] != out_lats[3] or out_lngs[1] != out_lngs[3]
+
+
 def test_same_physical_location_across_abstract_codes_yields_one_stop():
     """Different abstract-location codes that resolve (e.g. via preferential
     return, rho=0) to the agent's *current* physical tile must not fragment
@@ -203,6 +243,7 @@ def test_same_physical_location_across_abstract_codes_yields_one_stop():
         end_ts=86400,
         rho=0.0,
         gamma=0.0,
+        work_tile=0,
     )
     ag, out_lats, _, arr, dep, *_ = trip
 
@@ -236,6 +277,7 @@ def test_same_physical_location_still_samples_multiple_activities():
         act_dur_sigma=act_dur_sigma,
         purpose_act_starts=purpose_act_starts,
         purpose_acts=purpose_acts,
+        work_tile=0,
     )
     ag = trip[0]
     assert len(ag) == 1  # still one physical stop
@@ -292,6 +334,7 @@ def test_simulate_agents_returns_trip_columns():
         "departure",
         "trip_duration_minutes",
         "dwell_minutes",
+        "purpose",
     ):
         assert column in df.columns
     assert "activity" not in df.columns
@@ -300,6 +343,42 @@ def test_simulate_agents_returns_trip_columns():
     assert pd.api.types.is_datetime64_any_dtype(df["arrival"])
     assert isinstance(moving, pd.DataFrame)
     assert isinstance(activities, pd.DataFrame)
+
+
+def test_simulate_agents_purpose_uses_engine_abstract_location_not_arrival_window():
+    tess = pd.DataFrame(
+        {
+            "tile_id": [0, 1],
+            "lat": [48.8566, 48.95],
+            "lng": [2.3522, 2.55],
+            "relevance": [1.0, 1.0],
+        }
+    )
+    diary_arrays = (
+        np.array([0, 8 * 3600, 8 * 3600 + _SLOT], dtype=np.int64),
+        np.array([0, 2, 0], dtype=np.int32),
+        np.array([0], dtype=np.int64),
+        np.array([3], dtype=np.int64),
+    )
+
+    df, _, _, _ = simulate_agents(
+        tess,
+        "relevance",
+        diary_arrays,
+        start_ts=0,
+        end_ts=10 * 3600,
+        slot_seconds=_SLOT,
+        car_speed_kmh=10.0,
+        n_agents=1,
+        random_state=42,
+        rho=1.0,
+        gamma=0.0,
+        starting_locs=np.array([0], dtype=np.int64),
+    )
+
+    other_stop = df.iloc[1]
+    assert other_stop["datetime"] >= pd.Timestamp("1970-01-01 08:15:00")
+    assert other_stop["purpose"] == "OTHER"
 
 
 def test_simulate_agents_can_return_social_graph_artifact():

@@ -7,12 +7,18 @@ import pandas as pd
 
 from citybehavex.reports import (
     _activity_comparison_section_html,
+    _activities_sidecar_path,
+    _collapse_explicit_purposes,
     _common_part_of_commuters,
     _daily_location_lognormal_dataset,
+    _derive_purpose_groups_from_heuristic,
     _metrics_section_html,
+    _micro_activity_daily_usage_figure,
+    _micro_activity_section_html,
     _mobility_law_visits,
     _mobility_laws_section_html,
     _motif_visits,
+    _prepare_activity_visits,
     _trajectory_od_matrix,
     _visits_for_comparison,
     load_trajectory,
@@ -172,6 +178,75 @@ def test_motif_visits_use_h3_locations_and_binary_purposes():
     assert motif_visits["purpose"].tolist() == ["HOME", "VISIT"]
 
 
+def test_explicit_purpose_collapse_uses_home_work_other_only():
+    visits = pd.DataFrame(
+        {
+            "purpose": ["HOME", " work ", "SHOP", "PURCHASE", None, "unknown"],
+        }
+    )
+
+    grouped = _collapse_explicit_purposes(visits)
+
+    assert grouped["purpose"].tolist() == [
+        "HOME",
+        "WORK",
+        "OTHER",
+        "OTHER",
+        "OTHER",
+        "OTHER",
+    ]
+
+
+def test_heuristic_purpose_derivation_uses_time_location_anchors():
+    visits = pd.DataFrame(
+        {
+            "uid": ["u1"] * 5,
+            "start_timestamp": pd.to_datetime(
+                [
+                    "2026-01-01 02:30",
+                    "2026-01-01 05:00",
+                    "2026-01-01 10:00",
+                    "2026-01-01 15:00",
+                    "2026-01-01 20:00",
+                ]
+            ),
+            "location_id": ["home", "home", "work", "work", "shop"],
+        }
+    )
+
+    derived = _derive_purpose_groups_from_heuristic(visits)
+
+    assert derived["purpose"].tolist() == ["HOME", "HOME", "WORK", "WORK", "OTHER"]
+
+
+def test_prepare_activity_visits_warns_when_using_heuristic():
+    source = pd.DataFrame(
+        {
+            "uid": ["u1", "u1", "u1"],
+            "datetime": pd.to_datetime(
+                ["2026-01-01 03:00", "2026-01-01 10:00", "2026-01-01 18:00"]
+            ),
+            "location_id": ["home", "work", "shop"],
+        }
+    )
+
+    result = _prepare_activity_visits(
+        source,
+        label="survey",
+        uid_col="uid",
+        datetime_col="datetime",
+        activity_col=None,
+        location_col="location_id",
+        lat_col=None,
+        lng_col=None,
+    )
+
+    assert result is not None
+    assert result.used_heuristic is True
+    assert "survey has no explicit purpose column" in result.warning
+    assert set(result.visits["purpose"]).issubset({"HOME", "WORK", "OTHER"})
+
+
 def test_activity_comparison_section_uses_comparison_plots(monkeypatch):
     observed_visits = pd.DataFrame({"source": ["observed"]})
     synthetic_visits = pd.DataFrame({"source": ["synthetic"]})
@@ -227,6 +302,45 @@ def test_activity_comparison_section_uses_comparison_plots(monkeypatch):
     assert calls[2][3] == ("survey", "synthetic")
     assert html.count("Activity comparison") == 1
     assert html.count("<iframe>") == 3
+
+
+def test_activity_comparison_section_shows_heuristic_warning(monkeypatch):
+    class Figure:
+        def _repr_html_(self):
+            return "<iframe>chart</iframe>"
+
+    monkeypatch.setattr(
+        "citybehavex.reports.comparison.plot_visit_purpose_comparison",
+        lambda *args, **kwargs: Figure(),
+    )
+    monkeypatch.setattr(
+        "citybehavex.reports.comparison.plot_activity_transition_difference",
+        lambda *args, **kwargs: Figure(),
+    )
+    monkeypatch.setattr(
+        "citybehavex.reports.comparison.plot_daily_activity_difference",
+        lambda *args, **kwargs: Figure(),
+    )
+
+    visits = pd.DataFrame(
+        {
+            "uid": ["u1"],
+            "start_timestamp": pd.to_datetime(["2026-01-01 08:00"]),
+            "end_timestamp": pd.to_datetime(["2026-01-01 09:00"]),
+            "location_id": ["home"],
+            "purpose": ["HOME"],
+        }
+    )
+
+    html = _activity_comparison_section_html(
+        visits,
+        visits,
+        "survey",
+        ["survey has no explicit purpose column; derived HOME/WORK/OTHER."],
+    )
+
+    assert "Purpose heuristic warning" in html
+    assert "survey has no explicit purpose column" in html
 
 
 def test_activity_comparison_section_requires_both_datasets():
@@ -434,3 +548,47 @@ def test_mobility_laws_section_skips_only_failed_chart(monkeypatch):
 
     assert html.count("<iframe>") == 3
     assert html.count('class="fit-parameters"') == 3
+
+
+def test_activities_sidecar_path_uses_synthetic_stem():
+    assert (
+        _activities_sidecar_path("data/run/synthetic.parquet")
+        == "data/run/synthetic_activities.parquet"
+    )
+
+
+def test_micro_activity_daily_usage_figure_uses_catalog_labels():
+    activities = pd.DataFrame(
+        {
+            "uid": [1, 1],
+            "activity": [0, 4],
+            "arrival": pd.to_datetime(["2026-01-01 00:00", "2026-01-01 08:00"]),
+            "departure": pd.to_datetime(["2026-01-01 01:00", "2026-01-01 09:00"]),
+        }
+    )
+
+    fig = _micro_activity_daily_usage_figure(activities)
+
+    trace_names = {trace.name for trace in fig.data}
+    assert "sleep" in trace_names
+    assert "paid_work" in trace_names
+
+
+def test_micro_activity_section_skips_missing_sidecar(capsys, tmp_path):
+    html = _micro_activity_section_html(str(tmp_path / "missing_activities.parquet"))
+
+    assert html == ""
+    assert "micro-activity chart skipped" in capsys.readouterr().err
+
+
+def test_micro_activity_section_skips_empty_sidecar(capsys, tmp_path):
+    path = tmp_path / "empty_activities.parquet"
+    pd.DataFrame(columns=["uid", "activity", "arrival", "departure"]).to_parquet(
+        path,
+        index=False,
+    )
+
+    html = _micro_activity_section_html(str(path))
+
+    assert html == ""
+    assert "activities table is empty" in capsys.readouterr().err
