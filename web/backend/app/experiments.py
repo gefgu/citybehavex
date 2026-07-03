@@ -60,6 +60,10 @@ class Run:
     def moving_path(self) -> Path:
         return self.path.with_name(f"{self.path.stem}_moving{self.path.suffix}")
 
+    @property
+    def activities_path(self) -> Path:
+        return self.path.with_name(f"{self.path.stem}_activities{self.path.suffix}")
+
     def to_dict(self, with_summary: bool = False) -> dict[str, Any]:
         d: dict[str, Any] = {
             "run_id": self.run_id,

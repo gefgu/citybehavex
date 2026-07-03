@@ -7,7 +7,10 @@ function fmtDateTime(s: string): string {
 }
 
 function fmtPurpose(purpose: string, category?: string | null): string {
-  return category ? `${purpose} · ${category}` : purpose;
+  // POI category is only meaningful for OTHER stops — HOME/WORK locations
+  // don't reliably correspond to the category of whatever POI tile they
+  // happen to sit on.
+  return purpose === "OTHER" && category ? `${purpose} · ${category}` : purpose;
 }
 
 export function AgentSidebar({
@@ -113,6 +116,7 @@ export function AgentSidebar({
                         key={i}
                         className="agent-click-row"
                         tabIndex={0}
+                        title="Open trip activity detail"
                         onClick={() =>
                           onSelectDetail({
                             kind: "trip",
@@ -161,6 +165,7 @@ export function AgentSidebar({
                         key={i}
                         className="agent-click-row"
                         tabIndex={0}
+                        title="Open encounter detail"
                         onClick={() =>
                           onSelectDetail({
                             kind: "encounter",

@@ -11,7 +11,6 @@ pub(crate) struct SimulationOutput {
     pub(crate) encounter_contact: Vec<i64>,
     pub(crate) encounter_tile: Vec<i64>,
     pub(crate) encounter_ts: Vec<i64>,
-    pub(crate) activity: Vec<i64>,
     pub(crate) stop_id: Vec<i64>,
     pub(crate) path_agent: Vec<i64>,
     pub(crate) path_stop_id: Vec<i64>,
@@ -19,6 +18,12 @@ pub(crate) struct SimulationOutput {
     pub(crate) path_lat: Vec<f64>,
     pub(crate) path_lng: Vec<f64>,
     pub(crate) path_t: Vec<i64>,
+    pub(crate) act_agent: Vec<i64>,
+    pub(crate) act_stop_id: Vec<i64>,
+    pub(crate) act_seq: Vec<i32>,
+    pub(crate) act_activity: Vec<i64>,
+    pub(crate) act_arrival: Vec<i64>,
+    pub(crate) act_departure: Vec<i64>,
 }
 
 impl SimulationOutput {
@@ -34,7 +39,6 @@ impl SimulationOutput {
             encounter_contact: Vec::new(),
             encounter_tile: Vec::new(),
             encounter_ts: Vec::new(),
-            activity: Vec::new(),
             stop_id: Vec::new(),
             path_agent: Vec::new(),
             path_stop_id: Vec::new(),
@@ -42,7 +46,65 @@ impl SimulationOutput {
             path_lat: Vec::new(),
             path_lng: Vec::new(),
             path_t: Vec::new(),
+            act_agent: Vec::new(),
+            act_stop_id: Vec::new(),
+            act_seq: Vec::new(),
+            act_activity: Vec::new(),
+            act_arrival: Vec::new(),
+            act_departure: Vec::new(),
         }
+    }
+}
+
+/// One row per micro-activity sampled during a stop's dwell window. Kept
+/// separate from `TripOutputBuffers` so the stop table stays a clean "one row
+/// per real physical visit" table even when a single stop spans several
+/// sampled micro-activities (e.g. sleep -> breakfast -> get ready, all at
+/// HOME). `last_idx[agent_idx]` mirrors `TripOutputBuffers.last_output_idx`:
+/// it points at the most recently pushed activity row for that agent, so its
+/// `departure` can be patched once the next activity (or the stop itself)
+/// closes it out.
+#[derive(Default)]
+pub(crate) struct ActivityOutputBuffers {
+    pub(crate) agent: Vec<i64>,
+    pub(crate) stop_id: Vec<i64>,
+    pub(crate) seq: Vec<i32>,
+    pub(crate) activity: Vec<i64>,
+    pub(crate) arrival: Vec<i64>,
+    pub(crate) departure: Vec<i64>,
+    pub(crate) last_idx: Vec<usize>,
+}
+
+impl ActivityOutputBuffers {
+    pub(crate) fn with_capacity(n_agents: usize) -> Self {
+        Self {
+            agent: Vec::with_capacity(n_agents),
+            stop_id: Vec::with_capacity(n_agents),
+            seq: Vec::with_capacity(n_agents),
+            activity: Vec::with_capacity(n_agents),
+            arrival: Vec::with_capacity(n_agents),
+            departure: Vec::with_capacity(n_agents),
+            last_idx: Vec::with_capacity(n_agents),
+        }
+    }
+
+    /// Push a new micro-activity row for `agent_idx`, recording its index in
+    /// `last_idx` so a later call can patch its `departure`. Returns the new
+    /// row's index (unused by callers today, kept for symmetry/testability).
+    pub(crate) fn push(&mut self, agent_idx: usize, stop_id: i64, seq: i32, arrival: i64) -> usize {
+        let idx = self.agent.len();
+        self.agent.push(agent_idx as i64 + 1);
+        self.stop_id.push(stop_id);
+        self.seq.push(seq);
+        self.activity.push(0); // placeholder, patched immediately after sampling
+        self.arrival.push(arrival);
+        self.departure.push(arrival); // placeholder, patched when this activity closes
+        if agent_idx < self.last_idx.len() {
+            self.last_idx[agent_idx] = idx;
+        } else {
+            self.last_idx.push(idx);
+        }
+        idx
     }
 }
 
@@ -79,7 +141,6 @@ pub(crate) struct TripOutputBuffers {
     pub(crate) arrival: Vec<i64>,
     pub(crate) departure: Vec<i64>,
     pub(crate) duration: Vec<f64>,
-    pub(crate) activity: Vec<i64>,
     pub(crate) stop_id: Vec<i64>,
     pub(crate) last_output_idx: Vec<usize>,
 }
@@ -99,7 +160,6 @@ impl TripOutputBuffers {
             arrival: Vec::with_capacity(n_agents),
             departure: Vec::with_capacity(n_agents),
             duration: Vec::with_capacity(n_agents),
-            activity: Vec::with_capacity(n_agents),
             stop_id: Vec::with_capacity(n_agents),
             last_output_idx: Vec::with_capacity(n_agents),
         };
@@ -113,7 +173,6 @@ impl TripOutputBuffers {
             out.arrival.push(start_ts);
             out.departure.push(start_ts);
             out.duration.push(0.0);
-            out.activity.push(0);
             out.stop_id.push(stop_id);
         }
 
@@ -127,6 +186,7 @@ impl TripOutputBuffers {
         encounter_tile: Vec<i64>,
         encounter_ts: Vec<i64>,
         paths: RoadPathOutputBuffers,
+        activities: ActivityOutputBuffers,
     ) -> SimulationOutput {
         SimulationOutput {
             agents: self.agents,
@@ -139,7 +199,6 @@ impl TripOutputBuffers {
             encounter_contact,
             encounter_tile,
             encounter_ts,
-            activity: self.activity,
             stop_id: self.stop_id,
             path_agent: paths.agent,
             path_stop_id: paths.dest_stop_id,
@@ -147,6 +206,12 @@ impl TripOutputBuffers {
             path_lat: paths.lat,
             path_lng: paths.lng,
             path_t: paths.t,
+            act_agent: activities.agent,
+            act_stop_id: activities.stop_id,
+            act_seq: activities.seq,
+            act_activity: activities.activity,
+            act_arrival: activities.arrival,
+            act_departure: activities.departure,
         }
     }
 }

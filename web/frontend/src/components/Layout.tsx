@@ -6,7 +6,7 @@ export function Layout() {
       <header className="top-nav">
         <div className="container">
           <Link to="/" className="brand">
-            CityBehavEx
+            <img src="/citybx_logo.png" alt="CityBehavEx" className="brand-logo" />
           </Link>
           <nav>
             <NavLink to="/" end>

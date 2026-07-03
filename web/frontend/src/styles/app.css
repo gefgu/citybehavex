@@ -28,11 +28,17 @@ body {
   gap: var(--space-xl);
 }
 .top-nav .brand {
-  font-size: 18px;
-  font-weight: 500;
-  color: var(--ink);
+  display: inline-flex;
+  align-items: center;
   text-decoration: none;
-  letter-spacing: -0.01em;
+  flex-shrink: 0;
+}
+.top-nav .brand-logo {
+  display: block;
+  width: auto;
+  height: 34px;
+  max-width: 190px;
+  object-fit: contain;
 }
 .top-nav nav {
   display: flex;
@@ -51,7 +57,14 @@ body {
 
 /* ---- hero band ---- */
 .hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 520px);
+  align-items: center;
+  gap: var(--space-xxl);
   padding: var(--space-section) 0 var(--space-xxl);
+}
+.hero-copy {
+  min-width: 0;
 }
 .hero h1 {
   font-size: 48px;
@@ -64,6 +77,13 @@ body {
   color: var(--muted);
   max-width: 60ch;
   margin: 0 0 var(--space-lg);
+}
+.hero-figure {
+  display: block;
+  width: 100%;
+  max-height: 420px;
+  object-fit: contain;
+  justify-self: end;
 }
 
 /* ---- buttons ---- */
@@ -116,6 +136,7 @@ body {
   font-size: 22px;
 }
 .signature-card p {
+  color: inherit;
   margin: 0;
   opacity: 0.9;
   font-size: 15px;
@@ -130,6 +151,15 @@ body {
   border-radius: var(--radius-md);
   background: var(--canvas);
   padding: var(--space-lg);
+  transition:
+    border-color 160ms ease,
+    box-shadow 160ms ease,
+    transform 160ms ease,
+    background-color 160ms ease;
+}
+.card:hover {
+  border-color: var(--border-strong);
+  box-shadow: 0 10px 28px rgba(24, 29, 38, 0.08);
 }
 .card-grid {
   display: grid;
@@ -151,10 +181,22 @@ body {
   flex-direction: column;
   gap: var(--space-sm);
   min-width: 0;
+  cursor: pointer;
 }
 .exp-card.is-open {
   border-color: var(--border-strong);
   background: var(--surface-soft);
+}
+.exp-card:focus-visible {
+  outline: 2px solid var(--info);
+  outline-offset: 2px;
+}
+.exp-card:hover {
+  background: var(--surface-soft);
+  transform: translateY(-2px);
+}
+.exp-card.is-open:hover {
+  transform: none;
 }
 .exp-card .exp-head {
   display: flex;
@@ -215,6 +257,9 @@ body {
   grid-template-columns: minmax(280px, 0.9fr) minmax(360px, 1.1fr);
   gap: var(--space-xl);
   margin-top: var(--space-lg);
+}
+.experiment-view-summary {
+  margin: var(--space-lg) 0 var(--space-md);
 }
 .experiment-edit-form {
   display: grid;
@@ -468,6 +513,17 @@ table.agent-table td:first-child { color: var(--muted); }
   background: var(--cream);
   outline: none;
 }
+.agent-click-row:hover td,
+.agent-click-row:focus td {
+  color: var(--ink);
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+}
+.agent-click-row:focus-visible {
+  outline: 2px solid var(--info);
+  outline-offset: -2px;
+}
 .timeline-detail-panel {
   border: 1px solid var(--hairline);
   border-radius: var(--radius-md);
@@ -519,7 +575,30 @@ table.agent-table td:first-child { color: var(--muted); }
 
 @media (max-width: 900px) {
   .signature-grid { grid-template-columns: 1fr; }
+  .experiment-grid-row,
+  .experiment-panel-body,
+  .experiment-edit-form {
+    grid-template-columns: 1fr;
+  }
+  .experiment-panel-head,
+  .run-row {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .run-actions {
+    justify-content: flex-start;
+    margin-left: 0;
+  }
   .hero h1 { font-size: 36px; }
+  .hero {
+    grid-template-columns: 1fr;
+    gap: var(--space-lg);
+    padding-top: var(--space-xl);
+  }
+  .hero-figure {
+    max-height: 320px;
+    justify-self: center;
+  }
   .timeline-layout {
     flex-direction: column;
   }

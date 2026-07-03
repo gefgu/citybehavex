@@ -369,7 +369,7 @@ def _run_simulation_core(
             max_leg_waypoints=rn.max_leg_waypoints,
         )
 
-    df, encounters, moving = simulate_agents(
+    df, encounters, moving, activities = simulate_agents(
         tessellation_df,
         relevance_column,
         diary_arrays,
@@ -404,6 +404,11 @@ def _run_simulation_core(
         moving_path = base.replace(".parquet", "_moving.parquet")
         moving.to_parquet(moving_path, index=False)
         typer.echo(f"Saved {len(moving):,} waypoints -> {moving_path}")
+    if config.activities.enabled and len(activities) > 0:
+        base = output_path or config.simulation.output
+        act_path = base.replace(".parquet", "_activities.parquet")
+        activities.to_parquet(act_path, index=False)
+        typer.echo(f"Saved {len(activities):,} activities -> {act_path}")
     df = _merge_tessellation_metadata(df, tessellation_df, ["tile_id", "category"])
     df = annotate_trajectory_purposes_ddcrp(df, bank, chosen, start_date)
     traj = skmob2.TrajDataFrame(

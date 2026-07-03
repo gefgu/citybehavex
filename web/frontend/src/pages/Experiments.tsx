@@ -22,6 +22,8 @@ type EditForm = {
   profiles_output: string;
 };
 
+type PanelMode = "view" | "edit";
+
 function fmtDate(s?: string) {
   return s ? s.slice(0, 10) : "-";
 }
@@ -78,20 +80,23 @@ function chunkExperiments(experiments: Experiment[], size: number) {
 export function Experiments() {
   const [experiments, setExperiments] = useState<Experiment[] | null>(null);
   const [openId, setOpenId] = useState<string | null>(null);
+  const [panelMode, setPanelMode] = useState<PanelMode>("view");
   const [form, setForm] = useState<EditForm | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [busyAction, setBusyAction] = useState<string | null>(null);
 
-  async function reload(nextOpenId = openId) {
+  async function reload(nextOpenId = openId, nextPanelMode = panelMode) {
     const data = await fetchExperiments(true);
     setExperiments(data);
     if (nextOpenId && data.some((exp) => exp.id === nextOpenId)) {
       const openExp = data.find((exp) => exp.id === nextOpenId);
       setOpenId(nextOpenId);
+      setPanelMode(nextPanelMode);
       setForm(openExp ? formFromExperiment(openExp) : null);
     } else {
       setOpenId(null);
+      setPanelMode("view");
       setForm(null);
     }
   }
@@ -103,14 +108,15 @@ export function Experiments() {
   const rows = useMemo(() => chunkExperiments(experiments ?? [], 3), [experiments]);
   const openExperiment = experiments?.find((exp) => exp.id === openId) ?? null;
 
-  function toggleExperiment(exp: Experiment) {
+  function toggleExperiment(exp: Experiment, mode: PanelMode) {
     setActionError(null);
-    if (openId === exp.id) {
+    if (openId === exp.id && panelMode === mode) {
       setOpenId(null);
       setForm(null);
       return;
     }
     setOpenId(exp.id);
+    setPanelMode(mode);
     setForm(formFromExperiment(exp));
   }
 
@@ -122,7 +128,7 @@ export function Experiments() {
     setActionError(null);
     try {
       await updateExperiment(openExperiment.id, payloadFromForm(form));
-      await reload(openExperiment.id);
+      await reload(openExperiment.id, "view");
     } catch (e) {
       setActionError(String(e));
     } finally {
@@ -154,7 +160,7 @@ export function Experiments() {
     setActionError(null);
     try {
       await deleteExperimentRun(exp.id, runId);
-      await reload(exp.id);
+      await reload(exp.id, panelMode);
     } catch (e) {
       setActionError(String(e));
     } finally {
@@ -182,10 +188,20 @@ export function Experiments() {
                   experiment={exp}
                   isOpen={openId === exp.id}
                   key={exp.id}
-                  onToggle={() => toggleExperiment(exp)}
+                  mode={openId === exp.id ? panelMode : null}
+                  onEdit={() => toggleExperiment(exp, "edit")}
+                  onView={() => toggleExperiment(exp, "view")}
                 />
               ))}
-              {expanded && openExperiment && form && (
+              {expanded && openExperiment && panelMode === "view" && (
+                <ExperimentViewPanel
+                  actionError={actionError}
+                  busyAction={busyAction}
+                  experiment={openExperiment}
+                  onDeleteRun={(runId) => handleDeleteRun(openExperiment, runId)}
+                />
+              )}
+              {expanded && openExperiment && form && panelMode === "edit" && (
                 <ExperimentPanel
                   actionError={actionError}
                   busyAction={busyAction}
@@ -208,14 +224,29 @@ export function Experiments() {
 function ExperimentCard({
   experiment,
   isOpen,
-  onToggle,
+  mode,
+  onEdit,
+  onView,
 }: {
   experiment: Experiment;
   isOpen: boolean;
-  onToggle: () => void;
+  mode: PanelMode | null;
+  onEdit: () => void;
+  onView: () => void;
 }) {
   return (
-    <article className={`card exp-card ${isOpen ? "is-open" : ""}`}>
+    <article
+      className={`card exp-card ${isOpen ? "is-open" : ""}`}
+      role="button"
+      tabIndex={0}
+      onClick={onView}
+      onKeyDown={(event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          onView();
+        }
+      }}
+    >
       <div className="exp-head">
         <h3>{experiment.label}</h3>
         <span className="badge">{experiment.id}</span>
@@ -233,10 +264,70 @@ function ExperimentCard({
         <span>{experiment.runs.length.toLocaleString()} runs</span>
         <span>observed: {experiment.observed_exists ? "yes" : "missing"}</span>
       </div>
-      <button className="btn btn-secondary exp-toggle" type="button" onClick={onToggle}>
-        {isOpen ? "Close" : "Edit"}
+      <button
+        className="btn btn-secondary exp-toggle"
+        type="button"
+        onClick={(event) => {
+          event.stopPropagation();
+          onEdit();
+        }}
+      >
+        {isOpen && mode === "edit" ? "Close" : "Edit"}
       </button>
     </article>
+  );
+}
+
+function ExperimentViewPanel({
+  actionError,
+  busyAction,
+  experiment,
+  onDeleteRun,
+}: {
+  actionError: string | null;
+  busyAction: string | null;
+  experiment: Experiment;
+  onDeleteRun: (runId: string) => void;
+}) {
+  return (
+    <section className="card experiment-panel">
+      <div className="experiment-panel-head">
+        <div>
+          <h2>{experiment.label}</h2>
+          <p>
+            <code>{experiment.config}</code>
+          </p>
+        </div>
+        <span className="badge">{experiment.id}</span>
+      </div>
+
+      {actionError && <div className="inline-error">{actionError}</div>}
+
+      <div className="experiment-view-summary">
+        <div className="param-list">
+          <span>
+            <b>{paramString(experiment.params.agents)}</b> agents
+          </span>
+          <span>
+            <b>{paramString(experiment.params.days)}</b> days
+          </span>
+          <span>
+            granularity <b>{paramString(experiment.params.granularity_minutes)}m</b>
+          </span>
+          <span>
+            car speed <b>{paramString(experiment.params.car_speed_kmh)} km/h</b>
+          </span>
+          <span>observed: {experiment.observed_exists ? "yes" : "missing"}</span>
+          <span>profiles: {experiment.profiles_enabled ? "enabled" : "disabled"}</span>
+        </div>
+      </div>
+
+      <ExperimentRuns
+        busyAction={busyAction}
+        experiment={experiment}
+        onDeleteRun={onDeleteRun}
+      />
+    </section>
   );
 }
 
@@ -259,8 +350,6 @@ function ExperimentPanel({
   onFormChange: (form: EditForm) => void;
   onSave: (event: FormEvent) => void;
 }) {
-  const runnable = experiment.observed_exists && experiment.runs.length > 0;
-
   function updateField<K extends keyof EditForm>(key: K, value: EditForm[K]) {
     onFormChange({ ...form, [key]: value });
   }
@@ -366,45 +455,61 @@ function ExperimentPanel({
           </div>
         </form>
 
-        <div className="experiment-runs">
-          <h3>Runs</h3>
-          {experiment.runs.length === 0 && <p className="muted-small">No simulation runs found yet.</p>}
-          {experiment.runs.map((run) => (
-            <div className="run-row" key={run.run_id}>
-              <div className="run-main">
-                <span className="run-id">{fmtRunId(run.run_id)}</span>
-                <span className="run-meta">
-                  {run.summary
-                    ? `${run.summary.rows.toLocaleString()} rows · ${
-                        run.summary.uids?.toLocaleString() ?? "?"
-                      } users · ${fmtDate(run.summary.date_start)} to ${fmtDate(run.summary.date_end)}`
-                    : run.summary_error ?? ""}
-                </span>
-              </div>
-              <div className="run-actions">
-                {runnable && (
-                  <Link to={`/experiments/${experiment.id}/charts?run=${run.run_id}`} className="btn btn-secondary">
-                    Charts
-                  </Link>
-                )}
-                {run.summary && run.summary.rows > 0 && (
-                  <Link to={`/experiments/${experiment.id}/timeline?run=${run.run_id}`} className="btn btn-secondary">
-                    Timeline
-                  </Link>
-                )}
-                <button
-                  className="btn btn-danger"
-                  disabled={busyAction !== null}
-                  type="button"
-                  onClick={() => onDeleteRun(run.run_id)}
-                >
-                  {busyAction === `delete-run:${run.run_id}` ? "Deleting..." : "Delete"}
-                </button>
-              </div>
-            </div>
-          ))}
-        </div>
+        <ExperimentRuns busyAction={busyAction} experiment={experiment} onDeleteRun={onDeleteRun} />
       </div>
     </section>
+  );
+}
+
+function ExperimentRuns({
+  busyAction,
+  experiment,
+  onDeleteRun,
+}: {
+  busyAction: string | null;
+  experiment: Experiment;
+  onDeleteRun: (runId: string) => void;
+}) {
+  const runnable = experiment.observed_exists && experiment.runs.length > 0;
+
+  return (
+    <div className="experiment-runs">
+      <h3>Runs</h3>
+      {experiment.runs.length === 0 && <p className="muted-small">No simulation runs found yet.</p>}
+      {experiment.runs.map((run) => (
+        <div className="run-row" key={run.run_id}>
+          <div className="run-main">
+            <span className="run-id">{fmtRunId(run.run_id)}</span>
+            <span className="run-meta">
+              {run.summary
+                ? `${run.summary.rows.toLocaleString()} rows · ${
+                    run.summary.uids?.toLocaleString() ?? "?"
+                  } users · ${fmtDate(run.summary.date_start)} to ${fmtDate(run.summary.date_end)}`
+                : run.summary_error ?? ""}
+            </span>
+          </div>
+          <div className="run-actions">
+            {runnable && (
+              <Link to={`/experiments/${experiment.id}/charts?run=${run.run_id}`} className="btn btn-secondary">
+                Charts
+              </Link>
+            )}
+            {run.summary && run.summary.rows > 0 && (
+              <Link to={`/experiments/${experiment.id}/timeline?run=${run.run_id}`} className="btn btn-secondary">
+                Timeline
+              </Link>
+            )}
+            <button
+              className="btn btn-danger"
+              disabled={busyAction !== null}
+              type="button"
+              onClick={() => onDeleteRun(run.run_id)}
+            >
+              {busyAction === `delete-run:${run.run_id}` ? "Deleting..." : "Delete"}
+            </button>
+          </div>
+        </div>
+      ))}
+    </div>
   );
 }

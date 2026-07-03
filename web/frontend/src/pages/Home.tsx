@@ -4,16 +4,23 @@ export function Home() {
   return (
     <>
       <section className="hero">
-        <h1>Synthetic urban mobility, measured against the real thing.</h1>
-        <p className="lead">
-          CityBehavEx simulates agent trajectories for a city and compares them to
-          observed mobility data. This is the interactive report — distributions,
-          mobility laws, activity patterns, profiles and spatial differences, straight
-          from the simulation outputs.
-        </p>
-        <Link to="/experiments" className="btn btn-primary">
-          Browse experiments
-        </Link>
+        <div className="hero-copy">
+          <h1>Synthetic urban mobility, measured against the real thing.</h1>
+          <p className="lead">
+            CityBehavEx simulates agent trajectories for a city and compares them to
+            observed mobility data. This is the interactive report — distributions,
+            mobility laws, activity patterns, profiles and spatial differences, straight
+            from the simulation outputs.
+          </p>
+          <Link to="/experiments" className="btn btn-primary">
+            Browse experiments
+          </Link>
+        </div>
+        <img
+          className="hero-figure"
+          src="/notre_dame_with_character.jpg"
+          alt="CityBehavEx character beside Notre-Dame"
+        />
       </section>
 
       <section className="signature-grid">

@@ -59,14 +59,21 @@ def simulate_agents(
     road_node_lngs: np.ndarray | None = None,
     location_road_node: np.ndarray | None = None,
     max_leg_waypoints: int = 16,
-) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """Run the CityBehavEx simulation core.
 
     Returns:
-        (trajectories_df, encounters_df, moving_df). ``encounters_df`` records
-        (agent, contact, tile, ts) for each social interaction; ``moving_df``
-        has one row per waypoint along each trip's road-following path (or a
-        2-point origin/destination pair when road routing is disabled/unsnapped).
+        (trajectories_df, encounters_df, moving_df, activities_df).
+        ``trajectories_df`` is a stop table: one row per real physical
+        location visit (a new row only appears when the agent actually
+        relocates). ``encounters_df`` records (agent, contact, tile, ts) for
+        each social interaction. ``moving_df`` has one row per waypoint along
+        each trip's road-following path (or a 2-point origin/destination pair
+        when road routing is disabled/unsnapped). ``activities_df`` has one
+        row per sampled micro-activity, keyed by ``stop_id`` — a single stop
+        can span several micro-activities (e.g. sleep -> breakfast -> get
+        ready, all at HOME), kept separate so the stop table itself stays a
+        clean one-row-per-visit table.
     """
     lats = np.ascontiguousarray(tessellation_df["lat"].to_numpy(dtype=float))
     lng_col = "lng" if "lng" in tessellation_df.columns else "lon"
@@ -155,10 +162,13 @@ def simulate_agents(
     (
         (
             agent_ids, out_lats, out_lngs, arrival, departure, trip_dur,
-            enc_agent, enc_contact, enc_tile, enc_ts, out_activity,
+            enc_agent, enc_contact, enc_tile, enc_ts,
         ),
         (
             stop_id, path_agent, path_stop_id, path_seq, path_lat, path_lng, path_t,
+        ),
+        (
+            act_agent, act_stop_id, act_seq, act_activity, act_arrival, act_departure,
         ),
     ) = _cbx_core.simulation_core_simulate_agents(
         lats,
@@ -222,7 +232,6 @@ def simulate_agents(
             "departure": departure.astype("datetime64[s]"),
             "trip_duration_minutes": trip_dur / 60.0,
             "dwell_minutes": (departure - arrival) / 60.0,
-            "activity": np.asarray(out_activity, dtype=np.int64),
         }
     )
 
@@ -247,4 +256,17 @@ def simulate_agents(
         }
     )
 
-    return trajectories, encounters, moving
+    act_arrival_arr = np.asarray(act_arrival, dtype=np.int64)
+    act_departure_arr = np.asarray(act_departure, dtype=np.int64)
+    activities = pd.DataFrame(
+        {
+            "uid": np.asarray(act_agent, dtype=np.int64),
+            "stop_id": np.asarray(act_stop_id, dtype=np.int64),
+            "seq": np.asarray(act_seq, dtype=np.int32),
+            "activity": np.asarray(act_activity, dtype=np.int64),
+            "arrival": act_arrival_arr.astype("datetime64[s]"),
+            "departure": act_departure_arr.astype("datetime64[s]"),
+        }
+    )
+
+    return trajectories, encounters, moving, activities

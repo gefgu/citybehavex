@@ -29,7 +29,10 @@ function fmtCoords(lat: number | null | undefined, lng: number | null | undefine
 
 function fmtPurpose(purpose: string | null | undefined, category?: string | null): string {
   if (!purpose) return "not available";
-  return category ? `${purpose} · ${category}` : purpose;
+  // POI category is only meaningful for OTHER stops — HOME/WORK locations
+  // don't reliably correspond to the category of whatever POI tile they
+  // happen to sit on.
+  return purpose === "OTHER" && category ? `${purpose} · ${category}` : purpose;
 }
 
 function fmtActivity(name: string | null, id: number | null): string {
@@ -58,10 +61,6 @@ export function TimelineDetailPanel({ selection }: { selection: TimelineDetailSe
           <span className="timeline-detail-pill">agent {selection.agentUid}</span>
         </div>
 
-        <p className="agent-narrative">
-          {trip.activity_description ?? "No micro-activity description is available for this stop."}
-        </p>
-
         <table className="agent-table timeline-detail-table">
           <tbody>
             <tr>
@@ -77,10 +76,6 @@ export function TimelineDetailPanel({ selection }: { selection: TimelineDetailSe
               <td>{fmtPurpose(trip.purpose, trip.category)}</td>
             </tr>
             <tr>
-              <td>micro-activity</td>
-              <td>{fmtActivity(trip.activity_name, trip.activity)}</td>
-            </tr>
-            <tr>
               <td>dwell time</td>
               <td>{fmtMinutes(trip.dwell_minutes)}</td>
             </tr>
@@ -94,6 +89,32 @@ export function TimelineDetailPanel({ selection }: { selection: TimelineDetailSe
             </tr>
           </tbody>
         </table>
+
+        <div className="section-header">
+          Activities during this stay ({trip.activities.length})
+        </div>
+        <div className="agent-scroll">
+          <table className="agent-table timeline-detail-table">
+            <thead>
+              <tr>
+                <th>arrival</th>
+                <th>departure</th>
+                <th>micro-activity</th>
+                <th>dwell (min)</th>
+              </tr>
+            </thead>
+            <tbody>
+              {trip.activities.map((a, i) => (
+                <tr key={i} title={a.activity_description ?? undefined}>
+                  <td>{fmtDateTime(a.arrival)}</td>
+                  <td>{fmtDateTime(a.departure)}</td>
+                  <td>{fmtActivity(a.activity_name, a.activity)}</td>
+                  <td>{fmtMinutes(a.dwell_minutes)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </div>
     );
   }
