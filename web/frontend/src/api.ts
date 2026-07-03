@@ -2,6 +2,21 @@
 
 async function getJson<T>(url: string): Promise<T> {
   const res = await fetch(url);
+  return readJson<T>(res);
+}
+
+async function sendJson<T>(url: string, init: RequestInit): Promise<T> {
+  const res = await fetch(url, {
+    ...init,
+    headers: {
+      "Content-Type": "application/json",
+      ...(init.headers ?? {}),
+    },
+  });
+  return readJson<T>(res);
+}
+
+async function readJson<T>(res: Response): Promise<T> {
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
     throw new Error((body as { detail?: string }).detail || `HTTP ${res.status}`);
@@ -27,11 +42,28 @@ export interface Experiment {
   id: string;
   config: string;
   label: string;
+  simulation_output: string | null;
   observed_path: string | null;
   observed_exists: boolean;
+  profiles_enabled: boolean;
+  profiles_output: string | null;
+  profiles_path: string | null;
   profiles_exists: boolean;
   params: Record<string, unknown>;
   runs: Run[];
+}
+
+export interface ExperimentUpdate {
+  label?: string;
+  agents?: number;
+  days?: number;
+  start_date?: string | null;
+  granularity_minutes?: number;
+  car_speed_kmh?: number;
+  simulation_output?: string;
+  observed_path?: string | null;
+  profiles_enabled?: boolean;
+  profiles_output?: string;
 }
 
 export function fetchExperiments(withSummary = false): Promise<Experiment[]> {
@@ -40,6 +72,27 @@ export function fetchExperiments(withSummary = false): Promise<Experiment[]> {
 
 export function fetchExperiment(id: string): Promise<Experiment> {
   return getJson<Experiment>(`/api/experiments/${encodeURIComponent(id)}`);
+}
+
+export function updateExperiment(id: string, payload: ExperimentUpdate): Promise<Experiment> {
+  return sendJson<Experiment>(`/api/experiments/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function archiveExperiment(id: string): Promise<{ archived_config: string }> {
+  return sendJson<{ archived_config: string }>(
+    `/api/experiments/${encodeURIComponent(id)}/archive`,
+    { method: "POST", body: "{}" },
+  );
+}
+
+export function deleteExperimentRun(id: string, runId: string): Promise<{ deleted: string[] }> {
+  return sendJson<{ deleted: string[] }>(
+    `/api/experiments/${encodeURIComponent(id)}/runs/${encodeURIComponent(runId)}`,
+    { method: "DELETE", body: "{}" },
+  );
 }
 
 export function fetchCharts(id: string, run?: string): Promise<ChartPayload> {

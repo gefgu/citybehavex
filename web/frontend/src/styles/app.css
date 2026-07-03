@@ -89,6 +89,11 @@ body {
   color: var(--ink);
   border-color: var(--hairline);
 }
+.btn-danger {
+  background: var(--canvas);
+  color: var(--coral);
+  border-color: var(--coral);
+}
 
 /* ---- signature cards ---- */
 .signature-grid {
@@ -132,10 +137,24 @@ body {
 }
 
 /* ---- experiment list ---- */
+.experiment-grid {
+  display: grid;
+  gap: var(--space-lg);
+}
+.experiment-grid-row {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-lg);
+}
 .exp-card {
   display: flex;
   flex-direction: column;
   gap: var(--space-sm);
+  min-width: 0;
+}
+.exp-card.is-open {
+  border-color: var(--border-strong);
+  background: var(--surface-soft);
 }
 .exp-card .exp-head {
   display: flex;
@@ -143,7 +162,16 @@ body {
   justify-content: space-between;
   gap: var(--space-md);
 }
-.exp-card h3 { margin: 0; }
+.exp-card h3 {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.exp-toggle {
+  align-self: flex-start;
+  margin-top: auto;
+  padding: 6px 16px;
+  font-size: 14px;
+}
 .badge {
   display: inline-block;
   font-size: 12px;
@@ -162,6 +190,75 @@ body {
 }
 .param-list b { color: var(--ink); font-weight: 500; }
 
+.experiment-panel {
+  grid-column: 1 / -1;
+}
+.experiment-panel-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-lg);
+  border-bottom: 1px solid var(--hairline);
+  padding-bottom: var(--space-md);
+}
+.experiment-panel-head h2 {
+  font-size: 24px;
+  margin: 0 0 var(--space-xs);
+}
+.experiment-panel-head p {
+  color: var(--muted);
+  font-size: 13px;
+  margin: 0;
+}
+.experiment-panel-body {
+  display: grid;
+  grid-template-columns: minmax(280px, 0.9fr) minmax(360px, 1.1fr);
+  gap: var(--space-xl);
+  margin-top: var(--space-lg);
+}
+.experiment-edit-form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-md);
+  align-content: start;
+}
+.experiment-edit-form label {
+  color: var(--muted);
+  font-size: 13px;
+  margin: 0;
+}
+.experiment-edit-form input {
+  margin-top: 4px;
+}
+.experiment-edit-form .checkbox-field {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  color: var(--ink);
+}
+.experiment-edit-form .checkbox-field input {
+  margin: 0;
+  width: auto;
+}
+.form-actions {
+  grid-column: 1 / -1;
+}
+.inline-error {
+  border: 1px solid var(--coral);
+  border-radius: var(--radius-sm);
+  color: var(--coral);
+  font-size: 13px;
+  margin-top: var(--space-md);
+  padding: var(--space-sm) var(--space-md);
+}
+.experiment-runs h3 {
+  font-size: 18px;
+  margin: 0 0 var(--space-sm);
+}
+.muted-small {
+  color: var(--muted);
+  font-size: 13px;
+}
 .run-row {
   display: flex;
   align-items: center;
@@ -170,8 +267,24 @@ body {
   border-top: 1px solid var(--hairline);
   font-size: 13px;
 }
+.run-main {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
 .run-row .run-id { font-family: ui-monospace, monospace; color: var(--ink); }
 .run-row .run-meta { color: var(--muted); font-variant-numeric: tabular-nums; }
+.run-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-xs);
+  justify-content: flex-end;
+  margin-left: auto;
+}
+.run-actions .btn {
+  padding: 4px 12px;
+  font-size: 13px;
+}
 
 /* ---- section headers ---- */
 .section-header {
