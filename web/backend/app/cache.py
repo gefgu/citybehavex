@@ -13,6 +13,8 @@ from typing import Any, Callable
 
 from .config import CACHE_DIR
 
+PAYLOAD_CACHE_VERSION = "v2"
+
 
 def _key(
     exp_id: str,
@@ -28,7 +30,7 @@ def _key(
         for path in extra_paths
     )
     suffix = f"__{extra}" if extra else ""
-    return f"{exp_id}__{run_id}__{syn_mtime}__{obs_mtime}{suffix}.json"
+    return f"{PAYLOAD_CACHE_VERSION}__{exp_id}__{run_id}__{syn_mtime}__{obs_mtime}{suffix}.json"
 
 
 def get_or_build(

@@ -93,17 +93,80 @@ export function purposeOption(block: ActivityBlock["purpose"]): EChartsOption {
 }
 
 export function motifOption(block: MotifsBlock): EChartsOption {
-  const opt = groupedBar(block.categories, block.series, "% of user-days");
-  // motif ids are long hex strings
-  (opt.xAxis as { axisLabel: Record<string, unknown> }).axisLabel = {
-    color: COLORS.muted,
-    interval: 0,
-    rotate: 60,
-    fontSize: 9,
-    fontFamily: "ui-monospace, monospace",
+  const labelKeys = block.motif_label_keys ?? {};
+  const rich = (block.motif_label_styles ?? {}) as Record<string, never>;
+  return {
+    ...baseOption(),
+    grid: { left: 64, right: 24, top: 48, bottom: Object.keys(rich).length ? 150 : 90, containLabel: false },
+    tooltip: {
+      ...baseOption().tooltip,
+      trigger: "item",
+      formatter: (params: unknown) => {
+        const p = params as { seriesName: string; value?: unknown[] };
+        const value = p.value ?? [];
+        if (value.length >= 6) {
+          return [
+            `Literature motif: ${value[2]}`,
+            `Packed motif ID: ${value[3]}`,
+            `Hex ID: ${value[4]}`,
+            `${p.seriesName}: ${Number(value[1]).toFixed(2)}%`,
+            `Count: ${value[5]}`,
+          ].join("<br/>");
+        }
+        return `${p.seriesName}: ${Number(value[1] ?? 0).toFixed(2)}%`;
+      },
+    },
+    xAxis: {
+      type: "category",
+      data: block.categories,
+      name: "MOTIF ID",
+      nameLocation: "middle",
+      nameGap: Object.keys(rich).length ? 124 : 62,
+      axisLabel: {
+        color: COLORS.muted,
+        interval: 0,
+        margin: 10,
+        rotate: Object.keys(rich).length ? 0 : 60,
+        fontSize: Object.keys(rich).length ? 22 : 9,
+        fontFamily: "ui-monospace, monospace",
+        rich,
+        formatter: (value: string) => {
+          const styleKey = labelKeys[value];
+          return styleKey ? `{${styleKey}| }` : value;
+        },
+      },
+      axisLine: { lineStyle: { color: COLORS.hairline } },
+      axisTick: { show: false },
+    },
+    yAxis: { ...axisCommon("% of user-days"), min: 0, max: 100 },
+    series: block.series.map((s) => ({
+      name: s.name,
+      type: "bar",
+      data: block.categories.map((hexId, i) => {
+        const row = s.rows?.find((r) => r.hex_id === hexId);
+        if (!row) return [hexId, s.values[i] ?? 0, "", "", hexId, ""];
+        return [
+          row.hex_id,
+          Number(row.percentage),
+          row.literature_motif_id,
+          row.motif_id,
+          row.hex_id,
+          row.count,
+        ];
+      }),
+      dimensions: [
+        "hex_id",
+        "percentage",
+        "literature_motif_id",
+        "packed_motif_id",
+        "hex_label",
+        "count",
+      ],
+      encode: { x: "hex_id", y: "percentage" },
+      barMaxWidth: 32,
+      itemStyle: { color: ROLE_COLOR[s.role] ?? COLORS.ink },
+    })),
   };
-  (opt.grid as { bottom: number }).bottom = 90;
-  return opt;
 }
 
 function diffHeatmap(

@@ -301,7 +301,16 @@ export interface ProfilesBlock {
 }
 export interface MotifsBlock {
   categories: string[];
-  series: BarSeries[];
+  series: (BarSeries & { rows?: MotifRow[] })[];
+  motif_label_keys?: Record<string, string>;
+  motif_label_styles?: Record<string, unknown>;
+}
+export interface MotifRow {
+  literature_motif_id: number | string;
+  motif_id: number | string;
+  hex_id: string;
+  percentage: number;
+  count: number;
 }
 export interface StvdFeatureCollection {
   type: string;
