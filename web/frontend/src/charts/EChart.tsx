@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import * as echarts from "echarts";
+import "echarts-gl";
 import type { EChartsOption } from "echarts";
 
 // Minimal imperative ECharts wrapper: init on mount, setOption on change,
