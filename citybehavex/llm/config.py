@@ -14,7 +14,7 @@ class LLMConfig(BaseModel):
     temperature: float = 0.4
     max_tokens: Optional[int] = None
     timeout_seconds: float = 60.0
-    retries: int = 1
+    retries: int = 3
     diary_count: int = Field(default=30, ge=10, le=50)
     reuse_cache: bool = True
     cache_dir: str = ".citybehavex/llm_diaries"
