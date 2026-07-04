@@ -7,12 +7,12 @@ tessellation:
   overture_release: "2026-05-20.0"
   min_poi_count: 1
   relevance_column: relevance
-  output: data/gparis_poi_tessellation.parquet
+  output: data/gparis/results/gparis_poi_tessellation.parquet
 
 simulation:
   agents: 500
   days: 7
-  output: data/gparis_simulation_core_trajectories.parquet
+  output: data/gparis/results/gparis_simulation_core_trajectories.parquet
   random_state: 42
   relevance_column: relevance
   granularity_minutes: 15   # schedule slot length (5, 15, or 60)
@@ -30,9 +30,9 @@ simulation:
 
 road_network:
   enabled: true
-  nodes_output: data/gparis_road_graph_nodes.parquet
-  edges_output: data/gparis_road_graph_edges.parquet
-  snap_output: data/gparis_road_graph_snap.parquet
+  nodes_output: data/gparis/results/gparis_road_graph_nodes.parquet
+  edges_output: data/gparis/results/gparis_road_graph_edges.parquet
+  snap_output: data/gparis/results/gparis_road_graph_snap.parquet
   max_leg_waypoints: 128
 
 llm:
@@ -91,9 +91,9 @@ activities:
 
 profiles:
   enabled: true
-  output: data/gparis_agent_profiles.parquet
+  output: data/gparis/results/gparis_agent_profiles.parquet
 
 comparison:
-  path: data/gparis_visitation_df.parquet
+  path: data/gparis/results/gparis_visitation_df.parquet
   label: gparis
-  html: data/gparis_simulation_core_comparison.html
+  html: data/gparis/results/gparis_simulation_core_comparison.html
