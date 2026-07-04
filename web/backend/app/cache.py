@@ -8,12 +8,18 @@ input parquets. A changed input invalidates the entry automatically.
 from __future__ import annotations
 
 import json
+from hashlib import sha256
 from pathlib import Path
 from typing import Any, Callable
 
 from .config import CACHE_DIR
 
 PAYLOAD_CACHE_VERSION = "v4"
+MAX_CACHE_KEY_PREFIX = 120
+
+
+def _safe_part(value: str) -> str:
+    return "".join(char if char.isalnum() or char in "._-" else "-" for char in value)
 
 
 def _key(
@@ -25,12 +31,21 @@ def _key(
 ) -> str:
     syn_mtime = int(synthetic.stat().st_mtime)
     obs_mtime = int(observed.stat().st_mtime) if observed and observed.exists() else "synthetic-only"
-    extra = "__".join(
-        f"{path.stem}-{int(path.stat().st_mtime) if path.exists() else 'missing'}"
+    extra = [
+        [str(path), path.stem, int(path.stat().st_mtime) if path.exists() else "missing"]
         for path in extra_paths
-    )
-    suffix = f"__{extra}" if extra else ""
-    return f"{PAYLOAD_CACHE_VERSION}__{exp_id}__{run_id}__{syn_mtime}__{obs_mtime}{suffix}.json"
+    ]
+    key_parts = {
+        "version": PAYLOAD_CACHE_VERSION,
+        "exp_id": exp_id,
+        "run_id": run_id,
+        "synthetic": [str(synthetic), syn_mtime],
+        "observed": [str(observed) if observed else None, obs_mtime],
+        "extra": extra,
+    }
+    digest = sha256(json.dumps(key_parts, sort_keys=True).encode("utf-8")).hexdigest()[:16]
+    prefix = f"{PAYLOAD_CACHE_VERSION}__{_safe_part(exp_id)}__{_safe_part(run_id)}"
+    return f"{prefix[:MAX_CACHE_KEY_PREFIX]}__{digest}.json"
 
 
 def get_or_build(
