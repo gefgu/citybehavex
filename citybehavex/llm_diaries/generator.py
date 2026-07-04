@@ -6,6 +6,7 @@ import time
 from pathlib import Path
 from typing import Iterator, Optional
 
+import numpy as np
 import requests
 from pydantic import ValidationError
 
@@ -14,6 +15,7 @@ from citybehavex.math import allocate_location_counts
 
 from .cache import apply_variant, cache_path, load_cache_with_fallback, save_validated_diary_cache
 from .models import Diary, DiaryBatch, DiaryValidationError, LLMStats, LocationCountDistribution
+from .motifs import MOTIF_EXCURSION_PATTERNS, build_motif_rule, sample_motif
 from .parsing import parse_single_diary_response
 from .prompts import build_single_diary_prompt
 
@@ -84,6 +86,8 @@ def fetch_diary_batch(
     location_count_mu: float = 1.0,
     location_count_sigma: float = 0.5,
     max_locations: int = 6,
+    motif_exploration_rate: float = 1.0,
+    random_state: int = 0,
     variant: str = "",
     stats: Optional[LLMStats] = None,
     requests_module=requests,
@@ -116,6 +120,7 @@ def fetch_diary_batch(
             base_valid_path,
             expected_distribution=distribution_metadata,
             expected_location_counts=expected_location_counts,
+            expected_motif_exploration_rate=motif_exploration_rate,
         )
         if stats is not None:
             stats.cache_hits += 1
@@ -163,6 +168,14 @@ def fetch_diary_batch(
         last_error: Exception | None = None
 
         for diary_number, diary_location_count in enumerate(expected_location_counts, start=1):
+            diary_rng = np.random.default_rng(
+                np.random.SeedSequence([int(random_state), diary_number])
+            )
+            motif_rule = ""
+            if diary_location_count > 1 and diary_rng.random() >= motif_exploration_rate:
+                motif_ordinal = sample_motif(diary_location_count, diary_rng)
+                motif_rule = build_motif_rule(MOTIF_EXCURSION_PATTERNS[motif_ordinal])
+
             prompt = build_single_diary_prompt(
                 diary_number=diary_number,
                 diary_count=config.diary_count,
@@ -171,6 +184,7 @@ def fetch_diary_batch(
                 purpose_distribution=purpose_distribution,
                 location_count=diary_location_count,
                 previous_diaries=generated_by_count.get(diary_location_count),
+                motif_rule=motif_rule,
             )
 
             diary: Diary | None = None
@@ -200,6 +214,7 @@ def fetch_diary_batch(
                         "representative_day": representative_day,
                         "location_count_distribution": distribution_metadata.model_dump(),
                         "target_location_counts": expected_location_counts,
+                        "motif_exploration_rate": motif_exploration_rate,
                         "diaries": diaries,
                     }
                 )

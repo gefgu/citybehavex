@@ -20,6 +20,7 @@ class DiariesConfig(BaseModel):
     location_count_mu: float = 1.0
     location_count_sigma: float = Field(default=0.5, gt=0)
     max_locations: int = Field(default=6, ge=1, le=6)
+    motif_exploration_rate: float = Field(default=1.0, ge=0.0, le=1.0)
 
     def profile_for(self, day_type: str) -> str:
         """City profile for weekday/weekend, falling back to the shared one."""

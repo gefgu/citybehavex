@@ -23,6 +23,7 @@ def build_single_diary_prompt(
     purpose_distribution: Optional[dict[str, float]] = None,
     location_count: Optional[int] = None,
     previous_diaries: Optional[list[Diary]] = None,
+    motif_rule: str = "",
 ) -> str:
     distribution = purpose_distribution or {}
     location_rule = ""
@@ -62,6 +63,7 @@ def build_single_diary_prompt(
         f"City profile: {city_profile or 'No additional city profile provided.'}\n"
         f"Purpose distribution hints: {json.dumps(distribution, sort_keys=True)}\n"
         f"{location_rule}"
+        f"{motif_rule}"
         f"{dedup_rule}"
         "Allowed purposes: HOME, WORK, OTHER.\n"
         "Rules: start at 00:00, end at 24:00, use contiguous non-overlapping episodes, "

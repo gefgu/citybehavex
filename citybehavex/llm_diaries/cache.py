@@ -31,6 +31,7 @@ def load_validated_diary_cache(
     *,
     expected_distribution: Optional[LocationCountDistribution] = None,
     expected_location_counts: Optional[list[int]] = None,
+    expected_motif_exploration_rate: Optional[float] = None,
 ) -> DiaryBatch:
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
@@ -51,6 +52,13 @@ def load_validated_diary_cache(
         raise DiaryValidationError(
             f"invalid diary cache at {path}: target location counts do not match configuration"
         )
+    if (
+        expected_motif_exploration_rate is not None
+        and batch.motif_exploration_rate != expected_motif_exploration_rate
+    ):
+        raise DiaryValidationError(
+            f"invalid diary cache at {path}: motif exploration rate does not match configuration"
+        )
     return batch
 
 
@@ -65,12 +73,14 @@ def load_cache_with_fallback(
     *,
     expected_distribution: LocationCountDistribution,
     expected_location_counts: list[int],
+    expected_motif_exploration_rate: Optional[float] = None,
 ) -> DiaryBatch:
     try:
         return load_validated_diary_cache(
             valid_path,
             expected_distribution=expected_distribution,
             expected_location_counts=expected_location_counts,
+            expected_motif_exploration_rate=expected_motif_exploration_rate,
         )
     except DiaryValidationError:
         if base_valid_path != valid_path:
@@ -78,5 +88,6 @@ def load_cache_with_fallback(
                 base_valid_path,
                 expected_distribution=expected_distribution,
                 expected_location_counts=expected_location_counts,
+                expected_motif_exploration_rate=expected_motif_exploration_rate,
             )
         raise
