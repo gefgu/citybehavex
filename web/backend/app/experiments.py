@@ -131,6 +131,7 @@ class Experiment:
     road_nodes_path: Optional[Path]
     road_edges_path: Optional[Path]
     params: dict[str, Any]
+    special_days: list[dict[str, str]]
     runs: list[Run]
 
     def to_dict(self, with_summary: bool = False) -> dict[str, Any]:
@@ -152,6 +153,7 @@ class Experiment:
                 and self.road_edges_path.exists()
             ),
             "params": self.params,
+            "special_days": self.special_days,
             "runs": [r.to_dict(with_summary=with_summary) for r in self.runs],
         }
 
@@ -182,6 +184,10 @@ def _load_experiment(config_path: Path) -> Experiment:
         "granularity_minutes": cfg.simulation.granularity_minutes,
         "car_speed_kmh": cfg.simulation.car_speed_kmh,
     }
+    special_days = [
+        {"name": sd.name, "start_date": sd.start_date, "end_date": sd.end_date}
+        for sd in cfg.diaries.special_days
+    ]
     return Experiment(
         id=config_path.stem,
         config_path=config_path,
@@ -194,6 +200,7 @@ def _load_experiment(config_path: Path) -> Experiment:
         road_nodes_path=road_nodes_path,
         road_edges_path=road_edges_path,
         params=params,
+        special_days=special_days,
         runs=_discover_runs(synthetic_output),
     )
 

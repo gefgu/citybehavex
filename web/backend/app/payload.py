@@ -124,13 +124,27 @@ FILTERS = [
     {"key": "weekend", "label": "Weekend", "kind": "day"},
 ]
 
-DISTRIBUTION_FILTERS = [
-    *FILTERS,
+_TIME_FILTERS = [
     {"key": "morning", "label": "Morning", "kind": "time", "start": 6, "end": 12},
     {"key": "afternoon", "label": "Afternoon", "kind": "time", "start": 12, "end": 18},
     {"key": "evening", "label": "Evening", "kind": "time", "start": 18, "end": 24},
     {"key": "night", "label": "Night", "kind": "time", "start": 0, "end": 6},
 ]
+
+
+def _special_day_filters(special_days: Optional[list[dict[str, str]]]) -> list[dict[str, Any]]:
+    """Turn config-declared special days (e.g. an "emergency" date range) into
+    the same filter-metadata shape as the built-in weekday/weekend filters."""
+    return [
+        {
+            "key": sd["name"],
+            "label": sd["name"].replace("_", " ").title(),
+            "kind": "date_range",
+            "start": sd["start_date"],
+            "end": sd["end_date"],
+        }
+        for sd in (special_days or [])
+    ]
 
 
 def _empty_group(meta: dict[str, Any], blocks_key: str = "blocks") -> dict[str, Any]:
@@ -145,6 +159,9 @@ def _filter_df(df: pd.DataFrame, datetime_col: str | None, meta: dict[str, Any])
         mask = dt.dt.dayofweek < 5
         if meta["key"] == "weekend":
             mask = ~mask
+    elif meta["kind"] == "date_range":
+        day = dt.dt.normalize()
+        mask = (day >= pd.Timestamp(meta["start"])) & (day <= pd.Timestamp(meta["end"]))
     else:
         hour = dt.dt.hour
         mask = (hour >= int(meta["start"])) & (hour < int(meta["end"]))
@@ -400,8 +417,11 @@ def build_comparison_payload(
     road_nodes_path: Optional[str] = None,
     road_edges_path: Optional[str] = None,
     road_snap_max_distance_m: float = 750.0,
+    special_days: Optional[list[dict[str, str]]] = None,
 ) -> dict[str, Any]:
     warnings: list[str] = []
+    filters = [*FILTERS, *_special_day_filters(special_days)]
+    distribution_filters = [*filters, *_TIME_FILTERS]
 
     def guard(section: str, fn):
         try:
@@ -558,7 +578,7 @@ def build_comparison_payload(
                     wasserstein.append(row)
         return group
 
-    ecdf = {"groups": [guard(f"ecdf.{m['key']}", lambda m=m: distribution_group(m)) for m in DISTRIBUTION_FILTERS]}
+    ecdf = {"groups": [guard(f"ecdf.{m['key']}", lambda m=m: distribution_group(m)) for m in distribution_filters]}
     ecdf["groups"] = [g for g in ecdf["groups"] if g is not None]
 
     synthetic_visits = None
@@ -635,7 +655,7 @@ def build_comparison_payload(
                 (synth_daily, synth_cats, synth_bins), real_daily_tuple,
             )
             return {"filter_key": meta["key"], "filter_label": meta["label"], **block}
-        activity_groups = [guard(f"activity.{m['key']}", lambda m=m: _activity_group(m)) for m in FILTERS]
+        activity_groups = [guard(f"activity.{m['key']}", lambda m=m: _activity_group(m)) for m in filters]
         activity_groups = [g for g in activity_groups if g is not None]
         activity = {"groups": activity_groups} if activity_groups else None
 
@@ -650,7 +670,7 @@ def build_comparison_payload(
             return None
         groups = []
         dt_col = detect_column(activities, ["arrival", "start_timestamp", "datetime"])
-        for meta in FILTERS:
+        for meta in filters:
             filtered = _filter_df(activities, dt_col, meta)
             if filtered.empty:
                 continue
@@ -708,7 +728,7 @@ def build_comparison_payload(
                      **_distance_frequency_series(obs_law_visits, syn_law_visits, observed_label if obs_law_visits is not None else None)})
         blocks = {k: v for k, v in block.items() if v is not None}
         return {"filter_key": meta["key"], "filter_label": meta["label"], "blocks": blocks} if blocks else None
-    mobility_groups = [guard(f"mobility_laws.{m['key']}", lambda m=m: _mobility_laws_group(m)) for m in FILTERS]
+    mobility_groups = [guard(f"mobility_laws.{m['key']}", lambda m=m: _mobility_laws_group(m)) for m in filters]
     mobility_groups = [g for g in mobility_groups if g is not None]
     mobility_laws = {"groups": mobility_groups} if mobility_groups else None
 
@@ -722,7 +742,7 @@ def build_comparison_payload(
     motifs = None
     if observed_visits is not None or synthetic_visits is not None:
         motif_groups = []
-        for meta in FILTERS:
+        for meta in filters:
             motif = guard(
                 f"motifs.{meta['key']}",
                 lambda meta=meta: _build_motifs_block(
@@ -741,7 +761,7 @@ def build_comparison_payload(
     stvd = None
     if mode == "comparison" and traj.lat_col and traj.lng_col and real_traj and real_traj.lat_col and real_traj.lng_col:
         stvd_groups = []
-        for meta in FILTERS:
+        for meta in filters:
             def _stvd(meta=meta):
                 synth_df = _filter_df(traj.df, traj.datetime_col, meta)
                 real_group_df = _filter_df(real_df, real_dt_col, meta)
@@ -762,7 +782,7 @@ def build_comparison_payload(
         stvd = {"groups": stvd_groups} if stvd_groups else None
 
     if mode == "comparison" and real_traj is not None:
-        for meta in FILTERS:
+        for meta in filters:
             def _cpc(meta=meta):
                 synth_df = _filter_df(traj.df, traj.datetime_col, meta)
                 real_group_df = _filter_df(real_df, real_dt_col, meta)

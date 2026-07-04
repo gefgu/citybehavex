@@ -94,3 +94,57 @@ def test_simulation_config_rejects_tessellation_and_bbox():
 def test_diaries_config_rejects_invalid_location_distribution(kwargs):
     with pytest.raises(ValueError):
         DiariesConfig(**kwargs)
+
+
+def _emergency_diaries_config() -> DiariesConfig:
+    return DiariesConfig(
+        city_profile="shared",
+        city_profile_weekday="weekday text",
+        city_profile_weekend="weekend text",
+        special_days=[
+            {
+                "name": "emergency",
+                "start_date": "2019-11-14",
+                "end_date": "2019-11-28",
+                "city_profile": "emergency text",
+            }
+        ],
+    )
+
+
+def test_profile_for_returns_special_day_profile():
+    cfg = _emergency_diaries_config()
+    assert cfg.profile_for("emergency") == "emergency text"
+    assert cfg.profile_for("weekday") == "weekday text"
+    assert cfg.profile_for("weekend") == "weekend text"
+
+
+def test_profile_for_special_day_falls_back_to_shared_profile():
+    cfg = DiariesConfig(
+        city_profile="shared",
+        special_days=[{"name": "emergency", "start_date": "2019-11-14", "end_date": "2019-11-28"}],
+    )
+    assert cfg.profile_for("emergency") == "shared"
+
+
+def test_day_types_for_range_includes_overlapping_special_days():
+    cfg = _emergency_diaries_config()
+    from datetime import date
+
+    assert cfg.day_types_for_range(date(2019, 9, 15), date(2019, 11, 28)) == [
+        "weekday",
+        "weekend",
+        "emergency",
+    ]
+    assert cfg.day_types_for_range(date(2019, 9, 15), date(2019, 10, 1)) == ["weekday", "weekend"]
+
+
+def test_resolve_day_type_prefers_special_day_over_calendar():
+    from datetime import date
+
+    cfg = _emergency_diaries_config()
+    # 2019-11-14 is a Thursday (a calendar weekday) but inside the emergency range.
+    assert cfg.resolve_day_type(date(2019, 11, 14)) == "emergency"
+    # A Saturday outside the emergency range still resolves to the calendar rule.
+    assert cfg.resolve_day_type(date(2019, 9, 21)) == "weekend"
+    assert cfg.resolve_day_type(date(2019, 9, 16)) == "weekday"

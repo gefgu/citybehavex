@@ -5,7 +5,12 @@ import json
 import pandas as pd
 
 from citybehavex.simulation.core import social_network_sidecar_path
-from web.backend.app.payload import _load_social_network_sidecar, build_comparison_payload
+from web.backend.app.payload import (
+    _filter_df,
+    _load_social_network_sidecar,
+    _special_day_filters,
+    build_comparison_payload,
+)
 
 
 def test_load_social_network_sidecar_returns_none_when_absent(tmp_path):
@@ -167,3 +172,76 @@ def test_build_comparison_payload_supports_synthetic_only(monkeypatch, tmp_path)
     assert all_activity["transition_difference"]["matrix_mode"] == "raw"
     assert all_activity["daily_activity_difference"]["matrix_mode"] == "raw"
     assert len(all_activity["purpose"]["series"]) == 1
+
+
+def test_special_day_filters_builds_date_range_metadata():
+    filters = _special_day_filters(
+        [{"name": "emergency", "start_date": "2019-11-14", "end_date": "2019-11-28"}]
+    )
+    assert filters == [
+        {
+            "key": "emergency",
+            "label": "Emergency",
+            "kind": "date_range",
+            "start": "2019-11-14",
+            "end": "2019-11-28",
+        }
+    ]
+    assert _special_day_filters(None) == []
+
+
+def test_filter_df_date_range_keeps_only_rows_inside_window():
+    df = pd.DataFrame(
+        {
+            "datetime": pd.to_datetime(
+                ["2019-11-13 12:00", "2019-11-14 00:00", "2019-11-20 08:00", "2019-11-29 00:00"]
+            ),
+            "value": [1, 2, 3, 4],
+        }
+    )
+    meta = {"key": "emergency", "kind": "date_range", "start": "2019-11-14", "end": "2019-11-28"}
+    filtered = _filter_df(df, "datetime", meta)
+    assert filtered["value"].tolist() == [2, 3]
+
+
+def test_build_comparison_payload_includes_special_day_filter_group(monkeypatch, tmp_path):
+    synthetic = tmp_path / "synthetic.parquet"
+    synthetic_df = pd.DataFrame(
+        {
+            "uid": ["u1", "u1", "u1"],
+            "datetime": pd.to_datetime(
+                ["2026-01-01 03:00", "2026-01-05 10:00", "2026-01-05 18:00"]
+            ),
+            "lat": [48.85, 48.86, 48.87],
+            "lng": [2.35, 2.36, 2.37],
+            "purpose": ["HOME", "WORK", "SHOP"],
+            "trip_duration_minutes": [10.0, 15.0, 20.0],
+            "dwell_minutes": [300.0, 120.0, 90.0],
+        }
+    )
+    synthetic_df.to_parquet(synthetic, index=False)
+
+    monkeypatch.setattr(
+        "web.backend.app.payload._mobility_law_visits",
+        lambda *args, **kwargs: pd.DataFrame(
+            {
+                "user_id": ["u1", "u1"],
+                "timestamp": pd.to_datetime(["2026-01-01 00:00", "2026-01-01 01:00"]),
+                "location_id": ["a", "b"],
+                "lat": [48.85, 48.86],
+                "lng": [2.35, 2.36],
+            }
+        ),
+    )
+
+    payload = build_comparison_payload(
+        str(synthetic),
+        None,
+        "observed",
+        special_days=[{"name": "emergency", "start_date": "2026-01-05", "end_date": "2026-01-05"}],
+    )
+
+    ecdf_keys = {group["filter_key"] for group in payload["ecdf"]["groups"]}
+    assert "emergency" in ecdf_keys
+    activity_keys = {group["filter_key"] for group in payload["activity"]["groups"]}
+    assert "emergency" in activity_keys

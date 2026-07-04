@@ -317,7 +317,7 @@ export function fetchTimelineAgent(id: string, uid: number, run?: string): Promi
 
 export interface AgentCrpDiary {
   diary_id: string;
-  is_weekend: boolean;
+  day_type: string;
   sim: number;
   usage_count: number;
 }

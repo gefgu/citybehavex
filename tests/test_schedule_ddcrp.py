@@ -19,6 +19,13 @@ SLOTS = 1440 // GRAN
 MONDAY = pd.Timestamp("2026-06-15")  # a Monday -> Mon..Sun over 7 days
 
 
+def _calendar_day_types(start: pd.Timestamp, days: int) -> list[str]:
+    return [
+        "weekend" if (start + pd.Timedelta(days=d)).dayofweek >= 5 else "weekday"
+        for d in range(days)
+    ]
+
+
 def _diary(diary_id: str, away_purpose: str, away_start: str, away_end: str) -> Diary:
     return Diary.model_validate(
         {
@@ -147,8 +154,8 @@ def test_embed_texts_returns_none_on_server_failure():
 def test_build_diary_bank_no_embeddings():
     bank = build_diary_bank(_batches(10, 10), EmbeddingConfig(enabled=False), GRAN)
     assert len(bank.diaries) == 20
-    assert int((~bank.is_weekend).sum()) == 10
-    assert int(bank.is_weekend.sum()) == 10
+    assert int((bank.day_type == "weekday").sum()) == 10
+    assert int((bank.day_type == "weekend").sum()) == 10
     assert bank.embedded is False
     assert bank.embeddings is None
     assert bank.slot_locs.shape == (20, SLOTS)
@@ -165,30 +172,57 @@ def _bank(n_weekday=10, n_weekend=10) -> DiaryBank:
 
 def test_hard_weekday_weekend_filter():
     bank = _bank()
-    weekday_set = set(np.flatnonzero(~bank.is_weekend).tolist())
-    weekend_set = set(np.flatnonzero(bank.is_weekend).tolist())
+    weekday_set = set(np.flatnonzero(bank.day_type == "weekday").tolist())
+    weekend_set = set(np.flatnonzero(bank.day_type == "weekend").tolist())
+    day_types = _calendar_day_types(MONDAY, 7)
     (_, _, _, _), chosen, _info = build_ddcrp_diary(
-        bank, MONDAY, days=7, n_agents=50, random_state=42, params=ScheduleConfig()
+        bank, MONDAY, 7, day_types, n_agents=50, random_state=42, params=ScheduleConfig()
     )
     for d in range(7):
-        is_we = (MONDAY + pd.Timedelta(days=d)).dayofweek >= 5
-        valid = weekend_set if is_we else weekday_set
+        valid = weekend_set if day_types[d] == "weekend" else weekday_set
         assert set(chosen[:, d].tolist()) <= valid
+
+
+def test_hard_partition_with_special_day():
+    """A special day type (e.g. an 'emergency') hard-partitions its own bank,
+    even on a date that would otherwise be a weekday."""
+    bank = build_diary_bank(
+        {
+            **_batches(10, 10),
+            "emergency": _batch(
+                [_diary(f"em-{i:03d}", "OTHER", "10:00", "11:00") for i in range(10)]
+            ),
+        },
+        EmbeddingConfig(enabled=False),
+        GRAN,
+    )
+    emergency_set = set(np.flatnonzero(bank.day_type == "emergency").tolist())
+    weekday_set = set(np.flatnonzero(bank.day_type == "weekday").tolist())
+    # Days 0-1 are a Monday/Tuesday (calendar weekdays) but forced to "emergency".
+    day_types = ["emergency", "emergency", *_calendar_day_types(MONDAY, 7)[2:]]
+    (_, _, _, _), chosen, _info = build_ddcrp_diary(
+        bank, MONDAY, 7, day_types, n_agents=20, random_state=1, params=ScheduleConfig()
+    )
+    assert set(chosen[:, 0].tolist()) <= emergency_set
+    assert set(chosen[:, 1].tolist()) <= emergency_set
+    assert set(chosen[:, 0].tolist()) & weekday_set == set()
 
 
 def test_determinism():
     bank = _bank()
     params = ScheduleConfig()
-    (_, _, _, _), c1, _info1 = build_ddcrp_diary(bank, MONDAY, 7, 30, 7, params)
-    (_, _, _, _), c2, _info2 = build_ddcrp_diary(bank, MONDAY, 7, 30, 7, params)
+    day_types = _calendar_day_types(MONDAY, 7)
+    (_, _, _, _), c1, _info1 = build_ddcrp_diary(bank, MONDAY, 7, day_types, 30, 7, params)
+    (_, _, _, _), c2, _info2 = build_ddcrp_diary(bank, MONDAY, 7, day_types, 30, 7, params)
     np.testing.assert_array_equal(c1, c2)
 
 
 def test_diary_arrays_shapes_and_mask():
     bank = _bank()
     days, agents = 7, 12
+    day_types = _calendar_day_types(MONDAY, days)
     (ts, locs, starts, ends), chosen, _info = build_ddcrp_diary(
-        bank, MONDAY, days, agents, 1, ScheduleConfig()
+        bank, MONDAY, days, day_types, agents, 1, ScheduleConfig()
     )
     expected = agents * days * SLOTS
     assert ts.shape == (expected,) and locs.shape == (expected,)
@@ -217,7 +251,7 @@ def test_profile_similarity_biases_selection():
     diary_embs[5:] = [0.0, 1.0]
     bank = DiaryBank(
         diaries=bank.diaries,
-        is_weekend=bank.is_weekend,
+        day_type=bank.day_type,
         embeddings=diary_embs,
         slot_locs=bank.slot_locs,
         slots_per_day=bank.slots_per_day,
@@ -230,11 +264,12 @@ def test_profile_similarity_biases_selection():
     profile_embs = np.array([[1.0, 0.0], [0.0, 1.0]], dtype=np.float32)
 
     params = ScheduleConfig(temperature_beta_a=0.5, temperature_beta_b=10.0)  # low T → sharp
+    day_types = _calendar_day_types(MONDAY, 5)
     _, chosen, _info = build_ddcrp_diary(
-        bank, MONDAY, days=5, n_agents=2, random_state=0, params=params,
+        bank, MONDAY, 5, day_types, n_agents=2, random_state=0, params=params,
         profile_embeddings=profile_embs,
     )
-    weekday_cols = [d for d in range(5) if (MONDAY + pd.Timedelta(days=d)).dayofweek < 5]
+    weekday_cols = [d for d in range(5) if day_types[d] == "weekday"]
 
     worker_picks = chosen[0, weekday_cols]
     other_picks = chosen[1, weekday_cols]
@@ -251,7 +286,8 @@ def test_no_profile_embeddings_uses_popularity():
     """Without profile embeddings, selection should spread across the bank (exploration)."""
     bank = _bank(n_weekday=10, n_weekend=10)
     params = ScheduleConfig(alpha_beta_a=10.0, alpha_beta_b=1.0)  # high alpha → lots of exploration
-    (_, _, _, _), chosen, _info = build_ddcrp_diary(bank, MONDAY, 7, 200, 9, params)
-    weekday_cols = [d for d in range(7) if (MONDAY + pd.Timedelta(days=d)).dayofweek < 5]
+    day_types = _calendar_day_types(MONDAY, 7)
+    (_, _, _, _), chosen, _info = build_ddcrp_diary(bank, MONDAY, 7, day_types, 200, 9, params)
+    weekday_cols = [d for d in range(7) if day_types[d] == "weekday"]
     used = set(chosen[:, weekday_cols].ravel().tolist())
     assert len(used) >= 6  # most of the 10-diary weekday bank gets explored

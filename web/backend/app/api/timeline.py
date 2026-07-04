@@ -227,7 +227,7 @@ def get_timeline_agent_crp(
     exp_id: str, uid: int, run: Optional[str] = Query(None)
 ) -> ApiResponseWrapper[dict[str, Any]]:
     """ddCRP diary-selection state for one agent: T_a, alpha_a, and per-diary
-    usage counts + profile similarity, split by weekday/weekend bank."""
+    usage counts + profile similarity, split by day-type bank."""
     _experiment, selected = _resolve_run(exp_id, run)
     warnings: list[str] = []
     diaries: list[dict[str, Any]] = []
@@ -242,7 +242,7 @@ def get_timeline_agent_crp(
             diaries = [
                 {
                     "diary_id": r["diary_id"],
-                    "is_weekend": bool(r["is_weekend"]),
+                    "day_type": r["day_type"],
                     "sim": float(r["sim"]),
                     "usage_count": int(r["usage_count"]),
                 }

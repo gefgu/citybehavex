@@ -155,13 +155,6 @@ export function Charts() {
     age_bracket: null,
     job: null,
   });
-  const setSyncedDayFilter = (next: string) => {
-    setDayFilter(next);
-    if (["all", "weekday", "weekend"].includes(distributionFilter)) {
-      setDistributionFilter(next);
-    }
-  };
-
   useEffect(() => {
     setPayload(null);
     setError(null);
@@ -190,6 +183,27 @@ export function Charts() {
     return <div className="state">Building comparison… (first load can take a while)</div>;
 
   const { metrics } = payload;
+  // Day-type filter options (all/weekday/weekend, plus any config-declared
+  // special day like "emergency") are computed server-side and attached to
+  // every group that's partitioned by day type; derive the toggle list from
+  // whichever of those groups is present instead of hardcoding the 3 defaults.
+  const dayFilterGroups =
+    payload.mobility_laws?.groups ??
+    payload.activity?.groups ??
+    payload.micro_activity_usage?.groups ??
+    payload.motifs?.groups ??
+    payload.stvd?.groups ??
+    null;
+  const dayFilters: FilterChoice[] = dayFilterGroups
+    ? dayFilterGroups.map((g) => ({ key: g.filter_key, label: g.filter_label }))
+    : DAY_FILTERS;
+  const dayFilterKeys = dayFilters.map((f) => f.key);
+  const setSyncedDayFilter = (next: string) => {
+    setDayFilter(next);
+    if (dayFilterKeys.includes(distributionFilter)) {
+      setDistributionFilter(next);
+    }
+  };
   const metricFilter = distributionFilter === "all" ? dayFilter : distributionFilter;
   const metricRows = {
     wasserstein: metrics.wasserstein.filter((m) => m.filter_key === metricFilter),
@@ -240,7 +254,7 @@ export function Charts() {
           <SegmentedControl
             label="Metrics day type filter"
             onChange={setSyncedDayFilter}
-            options={DAY_FILTERS}
+            options={dayFilters}
             value={dayFilter}
           />
         }
@@ -264,7 +278,7 @@ export function Charts() {
           <SegmentedControl
             label="Distribution filter"
             onChange={setDistributionFilter}
-            options={[...DAY_FILTERS, ...PERIOD_FILTERS.filter((option) => option.key !== "all")]}
+            options={[...dayFilters, ...PERIOD_FILTERS.filter((option) => option.key !== "all")]}
             value={distributionFilter}
           />
         }
@@ -285,7 +299,7 @@ export function Charts() {
               <SegmentedControl
                 label="Mobility laws day type filter"
                 onChange={setSyncedDayFilter}
-                options={DAY_FILTERS}
+                options={dayFilters}
                 value={dayFilter}
               />
             }
@@ -311,7 +325,7 @@ export function Charts() {
               <SegmentedControl
                 label="Activity day type filter"
                 onChange={setSyncedDayFilter}
-                options={DAY_FILTERS}
+                options={dayFilters}
                 value={dayFilter}
               />
             }
@@ -340,7 +354,7 @@ export function Charts() {
               <SegmentedControl
                 label="Micro-activity day type filter"
                 onChange={setSyncedDayFilter}
-                options={DAY_FILTERS}
+                options={dayFilters}
                 value={dayFilter}
               />
             }
@@ -361,7 +375,7 @@ export function Charts() {
               <SegmentedControl
                 label="Motifs day type filter"
                 onChange={setSyncedDayFilter}
-                options={DAY_FILTERS}
+                options={dayFilters}
                 value={dayFilter}
               />
             }
@@ -380,7 +394,7 @@ export function Charts() {
               <SegmentedControl
                 label="STVD day type filter"
                 onChange={setSyncedDayFilter}
-                options={DAY_FILTERS}
+                options={dayFilters}
                 value={dayFilter}
               />
             }

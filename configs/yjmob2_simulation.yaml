@@ -1,0 +1,108 @@
+tessellation:
+  min_lon: 136.5
+  min_lat: 34.6
+  max_lon: 137.7
+  max_lat: 35.75
+  resolution: 8
+  enrich_overture: true
+  output: data/yjmob2/yjmob2_h3_tessellation.parquet
+simulation:
+  agents: 100000
+  days: 75
+  start_date: '2019-09-15'
+  output: data/yjmob2/yjmob2_simulation_trajectories.parquet
+  random_state: 42
+  relevance_column: total_poi_count
+  granularity_minutes: 30
+  car_speed_kmh: 40.0
+  rho: 0.6
+  gamma: 0.21
+  alpha: 0.2
+  dt_update_mob_sim_hours: 168.0
+  indipendency_window_hours: 0.5
+  gravity_deterrence_exponent: -2.0
+  gravity_origin_exponent: 1.0
+  gravity_destination_exponent: 1.0
+road_network:
+  enabled: true
+  nodes_output: data/yjmob2/yjmob2_road_graph_nodes.parquet
+  edges_output: data/yjmob2/yjmob2_road_graph_edges.parquet
+  snap_output: data/yjmob2/yjmob2_road_graph_snap.parquet
+llm:
+  base_url: http://localhost:8081
+  api_key: none
+  model: Qwen/Qwen2.5-32B-Instruct-AWQ
+  diary_count: 30
+  max_tokens: 768
+  cache_dir: data/llm_diaries_yjmob2
+  validated_diaries_path: data/llm_diaries_yjmob2/validated_diaries.json
+diaries:
+  city_profile: Nagoya / Aichi Prefecture, Japan — dense urban core with surrounding
+    suburban towns, heavy reliance on trains and cars, manufacturing industry workers,
+    students, and families.
+  city_profile_weekday: 'Aichi weekday routines: early morning commutes by train or
+    car to factories, offices, or schools; midday breaks near workplaces; evening
+    returns home with occasional shopping.'
+  city_profile_weekend: 'Aichi weekend routines: later mornings at home, family outings
+    to shopping malls or parks, leisure trips by car, reduced industry activity.'
+  special_days:
+    - name: emergency
+      start_date: '2019-11-14'
+      end_date: '2019-11-28'
+      city_profile: 'Aichi emergency routines during a disaster/evacuation period:
+        transit disruptions and road closures curb long trips; most residents shelter
+        at home or make brief trips to a nearby shelter, relative, or convenience
+        store for essential supplies; non-essential work and leisure outings are
+        cancelled; a minority of essential workers (medical, utility, logistics)
+        still commute short distances.'
+  representative_day: '2019-09-15'
+  location_count_mu: 1.0
+  location_count_sigma: 0.5
+  max_locations: 6
+  motif_exploration_rate: 0.5
+embedding:
+  enabled: true
+  model: nomic-ai/nomic-embed-text-v1.5
+  base_url: http://localhost:8001
+  task_prefix: 'clustering: '
+  dimensions: 768
+  auto_launch: true
+  vllm_executable: /home/gustavo/vllm/.venv/bin/vllm
+  vllm_port: 8001
+  vllm_extra_args: ["--gpu-memory-utilization", "0.08", "--enforce-eager", "--max-model-len", "512"]
+  cache_dir: data/llm_diaries_yjmob2
+  cache_path: data/llm_diaries_yjmob2/diary_embeddings.npz
+schedule:
+  temperature_beta_a: 2.0
+  temperature_beta_b: 5.0
+  alpha_beta_a: 2.0
+  alpha_beta_b: 5.0
+activities:
+  enabled: true
+  kappa: 1.0
+  temperature: 0.5
+  embed_activities: true
+profiles:
+  enabled: true
+  output: data/yjmob2/yjmob2_agent_profiles.parquet
+  overture_feature_h3_resolution: 9
+  overture_building_features_output: data/yjmob2/yjmob2_overture_buildings_h3r9.parquet
+  home_building_weight: 1.0
+  home_poi_inverse_weight: 0.5
+  work_building_weight: 1.0
+  work_poi_weight: 0.75
+  work_distance_model: exponential
+  work_distance_exponential_lambda: 0.3
+  work_distance_max_km: 60.0
+  work_distance_min_km: 0.25
+  work_distance_fallback: expand
+  work_distance_density_correction_power: 1.0
+  work_from_home_probability: 0.05
+comparison:
+  path: data/yjmob2/yjmob_wgs84_simple.parquet
+  label: yjmob2_disaster
+  # WIP: road-network-based jump_lengths/radius_of_gyration is implemented
+  # (citybehavex/metrics/road_distance.py) but disabled by default pending
+  # further performance validation on large real datasets. Set true to use
+  # road-network distance instead of straight-line Haversine.
+  road_network_distance: false
