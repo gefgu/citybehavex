@@ -282,6 +282,55 @@ def test_profile_similarity_biases_selection():
     assert other_other_frac >= 0.6, f"Other agent only picked other {other_other_frac:.0%}"
 
 
+def test_precomputed_alignment_scores_override_embedding_similarity():
+    bank = _bank(n_weekday=10, n_weekend=10)
+    bank = DiaryBank(
+        diaries=bank.diaries,
+        day_type=bank.day_type,
+        embeddings=np.ones((len(bank.diaries), 3), dtype=np.float32),
+        slot_locs=bank.slot_locs,
+        slots_per_day=bank.slots_per_day,
+        granularity_minutes=bank.granularity_minutes,
+        embedded=True,
+    )
+    profile_embs = np.ones((2, 2), dtype=np.float32)
+    alignment_scores = np.zeros((2, len(bank.diaries)), dtype=np.float64)
+    weekday = np.flatnonzero(bank.day_type == "weekday")
+    alignment_scores[0, weekday[0]] = 1.0
+    alignment_scores[1, weekday[1]] = 1.0
+
+    params = ScheduleConfig(temperature_beta_a=0.5, temperature_beta_b=10.0)
+    (_, _, _, _), chosen, info = build_ddcrp_diary(
+        bank,
+        MONDAY,
+        1,
+        ["weekday"],
+        n_agents=2,
+        random_state=3,
+        params=params,
+        profile_embeddings=profile_embs,
+        agent_diary_sim=alignment_scores,
+    )
+
+    np.testing.assert_array_equal(info.agent_diary_sim, alignment_scores)
+    assert chosen.shape == (2, 1)
+
+
+def test_precomputed_alignment_scores_validate_shape():
+    bank = _bank(n_weekday=10, n_weekend=10)
+    with np.testing.assert_raises(ValueError):
+        build_ddcrp_diary(
+            bank,
+            MONDAY,
+            1,
+            ["weekday"],
+            n_agents=2,
+            random_state=3,
+            params=ScheduleConfig(),
+            agent_diary_sim=np.zeros((1, len(bank.diaries))),
+        )
+
+
 def test_no_profile_embeddings_uses_popularity():
     """Without profile embeddings, selection should spread across the bank (exploration)."""
     bank = _bank(n_weekday=10, n_weekend=10)
