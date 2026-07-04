@@ -18,7 +18,7 @@ class AgentProfilesConfig(BaseModel):
     home_anchors_output: Optional[str] = None
     home_anchor_relevance: float = Field(default=1.0, gt=0)
     home_anchor_h3_resolution: int = Field(default=9, ge=0, le=15)
-    location_inference_method: Literal["poi_building", "legacy_poi"] = "poi_building"
+    location_inference_method: Literal["poi_building"] = "poi_building"
     overture_building_features_path: Optional[str] = None
     overture_building_features_output: Optional[str] = None
     overture_feature_h3_resolution: Optional[int] = Field(default=None, ge=0, le=15)

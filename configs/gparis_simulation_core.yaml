@@ -51,7 +51,7 @@ diaries:
   representative_day: "2026-01-01"
   # Truncated rounded log-normal distribution of distinct daily locations,
   # including HOME.
-  location_count_mu: 0.85
+  location_count_mu: 1
   location_count_sigma: 0.5
   max_locations: 6
 
