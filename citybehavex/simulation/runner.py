@@ -625,6 +625,8 @@ def maybe_build_diaries(
             location_count_mu=config.diaries.location_count_mu,
             location_count_sigma=config.diaries.location_count_sigma,
             max_locations=config.diaries.max_locations,
+            motif_exploration_rate=config.diaries.motif_exploration_rate,
+            random_state=config.simulation.random_state,
             variant=day_type,
             stats=stats,
         )

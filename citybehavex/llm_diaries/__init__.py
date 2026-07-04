@@ -12,6 +12,12 @@ from .cache import (
 )
 from citybehavex.math import allocate_location_counts, lognormal_location_probabilities
 from .generator import fetch_diary_batch as _fetch_diary_batch
+from .motifs import (
+    MOTIF_EXCURSION_PATTERNS,
+    MOTIF_LOCATION_COUNTS,
+    build_motif_rule,
+    sample_motif,
+)
 from .models import (
     ChatChoice,
     ChatCompletionResponse,
@@ -65,9 +71,12 @@ __all__ = [
     "DiaryValidationError",
     "LLMStats",
     "LocationCountDistribution",
+    "MOTIF_EXCURSION_PATTERNS",
+    "MOTIF_LOCATION_COUNTS",
     "OpenAICompatibleDiaryClient",
     "Purpose",
     "allocate_location_counts",
+    "build_motif_rule",
     "build_single_diary_prompt",
     "diary_episode_summary",
     "diary_schema",
@@ -80,5 +89,6 @@ __all__ = [
     "parse_diary_response",
     "parse_single_diary_content",
     "parse_single_diary_response",
+    "sample_motif",
     "save_validated_diary_cache",
 ]

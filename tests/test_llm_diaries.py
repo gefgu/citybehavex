@@ -9,18 +9,23 @@ import pytest
 from citybehavex.llm import LLMConfig
 from citybehavex.llm_diaries.training import annotate_trajectory_purposes_ddcrp, diary_batch_to_markov_training
 from citybehavex.llm_diaries import (
+    MOTIF_EXCURSION_PATTERNS,
+    MOTIF_LOCATION_COUNTS,
     Diary,
     DiaryBatch,
     DiaryValidationError,
     LLMStats,
     allocate_location_counts,
+    build_motif_rule,
     build_single_diary_prompt,
     fetch_diary_batch,
     load_validated_diary_cache,
     lognormal_location_probabilities,
     parse_diary_response,
     parse_single_diary_response,
+    sample_motif,
 )
+from citybehavex.llm_diaries.motifs import motif_weights_for_location_count
 
 DEFAULT_COUNTS = allocate_location_counts(1.0, 0.5, 6, 10)
 
@@ -398,6 +403,162 @@ def test_markov_training_requires_validated_batch():
     assert list(training.columns) == ["uid", "datetime", "location", "purpose"]
     assert training["uid"].nunique() == 10
     assert pd.api.types.is_datetime64_any_dtype(training["datetime"])
+
+
+def test_motif_weights_for_location_count_sums_to_one_and_matches_group():
+    weights = motif_weights_for_location_count(4)
+
+    assert sum(weights.values()) == pytest.approx(1.0)
+    assert set(weights) == {ordinal for ordinal, count in MOTIF_LOCATION_COUNTS.items() if count == 4}
+
+
+def test_sample_motif_only_returns_ordinals_for_requested_location_count():
+    rng = np.random.default_rng(0)
+    for _ in range(50):
+        ordinal = sample_motif(5, rng)
+        assert MOTIF_LOCATION_COUNTS[ordinal] == 5
+
+
+def test_build_motif_rule_empty_for_stay_home_pattern():
+    assert build_motif_rule(()) == ""
+
+
+def test_build_motif_rule_describes_single_and_multi_excursion_patterns():
+    single = build_motif_rule((3,))
+    assert "single outing" in single
+    assert "visit 3 place(s)" in single
+
+    multi = build_motif_rule((2, 1))
+    assert "2 separate outings" in multi
+    assert "outing 1 visits 2 places in a row" in multi
+    assert "outing 2 visits a single place (direct round trip)" in multi
+
+
+def test_prompt_includes_motif_rule_when_provided():
+    prompt = build_single_diary_prompt(
+        diary_number=1,
+        diary_count=10,
+        city_profile="test city",
+        representative_day="2026-01-01",
+        location_count=4,
+        motif_rule=build_motif_rule(MOTIF_EXCURSION_PATTERNS[6]),
+    )
+    assert "Structure the day as 2 separate outings away from home" in prompt
+
+
+def test_prompt_omits_motif_rule_when_not_provided():
+    prompt = build_single_diary_prompt(
+        diary_number=1,
+        diary_count=10,
+        city_profile="test city",
+        representative_day="2026-01-01",
+        location_count=4,
+    )
+    assert "Structure the day as" not in prompt
+
+
+def test_legacy_cache_missing_motif_rate_defaults_to_free_exploration(tmp_path):
+    legacy_path = tmp_path / "legacy_motif.json"
+    legacy = _batch()
+    legacy.pop("motif_exploration_rate", None)
+    legacy_path.write_text(json.dumps(legacy), encoding="utf-8")
+
+    batch = load_validated_diary_cache(legacy_path)
+    assert batch.motif_exploration_rate == 1.0
+
+
+def test_mismatched_motif_exploration_rate_cache_is_rejected(tmp_path):
+    cache_path = tmp_path / "motif_mismatch.json"
+    payload = _batch()
+    payload["motif_exploration_rate"] = 0.5
+    cache_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(DiaryValidationError):
+        load_validated_diary_cache(cache_path, expected_motif_exploration_rate=1.0)
+
+
+def _post_response_mock():
+    class Response:
+        text = ""
+
+        def __init__(self, payload):
+            self._payload = payload
+            self.text = json.dumps(payload)
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return self._payload
+
+    return Response
+
+
+def test_fetch_diary_batch_always_constrains_motif_when_rate_is_zero(monkeypatch, tmp_path):
+    Response = _post_response_mock()
+    prompts = []
+    responses = [_home_diary(1)] + [_diary(i) for i in range(2, 11)]
+
+    def post(*args, **kwargs):
+        content = kwargs["json"]["messages"][1]["content"]
+        prompts.append(content)
+        return Response(_chat(responses[len(prompts) - 1]))
+
+    monkeypatch.setattr("citybehavex.llm_diaries.requests.get", lambda *args, **kwargs: Response({"data": []}))
+    monkeypatch.setattr("citybehavex.llm_diaries.requests.post", post)
+    config = LLMConfig(
+        base_url="http://localhost:8000",
+        api_key="test",
+        model="test-model",
+        cache_dir=str(tmp_path),
+        validated_diaries_path=str(tmp_path / "validated_diaries.json"),
+        diary_count=10,
+    )
+
+    batch = fetch_diary_batch(
+        config,
+        city_profile="test city",
+        representative_day="2026-01-01",
+        location_counts=[1] + [4] * 9,
+        motif_exploration_rate=0.0,
+        random_state=7,
+    )
+
+    assert len(batch.diaries) == 10
+    assert batch.motif_exploration_rate == 0.0
+    assert "Structure the day as" not in prompts[0]
+    assert all("Structure the day as" in prompt for prompt in prompts[1:])
+
+
+def test_fetch_diary_batch_default_rate_never_constrains_motif(monkeypatch, tmp_path):
+    Response = _post_response_mock()
+    prompts = []
+
+    def post(*args, **kwargs):
+        content = kwargs["json"]["messages"][1]["content"]
+        prompts.append(content)
+        return Response(_chat(_diary(len(prompts))))
+
+    monkeypatch.setattr("citybehavex.llm_diaries.requests.get", lambda *args, **kwargs: Response({"data": []}))
+    monkeypatch.setattr("citybehavex.llm_diaries.requests.post", post)
+    config = LLMConfig(
+        base_url="http://localhost:8000",
+        api_key="test",
+        model="test-model",
+        cache_dir=str(tmp_path),
+        validated_diaries_path=str(tmp_path / "validated_diaries.json"),
+        diary_count=10,
+    )
+
+    batch = fetch_diary_batch(
+        config,
+        city_profile="test city",
+        representative_day="2026-01-01",
+        location_counts=[4] * 10,
+    )
+
+    assert batch.motif_exploration_rate == 1.0
+    assert all("Structure the day as" not in prompt for prompt in prompts)
 
 
 def test_ddcrp_annotation_preserves_engine_purpose_column():

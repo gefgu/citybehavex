@@ -152,6 +152,7 @@ class DiaryBatch(BaseModel):
     representative_day: Optional[str] = None
     location_count_distribution: LocationCountDistribution
     target_location_counts: list[int] = Field(min_length=10, max_length=30)
+    motif_exploration_rate: float = Field(default=1.0, ge=0.0, le=1.0)
     diaries: list[Diary] = Field(min_length=10, max_length=30)
 
     @model_validator(mode="after")
