@@ -8,6 +8,7 @@ use crate::simulation_core::inputs::{
     RoadNetworkInputs, SimulationParams, SocialGraphInputs,
 };
 use crate::simulation_core::outputs::RoadPathOutputBuffers;
+use crate::simulation_core::roads::{batch_road_distances, RoadGraph};
 
 /// Borrowed slice from an optional numpy array, or an empty slice when absent.
 fn opt_slice<'a, T: numpy::Element>(v: &'a Option<PyReadonlyArray1<'_, T>>) -> PyResult<&'a [T]> {
@@ -296,4 +297,55 @@ pub fn simulation_core_simulate_agents<'py>(
             output.act_departure.into_pyarray(py),
         ),
     ))
+}
+
+/// A road network prepared once (contraction hierarchy) and reused for many
+/// point-to-point physical-distance queries. Used by report/comparison code
+/// to recompute jump-length / radius-of-gyration metrics over the real road
+/// network instead of straight-line Haversine: CH preparation, not the query
+/// itself, is the expensive step, so one handle serves every query batch
+/// needed by a single comparison run (synthetic + real, every metric, every
+/// filter group) instead of re-preparing per call.
+#[pyclass]
+pub struct RoadNetworkHandle {
+    graph: RoadGraph,
+}
+
+#[pymethods]
+impl RoadNetworkHandle {
+    #[new]
+    fn new(
+        edge_from: PyReadonlyArray1<'_, i64>,
+        edge_to: PyReadonlyArray1<'_, i64>,
+        edge_weight_ds: PyReadonlyArray1<'_, i64>,
+        edge_length_m: PyReadonlyArray1<'_, f64>,
+    ) -> PyResult<Self> {
+        let ef = i64_as_usize_vec(&edge_from)?;
+        let et = i64_as_usize_vec(&edge_to)?;
+        let ew = i64_as_usize_vec(&edge_weight_ds)?;
+        let el = edge_length_m.as_slice()?;
+        Ok(Self {
+            graph: RoadGraph::build_with_length(&ef, &et, &ew, el),
+        })
+    }
+
+    /// Batch physical-distance (metres) query for `(from_node, to_node)`
+    /// pairs against the prepared contraction hierarchy. Returns
+    /// `(distances_m, connected)`, `connected` as `0`/`1` per pair (no
+    /// existing precedent in this crate for bool numpy arrays, matching the
+    /// plain-numeric-array convention already used elsewhere, e.g.
+    /// `abstract_loc: i32`). The Python caller falls back to straight-line
+    /// Haversine wherever `connected == 0` (negative/unsnapped node ids or a
+    /// disconnected graph component).
+    fn batch_distances<'py>(
+        &self,
+        py: Python<'py>,
+        from_nodes: PyReadonlyArray1<'py, i64>,
+        to_nodes: PyReadonlyArray1<'py, i64>,
+    ) -> PyResult<(Bound<'py, PyArray1<f64>>, Bound<'py, PyArray1<u8>>)> {
+        let (dist, conn) =
+            batch_road_distances(&self.graph, from_nodes.as_slice()?, to_nodes.as_slice()?);
+        let conn_u8: Vec<u8> = conn.into_iter().map(|b| b as u8).collect();
+        Ok((dist.into_pyarray(py), conn_u8.into_pyarray(py)))
+    }
 }

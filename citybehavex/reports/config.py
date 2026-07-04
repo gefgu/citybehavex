@@ -17,6 +17,14 @@ class ComparisonConfig(BaseModel):
     # Which report sections to compute; None (default) = run all of them.
     # Wasserstein/CPC summary metrics and the ECDF charts always run.
     sections: Optional[list[str]] = None
+    # When True (default) and a cached road graph is available (road_network
+    # section), jump_lengths/radius_of_gyration are recomputed as
+    # road-network distance instead of straight-line Haversine, for both
+    # synthetic and real trajectories. Road-network routing is far more
+    # expensive per pair than skmob2's vectorized Haversine, so very large
+    # real datasets (tens/hundreds of millions of rows) may want this off to
+    # keep the live web comparison responsive.
+    road_network_distance: bool = True
 
     @field_validator("sections")
     @classmethod

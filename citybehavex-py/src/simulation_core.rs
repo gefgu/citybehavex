@@ -9,4 +9,4 @@ mod roads;
 mod social;
 mod types;
 
-pub use py_interface::simulation_core_simulate_agents;
+pub use py_interface::{simulation_core_simulate_agents, RoadNetworkHandle};

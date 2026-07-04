@@ -8,5 +8,6 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
         simulation_core::simulation_core_simulate_agents,
         m
     )?)?;
+    m.add_class::<simulation_core::RoadNetworkHandle>()?;
     Ok(())
 }
