@@ -447,6 +447,51 @@ table.metrics td.unit { color: var(--muted); }
 }
 .stvd-legend span { width: 20px; height: 20px; display: block; }
 
+/* ---- home/work density maps ---- */
+.hw-panels {
+  display: flex;
+  gap: var(--space-lg);
+}
+.hw-panel {
+  flex: 1;
+  min-width: 0;
+}
+.hw-panel h5 {
+  margin: 0 0 var(--space-xs);
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--muted);
+}
+.hw-map { height: 480px; border-radius: var(--radius-md); overflow: hidden; }
+.hw-legend {
+  display: flex;
+  gap: 2px;
+  margin-top: var(--space-xs);
+}
+.hw-legend span { width: 20px; height: 14px; display: block; }
+.hw-filter {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-sm);
+}
+.hw-filter select {
+  width: auto;
+  margin: 0;
+  padding: 6px 10px;
+  font-size: 13px;
+}
+.hw-match-note {
+  color: var(--muted);
+  font-size: 13px;
+  margin: 0 0 var(--space-sm);
+}
+@media (max-width: 720px) {
+  .hw-panels {
+    flex-direction: column;
+  }
+}
+
 /* ---- social network ---- */
 .network-meta {
   display: flex;

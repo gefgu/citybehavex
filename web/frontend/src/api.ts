@@ -100,6 +100,71 @@ export function fetchCharts(id: string, run?: string): Promise<ChartPayload> {
   return getJson<ChartPayload>(`/api/experiments/${encodeURIComponent(id)}/charts${q}`);
 }
 
+export interface HomeWorkFeatureCollection {
+  type: string;
+  features: {
+    type: string;
+    geometry: { type: string; coordinates: number[][][] };
+    properties: Record<string, unknown> & {
+      area: string;
+      agent_count: number;
+      agent_pct: number;
+      color: string;
+      class: number;
+    };
+  }[];
+}
+export interface HomeWorkPanel {
+  center: [number, number] | null;
+  layers: Record<string, HomeWorkFeatureCollection>;
+  colors: string[];
+  breaks: number[];
+  total_agents: number;
+}
+export interface HomeWorkMapBlock {
+  synthetic: HomeWorkPanel;
+  real: HomeWorkPanel | null;
+}
+export interface AgeBracket {
+  key: string;
+  label: string;
+  min: number;
+  max: number;
+}
+export interface DemographicFilter {
+  gender: string | null;
+  age_bracket: string | null;
+  job: string | null;
+}
+export interface HomeWorkResponse {
+  run_id: string;
+  mode: "comparison" | "synthetic_only";
+  has_profiles: boolean;
+  matched_agents: number;
+  total_synthetic_agents: number;
+  filter: DemographicFilter;
+  filter_options: { genders: string[]; age_brackets: AgeBracket[]; jobs: string[] };
+  home: HomeWorkMapBlock;
+  work: HomeWorkMapBlock;
+  warnings: string[];
+}
+
+export function fetchHomeWork(
+  id: string,
+  run?: string,
+  filter?: DemographicFilter,
+): Promise<HomeWorkResponse> {
+  const q = new URLSearchParams();
+  if (run) q.set("run", run);
+  if (filter?.gender) q.set("gender", filter.gender);
+  if (filter?.age_bracket) q.set("age_bracket", filter.age_bracket);
+  if (filter?.job) q.set("job", filter.job);
+  const qs = q.toString();
+  return getJson<HomeWorkResponse>(
+    `/api/experiments/${encodeURIComponent(id)}/home-work${qs ? `?${qs}` : ""}`,
+  );
+}
+
 // ---- timeline view ----
 export interface TimelineMeta {
   run_id: string;
