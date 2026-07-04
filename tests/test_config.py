@@ -5,6 +5,7 @@ import pytest
 from citybehavex.config import apply_overrides, load_config
 from citybehavex.llm import LLMConfig
 from citybehavex.llm_diaries import DiariesConfig
+from citybehavex.profiles.config import AgentProfilesConfig
 from citybehavex.simulation import SimulationConfig
 
 
@@ -54,6 +55,15 @@ def test_simulation_config_accepts_bounded_social_graph_settings():
 
 def test_llm_config_defaults_to_thirty_diaries():
     assert LLMConfig().diary_count == 30
+
+
+def test_profiles_default_to_poi_building_location_inference():
+    config = AgentProfilesConfig()
+    assert config.location_inference_method == "poi_building"
+    assert config.home_poi_inverse_weight == 0.5
+    assert config.home_building_weight == 1.0
+    assert config.work_poi_weight == 0.75
+    assert config.work_building_weight == 1.0
 
 
 def test_simulation_config_rejects_tessellation_and_bbox():

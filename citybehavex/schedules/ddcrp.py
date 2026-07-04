@@ -125,6 +125,19 @@ def build_diary_bank(
     )
 
 
+@dataclass
+class DdcrpAgentInfo:
+    """Per-agent CRP state that would otherwise be discarded after selection.
+
+    Kept around so callers (e.g. the web app's diary-selection debug panel)
+    can reconstruct "what would this agent pick next" without re-running CRP.
+    """
+
+    T_per_agent: np.ndarray       # float64[n_agents]
+    alpha_per_agent: np.ndarray   # float64[n_agents]
+    agent_diary_sim: np.ndarray  # float64[n_agents, K]
+
+
 def build_ddcrp_diary(
     bank: DiaryBank,
     start_date: pd.Timestamp,
@@ -133,7 +146,7 @@ def build_ddcrp_diary(
     random_state: int,
     params: ScheduleConfig,
     profile_embeddings: np.ndarray | None = None,
-) -> tuple[DiaryArrays, np.ndarray]:
+) -> tuple[DiaryArrays, np.ndarray, DdcrpAgentInfo]:
     """Run profile-driven CRP schedule selection for every agent and day.
 
     Weight formula per candidate k on day t for agent a:
@@ -145,8 +158,10 @@ def build_ddcrp_diary(
     When ``profile_embeddings`` is ``None`` (embeddings off), ``s_k`` is treated
     as a constant → weights reduce to pure popularity-weighted CRP.
 
-    Returns ``(diary_arrays, chosen)`` where ``chosen[agent, day]`` is the global
-    bank index of the diary that agent used that day.
+    Returns ``(diary_arrays, chosen, info)`` where ``chosen[agent, day]`` is the
+    global bank index of the diary that agent used that day, and ``info``
+    carries the per-agent ``T_a``/``alpha_a``/similarity state used to make
+    those picks.
     """
     slots_per_day = bank.slots_per_day
     slot_seconds = bank.granularity_minutes * 60
@@ -179,7 +194,7 @@ def build_ddcrp_diary(
 
     slots = days * slots_per_day
 
-    def _process_agent(agent: int) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    def _process_agent(agent: int) -> tuple[np.ndarray, np.ndarray, np.ndarray, float, float]:
         rng = np.random.default_rng(np.random.SeedSequence([int(random_state), agent]))
         T_a = float(rng.beta(params.temperature_beta_a, params.temperature_beta_b))
         T_a = max(T_a, 1e-6)
@@ -211,7 +226,7 @@ def build_ddcrp_diary(
             agent_locs[base : base + slots_per_day] = bank.slot_locs[pick]
             agent_ts[base : base + slots_per_day] = day_ts[d] + slot_offsets
 
-        return agent_locs, agent_ts, agent_chosen
+        return agent_locs, agent_ts, agent_chosen, T_a, alpha_a
 
     if _JOBLIB_AVAILABLE and n_agents > 4:
         results = Parallel(n_jobs=-1, backend="loky")(
@@ -224,11 +239,20 @@ def build_ddcrp_diary(
     diary_abs_locs = np.empty(n_agents * slots, dtype=np.int32)
     d_starts = np.arange(n_agents, dtype=np.int64) * slots
     d_ends = d_starts + slots
-    for agent, (agent_locs, agent_ts, agent_chosen) in enumerate(results):
+    T_per_agent = np.empty(n_agents, dtype=np.float64)
+    alpha_per_agent = np.empty(n_agents, dtype=np.float64)
+    for agent, (agent_locs, agent_ts, agent_chosen, T_a, alpha_a) in enumerate(results):
         off = agent * slots
         diary_abs_locs[off : off + slots] = agent_locs
         diary_timestamps[off : off + slots] = agent_ts
         chosen[agent] = agent_chosen
+        T_per_agent[agent] = T_a
+        alpha_per_agent[agent] = alpha_a
 
     diary_arrays: DiaryArrays = (diary_timestamps, diary_abs_locs, d_starts, d_ends)
-    return diary_arrays, chosen
+    info = DdcrpAgentInfo(
+        T_per_agent=T_per_agent,
+        alpha_per_agent=alpha_per_agent,
+        agent_diary_sim=agent_diary_sim,
+    )
+    return diary_arrays, chosen, info

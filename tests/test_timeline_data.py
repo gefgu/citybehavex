@@ -10,6 +10,7 @@ from web.backend.app.timeline_data import (
     group_trips_by_location,
     query_active_legs,
     query_activity_at_stop,
+    query_agent_crp,
     query_agent_trips,
     query_stop_activities,
 )
@@ -31,6 +32,27 @@ def _trajectory(category: bool) -> pd.DataFrame:
     if category:
         rows["category"] = [None, "cafe"]
     return pd.DataFrame(rows)
+
+
+def test_query_agent_crp_filters_by_agent_and_sorts_by_usage(tmp_path):
+    path = tmp_path / "run_crp.parquet"
+    pd.DataFrame(
+        {
+            "agent": [0, 0, 0, 1, 1],
+            "diary_id": ["wd-0", "wd-1", "we-0", "wd-0", "wd-1"],
+            "is_weekend": [False, False, True, False, False],
+            "sim": [0.2, 0.9, 0.5, 0.1, 0.8],
+            "usage_count": [1, 5, 2, 3, 3],
+            "T_a": [0.31, 0.31, 0.31, 0.5, 0.5],
+            "alpha_a": [0.15, 0.15, 0.15, 0.2, 0.2],
+        }
+    ).to_parquet(path, index=False)
+
+    rows = query_agent_crp(path, 0)
+
+    assert [r["diary_id"] for r in rows] == ["wd-1", "we-0", "wd-0"]
+    assert rows[0]["T_a"] == 0.31 and rows[0]["alpha_a"] == 0.15
+    assert rows[1]["is_weekend"] is True
 
 
 def test_query_agent_trips_returns_null_category_for_legacy_runs(tmp_path):

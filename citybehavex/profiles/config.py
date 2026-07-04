@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Optional
+from typing import Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -18,6 +18,14 @@ class AgentProfilesConfig(BaseModel):
     home_anchors_output: Optional[str] = None
     home_anchor_relevance: float = Field(default=1.0, gt=0)
     home_anchor_h3_resolution: int = Field(default=9, ge=0, le=15)
+    location_inference_method: Literal["poi_building", "legacy_poi"] = "poi_building"
+    overture_building_features_path: Optional[str] = None
+    overture_building_features_output: Optional[str] = None
+    overture_feature_h3_resolution: Optional[int] = Field(default=None, ge=0, le=15)
+    home_poi_inverse_weight: float = Field(default=0.5, ge=0)
+    home_building_weight: float = Field(default=1.0, ge=0)
+    work_poi_weight: float = Field(default=0.75, ge=0)
+    work_building_weight: float = Field(default=1.0, ge=0)
 
     age_beta_a: float = Field(default=2.0, gt=0)
     age_beta_b: float = Field(default=5.0, gt=0)

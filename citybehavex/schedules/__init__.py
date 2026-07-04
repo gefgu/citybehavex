@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from .config import ScheduleConfig
 from .ddcrp import (
+    DdcrpAgentInfo,
     DiaryArrays,
     DiaryBank,
     build_ddcrp_diary,
@@ -10,6 +11,7 @@ from .ddcrp import (
 )
 
 __all__ = [
+    "DdcrpAgentInfo",
     "DiaryArrays",
     "DiaryBank",
     "ScheduleConfig",

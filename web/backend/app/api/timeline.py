@@ -19,6 +19,7 @@ from ..timeline_data import (
     legs_index_path,
     moving_index_path,
     query_active_legs,
+    query_agent_crp,
     query_agent_encounters,
     query_agent_trips,
     query_activity_at_stop,
@@ -216,6 +217,48 @@ def get_timeline_agent(
         "narrative": narrative,
         "trips": trips,
         "encounters": encounters,
+        "warnings": warnings,
+    }
+    return ApiResponseWrapper(data=payload)
+
+
+@router.get("/experiments/{exp_id}/timeline/agents/{uid}/crp")
+def get_timeline_agent_crp(
+    exp_id: str, uid: int, run: Optional[str] = Query(None)
+) -> ApiResponseWrapper[dict[str, Any]]:
+    """ddCRP diary-selection state for one agent: T_a, alpha_a, and per-diary
+    usage counts + profile similarity, split by weekday/weekend bank."""
+    _experiment, selected = _resolve_run(exp_id, run)
+    warnings: list[str] = []
+    diaries: list[dict[str, Any]] = []
+    T_a: Optional[float] = None
+    alpha_a: Optional[float] = None
+
+    if selected.crp_path.exists():
+        rows = query_agent_crp(selected.crp_path, uid)
+        if rows:
+            T_a = float(rows[0]["T_a"])
+            alpha_a = float(rows[0]["alpha_a"])
+            diaries = [
+                {
+                    "diary_id": r["diary_id"],
+                    "is_weekend": bool(r["is_weekend"]),
+                    "sim": float(r["sim"]),
+                    "usage_count": int(r["usage_count"]),
+                }
+                for r in rows
+            ]
+        else:
+            warnings.append("uid not found in ddCRP diary selection data")
+    else:
+        warnings.append("no ddCRP diary selection data available for this run")
+
+    payload = {
+        "uid": uid,
+        "run_id": selected.run_id,
+        "T_a": T_a,
+        "alpha_a": alpha_a,
+        "diaries": diaries,
         "warnings": warnings,
     }
     return ApiResponseWrapper(data=payload)

@@ -250,6 +250,29 @@ export function fetchTimelineAgent(id: string, uid: number, run?: string): Promi
   );
 }
 
+export interface AgentCrpDiary {
+  diary_id: string;
+  is_weekend: boolean;
+  sim: number;
+  usage_count: number;
+}
+
+export interface AgentCrpPayload {
+  uid: number;
+  run_id: string;
+  T_a: number | null;
+  alpha_a: number | null;
+  diaries: AgentCrpDiary[];
+  warnings: string[];
+}
+
+export function fetchTimelineAgentCrp(id: string, uid: number, run?: string): Promise<AgentCrpPayload> {
+  const q = run ? `?run=${encodeURIComponent(run)}` : "";
+  return getJson<AgentCrpPayload>(
+    `/api/experiments/${encodeURIComponent(id)}/timeline/agents/${uid}/crp${q}`,
+  );
+}
+
 // ---- payload types (mirrors web/backend/app/payload.py) ----
 export interface SeriesPoints {
   name: string;

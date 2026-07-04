@@ -638,6 +638,110 @@ table.agent-table td:first-child { color: var(--muted); }
   margin-top: var(--space-sm);
 }
 
+/* ---- CRP diary-selection summary ---- */
+.crp-panel-toggle {
+  display: inline-flex;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  flex-shrink: 0;
+}
+.crp-panel-toggle button {
+  border: none;
+  background: var(--canvas);
+  color: var(--muted);
+  font-size: 12px;
+  padding: 4px 12px;
+  cursor: pointer;
+}
+.crp-panel-toggle button + button {
+  border-left: 1px solid var(--hairline);
+}
+.crp-panel-toggle button.is-active {
+  background: var(--ink);
+  color: #fff;
+}
+.crp-section-header {
+  margin-top: var(--space-md);
+}
+.crp-stats-row {
+  display: flex;
+  gap: var(--space-lg);
+  margin: var(--space-xs) 0 var(--space-sm);
+}
+.crp-stat {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+.crp-stat-label {
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.crp-stat-value {
+  font-size: 15px;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+.crp-bar-cell {
+  width: 90px;
+}
+.crp-bar-track {
+  height: 6px;
+  border-radius: 3px;
+  background: var(--surface-strong);
+  overflow: hidden;
+}
+.crp-bar-fill {
+  height: 100%;
+  background: var(--coral);
+}
+.crp-prob-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: 4px 0;
+  border-bottom: 1px solid var(--hairline);
+  font-size: 13px;
+}
+.crp-prob-label {
+  flex: 0 0 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted);
+}
+.crp-prob-row.is-top .crp-prob-label {
+  color: var(--ink);
+  font-weight: 500;
+}
+.crp-prob-track {
+  flex: 1;
+  height: 8px;
+  border-radius: 4px;
+  background: var(--surface-strong);
+  overflow: hidden;
+}
+.crp-prob-fill {
+  height: 100%;
+  background: var(--coral);
+}
+.crp-prob-row.is-top .crp-prob-fill {
+  background: var(--forest);
+}
+.crp-prob-value {
+  flex: 0 0 48px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+}
+.crp-prob-row.is-top .crp-prob-value {
+  color: var(--ink);
+  font-weight: 500;
+}
+
 /* ---- states ---- */
 .state {
   padding: var(--space-xxl);

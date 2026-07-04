@@ -82,6 +82,8 @@ activities:
 profiles:
   enabled: true
   output: data/shanghai/shanghai_agent_profiles.parquet
+  overture_feature_h3_resolution: 9
+  overture_building_features_output: data/shanghai/shanghai_overture_buildings_h3r9.parquet
 
 comparison:
   path: data/shanghai/shanghai_data_raw.parquet

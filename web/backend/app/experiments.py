@@ -65,6 +65,10 @@ class Run:
         return self.path.with_name(f"{self.path.stem}_activities{self.path.suffix}")
 
     @property
+    def crp_path(self) -> Path:
+        return self.path.with_name(f"{self.path.stem}_crp{self.path.suffix}")
+
+    @property
     def social_network_path(self) -> Path:
         return self.path.with_name(f"{self.path.stem}_social_network.json")
 
@@ -85,8 +89,8 @@ class Run:
 def _discover_runs(output_path: Optional[Path]) -> list[Run]:
     """All parquet runs for a ``simulation.output`` stem, newest first.
 
-    Excludes the ``*_encounters.parquet`` and ``*_moving.parquet`` siblings
-    written alongside trajectories.
+    Excludes the ``*_encounters.parquet``, ``*_moving.parquet`` and ``*_crp.parquet``
+    siblings written alongside trajectories.
     """
     if output_path is None:
         return []
@@ -98,7 +102,7 @@ def _discover_runs(output_path: Optional[Path]) -> list[Run]:
     runs: list[Run] = []
     for candidate in parent.glob(f"{stem}*{output_path.suffix}"):
         name = candidate.stem
-        if name.endswith("_encounters") or name.endswith("_moving"):
+        if name.endswith("_encounters") or name.endswith("_moving") or name.endswith("_crp"):
             continue
         if name == stem:
             run_id = "base"
@@ -272,7 +276,7 @@ def delete_run(exp_id: str, run_id: str) -> list[Path]:
         raise FileNotFoundError(run_id)
 
     deleted: list[Path] = []
-    for path in (run.path, run.encounters_path, run.moving_path, run.activities_path, run.social_network_path):
+    for path in (run.path, run.encounters_path, run.moving_path, run.activities_path, run.crp_path, run.social_network_path):
         if path.exists():
             path.unlink()
             deleted.append(path)

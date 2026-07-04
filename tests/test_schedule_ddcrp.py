@@ -167,7 +167,7 @@ def test_hard_weekday_weekend_filter():
     bank = _bank()
     weekday_set = set(np.flatnonzero(~bank.is_weekend).tolist())
     weekend_set = set(np.flatnonzero(bank.is_weekend).tolist())
-    (_, _, _, _), chosen = build_ddcrp_diary(
+    (_, _, _, _), chosen, _info = build_ddcrp_diary(
         bank, MONDAY, days=7, n_agents=50, random_state=42, params=ScheduleConfig()
     )
     for d in range(7):
@@ -179,15 +179,15 @@ def test_hard_weekday_weekend_filter():
 def test_determinism():
     bank = _bank()
     params = ScheduleConfig()
-    (_, _, _, _), c1 = build_ddcrp_diary(bank, MONDAY, 7, 30, 7, params)
-    (_, _, _, _), c2 = build_ddcrp_diary(bank, MONDAY, 7, 30, 7, params)
+    (_, _, _, _), c1, _info1 = build_ddcrp_diary(bank, MONDAY, 7, 30, 7, params)
+    (_, _, _, _), c2, _info2 = build_ddcrp_diary(bank, MONDAY, 7, 30, 7, params)
     np.testing.assert_array_equal(c1, c2)
 
 
 def test_diary_arrays_shapes_and_mask():
     bank = _bank()
     days, agents = 7, 12
-    (ts, locs, starts, ends), chosen = build_ddcrp_diary(
+    (ts, locs, starts, ends), chosen, _info = build_ddcrp_diary(
         bank, MONDAY, days, agents, 1, ScheduleConfig()
     )
     expected = agents * days * SLOTS
@@ -230,7 +230,7 @@ def test_profile_similarity_biases_selection():
     profile_embs = np.array([[1.0, 0.0], [0.0, 1.0]], dtype=np.float32)
 
     params = ScheduleConfig(temperature_beta_a=0.5, temperature_beta_b=10.0)  # low T → sharp
-    _, chosen = build_ddcrp_diary(
+    _, chosen, _info = build_ddcrp_diary(
         bank, MONDAY, days=5, n_agents=2, random_state=0, params=params,
         profile_embeddings=profile_embs,
     )
@@ -251,7 +251,7 @@ def test_no_profile_embeddings_uses_popularity():
     """Without profile embeddings, selection should spread across the bank (exploration)."""
     bank = _bank(n_weekday=10, n_weekend=10)
     params = ScheduleConfig(alpha_beta_a=10.0, alpha_beta_b=1.0)  # high alpha → lots of exploration
-    (_, _, _, _), chosen = build_ddcrp_diary(bank, MONDAY, 7, 200, 9, params)
+    (_, _, _, _), chosen, _info = build_ddcrp_diary(bank, MONDAY, 7, 200, 9, params)
     weekday_cols = [d for d in range(7) if (MONDAY + pd.Timedelta(days=d)).dayofweek < 5]
     used = set(chosen[:, weekday_cols].ravel().tolist())
     assert len(used) >= 6  # most of the 10-diary weekday bank gets explored

@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional
 
+import duckdb
 import h3
 import numpy as np
 import pandas as pd
@@ -20,13 +21,222 @@ from citybehavex.embedding import embed_profiles, embed_texts
 from citybehavex.llm_diaries import DiaryBatch, LLMStats, allocate_location_counts, fetch_diary_batch
 from citybehavex.profiles import AgentProfile, generate_profiles, load_profiles, profile_to_narrative, profiles_to_frame
 from citybehavex.roads import build_road_graph, snap_locations_to_graph
-from citybehavex.schedules import DiaryBank, build_ddcrp_diary, build_diary_bank
+from citybehavex.schedules import DdcrpAgentInfo, DiaryBank, build_ddcrp_diary, build_diary_bank
 from citybehavex.simulation.core import CoreTiming, simulate_agents, social_network_sidecar_path
 from citybehavex.tessellation import build_poi_tessellation, build_tessellation, purpose_distribution
+
+_WORK_SCORE_COLUMN = "work_score"
+
+
+def _minmax(values: np.ndarray) -> np.ndarray:
+    arr = np.asarray(values, dtype=float)
+    arr = np.nan_to_num(arr, nan=0.0, posinf=0.0, neginf=0.0)
+    if len(arr) == 0:
+        return arr
+    lo = float(arr.min())
+    hi = float(arr.max())
+    if hi <= lo:
+        return np.zeros_like(arr, dtype=float)
+    return (arr - lo) / (hi - lo)
+
+
+def _lng_column(df: pd.DataFrame) -> str:
+    return "lng" if "lng" in df.columns else "lon"
+
+
+def _resolve_spatial_bounds(config: CityBehavExConfig, tessellation_df: pd.DataFrame) -> tuple[float, float, float, float]:
+    sim = config.simulation
+    tess = config.tessellation
+    min_lon = sim.min_lon if sim.min_lon is not None else tess.min_lon
+    min_lat = sim.min_lat if sim.min_lat is not None else tess.min_lat
+    max_lon = sim.max_lon if sim.max_lon is not None else tess.max_lon
+    max_lat = sim.max_lat if sim.max_lat is not None else tess.max_lat
+    if None not in [min_lon, min_lat, max_lon, max_lat]:
+        return float(min_lon), float(min_lat), float(max_lon), float(max_lat)
+
+    lng_col = _lng_column(tessellation_df)
+    if {"lat", lng_col}.issubset(tessellation_df.columns) and len(tessellation_df) > 0:
+        return (
+            float(tessellation_df[lng_col].min()),
+            float(tessellation_df["lat"].min()),
+            float(tessellation_df[lng_col].max()),
+            float(tessellation_df["lat"].max()),
+        )
+    raise ValueError(
+        "POI + building location inference requires a configured bbox, a tessellation "
+        "with lat/lng columns, or cached Overture building features"
+    )
+
+
+def _building_features_output_path(config: CityBehavExConfig, resolution: int) -> Path:
+    configured = config.profiles.overture_building_features_output
+    if configured:
+        return Path(configured)
+    profile_out = Path(config.profiles.output)
+    return profile_out.with_name(f"{profile_out.stem}_overture_buildings_h3r{resolution}.parquet")
+
+
+def _read_building_features(path: Path) -> pd.DataFrame:
+    df = pd.read_parquet(path)
+    if "h3_cell" not in df.columns and "tile_id" in df.columns:
+        df = df.rename(columns={"tile_id": "h3_cell"})
+    if "building_count" not in df.columns:
+        raise ValueError(f"building features at {path} must contain a building_count column")
+    if "h3_cell" not in df.columns:
+        raise ValueError(f"building features at {path} must contain an h3_cell or tile_id column")
+    out = df[["h3_cell", "building_count"]].copy()
+    out["h3_cell"] = out["h3_cell"].astype(str)
+    out["building_count"] = pd.to_numeric(out["building_count"], errors="coerce").fillna(0.0)
+    return out.groupby("h3_cell", as_index=False)["building_count"].sum()
+
+
+def _fetch_overture_building_features(
+    min_lon: float,
+    min_lat: float,
+    max_lon: float,
+    max_lat: float,
+    resolution: int,
+    overture_release: str,
+) -> pd.DataFrame:
+    typer.echo(
+        f"Fetching Overture Maps {overture_release} building counts "
+        f"by H3 cell (res={resolution}) ..."
+    )
+    return duckdb.sql(f"""
+        INSTALL spatial; LOAD spatial;
+        INSTALL h3 FROM community; LOAD h3;
+        INSTALL httpfs; LOAD httpfs;
+        SET s3_region = 'us-west-2';
+
+        SELECT
+            h3_latlng_to_cell_string(
+                ST_Y(ST_Centroid(geometry)),
+                ST_X(ST_Centroid(geometry)),
+                {resolution}
+            ) AS h3_cell,
+            COUNT(*) AS building_count
+        FROM read_parquet(
+            's3://overturemaps-us-west-2/release/{overture_release}/theme=buildings/type=*/*',
+            filename=true,
+            hive_partitioning=1
+        )
+        WHERE bbox.xmax >= {min_lon}
+          AND bbox.xmin <= {max_lon}
+          AND bbox.ymax >= {min_lat}
+          AND bbox.ymin <= {max_lat}
+        GROUP BY h3_cell
+    """).df()
+
+
+def _load_or_build_building_features(
+    config: CityBehavExConfig,
+    tessellation_df: pd.DataFrame,
+    resolution: int,
+) -> pd.DataFrame:
+    if config.profiles.overture_building_features_path:
+        path = Path(config.profiles.overture_building_features_path)
+        if path.exists():
+            typer.echo(f"Loading Overture building features from {path} ...")
+            return _read_building_features(path)
+
+    out = _building_features_output_path(config, resolution)
+    if out.exists():
+        typer.echo(f"Loading cached Overture building features from {out} ...")
+        return _read_building_features(out)
+
+    min_lon, min_lat, max_lon, max_lat = _resolve_spatial_bounds(config, tessellation_df)
+    features = _fetch_overture_building_features(
+        min_lon,
+        min_lat,
+        max_lon,
+        max_lat,
+        resolution,
+        config.tessellation.overture_release,
+    )
+    out.parent.mkdir(parents=True, exist_ok=True)
+    features.to_parquet(out, index=False)
+    typer.echo(f"Saved {len(features):,} Overture building feature cells -> {out}")
+    return _read_building_features(out)
+
+
+def _base_relevance_column(
+    config: CityBehavExConfig,
+    tessellation_df: pd.DataFrame,
+    relevance_column: str,
+) -> str | None:
+    candidates = [
+        relevance_column if relevance_column != _WORK_SCORE_COLUMN else None,
+        config.simulation.relevance_column,
+        config.tessellation.relevance_column,
+        "total_poi_count",
+        "relevance",
+    ]
+    for candidate in candidates:
+        if candidate and candidate in tessellation_df.columns:
+            return candidate
+    return None
+
+
+def _poi_counts_by_h3(
+    tessellation_df: pd.DataFrame,
+    resolution: int,
+    relevance_column: str | None,
+) -> pd.Series:
+    lng_col = _lng_column(tessellation_df)
+    cells = [
+        h3.latlng_to_cell(lat, lng, resolution)
+        for lat, lng in zip(tessellation_df["lat"], tessellation_df[lng_col])
+    ]
+    if relevance_column and relevance_column in tessellation_df.columns:
+        weights = pd.to_numeric(tessellation_df[relevance_column], errors="coerce").fillna(0.0)
+    else:
+        weights = pd.Series(1.0, index=tessellation_df.index)
+    return pd.DataFrame({"h3_cell": cells, "weight": weights}).groupby("h3_cell")["weight"].sum()
+
+
+def _append_work_scores(
+    config: CityBehavExConfig,
+    tessellation_df: pd.DataFrame,
+    relevance_column: str,
+) -> tuple[pd.DataFrame, str]:
+    if not config.profiles.enabled or config.profiles.location_inference_method == "legacy_poi":
+        return tessellation_df, relevance_column
+    if not {"lat", _lng_column(tessellation_df)}.issubset(tessellation_df.columns):
+        raise ValueError("POI + building work scoring requires tessellation lat/lng columns")
+
+    base_column = _base_relevance_column(config, tessellation_df, relevance_column)
+    resolution = config.profiles.overture_feature_h3_resolution or config.tessellation.resolution
+    buildings = _load_or_build_building_features(config, tessellation_df, resolution)
+    building_counts = dict(zip(buildings["h3_cell"], buildings["building_count"]))
+
+    lng_col = _lng_column(tessellation_df)
+    tile_cells = [
+        h3.latlng_to_cell(lat, lng, resolution)
+        for lat, lng in zip(tessellation_df["lat"], tessellation_df[lng_col])
+    ]
+    poi = (
+        pd.to_numeric(tessellation_df[base_column], errors="coerce").fillna(0.0).to_numpy(dtype=float)
+        if base_column
+        else np.ones(len(tessellation_df), dtype=float)
+    )
+    building = np.array([building_counts.get(cell, 0.0) for cell in tile_cells], dtype=float)
+
+    pc = config.profiles
+    enriched = tessellation_df.copy()
+    enriched["building_count"] = building
+    enriched[_WORK_SCORE_COLUMN] = (
+        pc.work_building_weight * _minmax(building)
+        + pc.work_poi_weight * _minmax(poi)
+    )
+    if float(enriched[_WORK_SCORE_COLUMN].sum()) <= 0:
+        enriched[_WORK_SCORE_COLUMN] = 1.0
+    typer.echo("Using POI + Overture building work scores for profile work tiles")
+    return enriched, _WORK_SCORE_COLUMN
 
 
 def load_or_build_tessellation(config: CityBehavExConfig) -> tuple[pd.DataFrame, str, np.ndarray | None]:
     tessellation_df, relevance_column = _load_or_build_tessellation_df(config)
+    tessellation_df, relevance_column = _append_work_scores(config, tessellation_df, relevance_column)
     tessellation_df, home_tile_pool = _append_home_anchors(config, tessellation_df, relevance_column)
     tessellation_df = _maybe_snap_to_roads(config, tessellation_df)
     return tessellation_df, relevance_column, home_tile_pool
@@ -58,7 +268,7 @@ def _read_home_anchor_candidates(path: Path) -> pd.DataFrame:
     raise ValueError(f"home anchors at {path} must have lat/lng or geometry columns")
 
 
-def _derive_home_anchor_candidates_from_tessellation(
+def _derive_legacy_home_anchor_candidates_from_tessellation(
     config: CityBehavExConfig,
     tessellation_df: pd.DataFrame,
     limit: int,
@@ -120,7 +330,65 @@ def _derive_home_anchor_candidates_from_tessellation(
     return pd.DataFrame({"lat": lat, "lng": lng})
 
 
-def _load_or_build_home_anchor_candidates(config: CityBehavExConfig, tessellation_df: pd.DataFrame) -> pd.DataFrame:
+def _derive_home_anchor_candidates_from_tessellation(
+    config: CityBehavExConfig,
+    tessellation_df: pd.DataFrame,
+    relevance_column: str,
+    limit: int,
+) -> pd.DataFrame:
+    if config.profiles.location_inference_method == "legacy_poi":
+        return _derive_legacy_home_anchor_candidates_from_tessellation(config, tessellation_df, limit)
+
+    min_lon, min_lat, max_lon, max_lat = _resolve_spatial_bounds(config, tessellation_df)
+    resolution = config.profiles.home_anchor_h3_resolution
+    boundary = h3.LatLngPoly(
+        [
+            (min_lat, min_lon),
+            (min_lat, max_lon),
+            (max_lat, max_lon),
+            (max_lat, min_lon),
+        ]
+    )
+    cells = list(h3.polygon_to_cells(boundary, resolution))
+    if not cells:
+        raise ValueError("no H3 cells found for the configured bounding box")
+
+    base_column = _base_relevance_column(config, tessellation_df, relevance_column)
+    poi_counts = _poi_counts_by_h3(tessellation_df, resolution, base_column)
+    buildings = _load_or_build_building_features(config, tessellation_df, resolution)
+    building_counts = buildings.set_index("h3_cell")["building_count"]
+
+    poi = np.array([poi_counts.get(cell, 0.0) for cell in cells], dtype=float)
+    building = np.array([building_counts.get(cell, 0.0) for cell in cells], dtype=float)
+    pc = config.profiles
+    weights = (
+        pc.home_building_weight * _minmax(building)
+        + pc.home_poi_inverse_weight * (1.0 - _minmax(poi))
+    )
+    if float(weights.sum()) <= 0:
+        weights = np.ones(len(cells), dtype=float)
+    weights /= weights.sum()
+
+    rng = np.random.default_rng(config.simulation.random_state)
+    sampled_cells = rng.choice(np.asarray(cells), size=limit, p=weights, replace=True)
+
+    centers = np.array([h3.cell_to_latlng(c) for c in sampled_cells])
+    edge_len_m = h3.average_hexagon_edge_length(resolution, unit="m")
+    lat_jitter_deg = edge_len_m / 111_320.0
+    lng_scale_m = 111_320.0 * np.cos(np.radians(centers[:, 0]))
+    lng_jitter_deg = edge_len_m / np.where(lng_scale_m > 0, lng_scale_m, 111_320.0)
+
+    lat = centers[:, 0] + rng.uniform(-lat_jitter_deg, lat_jitter_deg, size=limit)
+    lng = centers[:, 1] + rng.uniform(-lng_jitter_deg, lng_jitter_deg, size=limit)
+    typer.echo("Derived residential HOME anchors from POI + Overture building scores")
+    return pd.DataFrame({"lat": lat, "lng": lng})
+
+
+def _load_or_build_home_anchor_candidates(
+    config: CityBehavExConfig,
+    tessellation_df: pd.DataFrame,
+    relevance_column: str,
+) -> pd.DataFrame:
     if config.profiles.home_anchors_path:
         path = Path(config.profiles.home_anchors_path)
         if path.exists():
@@ -132,8 +400,16 @@ def _load_or_build_home_anchor_candidates(config: CityBehavExConfig, tessellatio
         typer.echo(f"Loading cached residential HOME anchors from {out} ...")
         return _read_home_anchor_candidates(out)
 
-    typer.echo("Deriving residential HOME anchors from tessellation POI density ...")
-    anchors = _derive_home_anchor_candidates_from_tessellation(config, tessellation_df, config.simulation.agents)
+    if config.profiles.location_inference_method == "legacy_poi":
+        typer.echo("Deriving residential HOME anchors from tessellation POI density ...")
+    else:
+        typer.echo("Deriving residential HOME anchors from POI + Overture building scores ...")
+    anchors = _derive_home_anchor_candidates_from_tessellation(
+        config,
+        tessellation_df,
+        relevance_column,
+        config.simulation.agents,
+    )
     out.parent.mkdir(parents=True, exist_ok=True)
     anchors.to_parquet(out, index=False)
     typer.echo(f"Saved {len(anchors):,} HOME anchor candidates -> {out}")
@@ -148,7 +424,7 @@ def _append_home_anchors(
     if not config.profiles.enabled:
         return tessellation_df, None
 
-    anchors = _load_or_build_home_anchor_candidates(config, tessellation_df)
+    anchors = _load_or_build_home_anchor_candidates(config, tessellation_df, relevance_column)
     anchors = anchors.replace([np.inf, -np.inf], np.nan).dropna(subset=["lat", "lng"]).reset_index(drop=True)
     if len(anchors) == 0:
         raise ValueError("no valid residential HOME anchors are available")
@@ -394,10 +670,10 @@ def _build_schedule(
     diary_batches: dict[str, DiaryBatch],
     start_date: pd.Timestamp,
     profiles: Optional[list[AgentProfile]] = None,
-) -> tuple[DiaryBank, tuple, np.ndarray, Optional[np.ndarray]]:
+) -> tuple[DiaryBank, tuple, np.ndarray, Optional[np.ndarray], DdcrpAgentInfo]:
     """Build the diary bank and run profile-driven CRP schedule selection.
 
-    Returns (bank, diary_arrays, chosen, profile_embeddings).
+    Returns (bank, diary_arrays, chosen, profile_embeddings, crp_info).
     profile_embeddings is None when embeddings are disabled or unavailable.
     """
     bank = build_diary_bank(
@@ -420,7 +696,7 @@ def _build_schedule(
         else:
             typer.echo("Profile embeddings unavailable — falling back to popularity CRP")
 
-    diary_arrays, chosen = build_ddcrp_diary(
+    diary_arrays, chosen, crp_info = build_ddcrp_diary(
         bank,
         start_date,
         config.simulation.days,
@@ -429,7 +705,40 @@ def _build_schedule(
         config.schedule,
         profile_embeddings=profile_embeddings,
     )
-    return bank, diary_arrays, chosen, profile_embeddings
+    return bank, diary_arrays, chosen, profile_embeddings, crp_info
+
+
+def _save_crp_artifact(
+    path: str,
+    bank: DiaryBank,
+    chosen: np.ndarray,
+    crp_info: DdcrpAgentInfo,
+) -> None:
+    """Persist per-(agent, diary) ddCRP state next to the trajectory output.
+
+    ``build_ddcrp_diary`` computes T_a/alpha_a/similarity/usage-counts and then
+    throws them away once the diary picks are baked into ``diary_arrays`` — the
+    web UI's diary-selection debug panel needs them to reconstruct "what would
+    this agent pick next", so they're written out in long form (one row per
+    agent x bank diary) alongside the run.
+    """
+    n_agents, _days = chosen.shape
+    K = len(bank.diaries)
+    usage_counts = np.stack([np.bincount(chosen[a], minlength=K) for a in range(n_agents)])
+
+    diary_ids = np.array([d.diary_id for d in bank.diaries])
+    df = pd.DataFrame(
+        {
+            "agent": np.repeat(np.arange(n_agents, dtype=np.int64), K),
+            "diary_id": np.tile(diary_ids, n_agents),
+            "is_weekend": np.tile(bank.is_weekend, n_agents),
+            "sim": crp_info.agent_diary_sim.reshape(-1),
+            "usage_count": usage_counts.reshape(-1),
+            "T_a": np.repeat(crp_info.T_per_agent, K),
+            "alpha_a": np.repeat(crp_info.alpha_per_agent, K),
+        }
+    )
+    df.to_parquet(path, index=False)
 
 
 def _build_activity_data(
@@ -673,8 +982,14 @@ def run_simulation(config: CityBehavExConfig) -> skmob2.TrajDataFrame:
             f"LLM diary phase: {llm_seconds:.2f}s, {llm_stats.calls:,} chat completion calls"
             f"{cache_text}"
         )
-        _, diary_arrays, _, profile_embeddings = _build_schedule(
+        bank, diary_arrays, chosen, profile_embeddings, crp_info = _build_schedule(
             config, diary_batches, start_date, profiles=profiles
+        )
+        crp_path = stamped_output.replace(".parquet", "_crp.parquet")
+        _save_crp_artifact(crp_path, bank, chosen, crp_info)
+        typer.echo(
+            f"Saved ddCRP diary selection state "
+            f"({config.simulation.agents} agents x {len(bank.diaries)} diaries) -> {crp_path}"
         )
         traj, synth_activity_col = _run_simulation_core(
             config,
