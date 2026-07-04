@@ -48,3 +48,5 @@ data/*_trajectories_*_social_network.json
 
 # vLLM embedding-server runtime logs
 **/vllm_embed.log
+
+**/*_social_network.json
