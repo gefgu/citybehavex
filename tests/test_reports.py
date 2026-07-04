@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import json
 from types import SimpleNamespace
 
 import h3
 import pandas as pd
+import pytest
+import skmob2
 
 from citybehavex.reports import (
+    ALL_REPORT_SECTIONS,
     _activity_comparison_section_html,
     _activities_sidecar_path,
     _collapse_explicit_purposes,
@@ -21,6 +25,7 @@ from citybehavex.reports import (
     _prepare_activity_visits,
     _trajectory_od_matrix,
     _visits_for_comparison,
+    generate_comparison_report,
     load_trajectory,
     waiting_times_minutes,
 )
@@ -124,19 +129,19 @@ def test_common_part_of_commuters_uses_trajectory_cpc(monkeypatch):
     )
     calls = []
 
-    def cpc(synthetic_traj, observed_traj, *, resolution):
-        calls.append((synthetic_traj, observed_traj, resolution))
-        return 0.75
+    def cpc_multi(synthetic_traj, observed_traj, *, resolutions):
+        calls.append((synthetic_traj, observed_traj, resolutions))
+        return [(r, 0.75) for r in resolutions]
 
     monkeypatch.setattr(
-        "citybehavex.reports.comparison.trajectory_common_part_of_commuters",
-        cpc,
+        "citybehavex.reports.comparison.trajectory_common_part_of_commuters_multi",
+        cpc_multi,
     )
 
     values = _common_part_of_commuters(traj, traj)
 
     assert values == [(7, 0.75), (8, 0.75), (9, 0.75)]
-    assert calls == [(traj, traj, 7), (traj, traj, 8), (traj, traj, 9)]
+    assert calls == [(traj, traj, (7, 8, 9))]
 
 
 def test_metrics_section_html_shows_cpc_at_all_resolutions():
@@ -217,6 +222,42 @@ def test_heuristic_purpose_derivation_uses_time_location_anchors():
     derived = _derive_purpose_groups_from_heuristic(visits)
 
     assert derived["purpose"].tolist() == ["HOME", "HOME", "WORK", "WORK", "OTHER"]
+
+
+def test_heuristic_purpose_derivation_scopes_masks_per_user():
+    """Regression test for per-user mask scoping (the fix for a quadratic-
+    blowup bug where the write mask was rebuilt over the whole dataframe once
+    per user instead of being scoped to that user's own rows). Rows are
+    interleaved across users and use a non-contiguous index to make sure
+    per-user grouping and index alignment both hold regardless of row order."""
+    visits = pd.DataFrame(
+        {
+            "uid": ["u1", "u2", "u1", "u2", "u1", "u2"],
+            "start_timestamp": pd.to_datetime(
+                [
+                    "2026-01-01 02:30",
+                    "2026-01-01 03:00",
+                    "2026-01-01 10:00",
+                    "2026-01-01 15:00",
+                    "2026-01-01 20:00",
+                    "2026-01-01 21:00",
+                ]
+            ),
+            # u2 never visits "home_a"/"work_a" (u1's anchors) and u1 never
+            # visits "home_b"/"work_b" (u2's anchors) -- any cross-user mask
+            # leak would mislabel these as OTHER instead of HOME/WORK, or
+            # vice versa.
+            "location_id": ["home_a", "home_b", "work_a", "work_b", "shop", "shop"],
+        },
+        index=[10, 20, 30, 40, 50, 60],
+    )
+
+    derived = _derive_purpose_groups_from_heuristic(visits)
+
+    u1 = derived[derived["uid"] == "u1"]["purpose"].tolist()
+    u2 = derived[derived["uid"] == "u2"]["purpose"].tolist()
+    assert u1 == ["HOME", "WORK", "OTHER"]
+    assert u2 == ["HOME", "WORK", "OTHER"]
 
 
 def test_prepare_activity_visits_warns_when_using_heuristic():
@@ -592,3 +633,145 @@ def test_micro_activity_section_skips_empty_sidecar(capsys, tmp_path):
 
     assert html == ""
     assert "activities table is empty" in capsys.readouterr().err
+
+
+def _build_report_fixture(tmp_path):
+    """Small but complete synthetic+observed dataset exercising the full
+    generate_comparison_report pipeline (jump lengths, RoG, CPC, dwell/trip
+    duration, activity JSD, motifs, profiles)."""
+    n_agents = 4
+    n_stops = 6
+    purposes = ["HOME", "WORK", "OTHER"]
+
+    synth_rows = []
+    for uid in range(1, n_agents + 1):
+        base_lat, base_lng = 48.85 + uid * 0.01, 2.35 + uid * 0.01
+        for i in range(n_stops):
+            lat, lng = base_lat + (i % 3) * 0.01, base_lng + (i % 3) * 0.01
+            ts = pd.Timestamp("2026-01-01") + pd.Timedelta(hours=4 * i)
+            synth_rows.append(
+                {
+                    "uid": uid,
+                    "datetime": ts,
+                    "lat": lat,
+                    "lng": lng,
+                    "trip_duration_minutes": 15.0,
+                    "dwell_minutes": 45.0,
+                    "purpose": purposes[i % 3],
+                    "location_id": h3.latlng_to_cell(lat, lng, 9),
+                }
+            )
+    synth_df = pd.DataFrame(synth_rows)
+    traj = skmob2.TrajDataFrame(
+        synth_df, datetime_col="datetime", lat_col="lat", lng_col="lng", uid_col="uid"
+    )
+
+    real_rows = []
+    for uid in range(101, 101 + n_agents):
+        base_lat, base_lng = 48.86 + uid * 0.001, 2.36 + uid * 0.001
+        for i in range(n_stops):
+            lat, lng = base_lat + (i % 3) * 0.01, base_lng + (i % 3) * 0.01
+            ts = pd.Timestamp("2026-01-01") + pd.Timedelta(hours=4 * i)
+            real_rows.append(
+                {
+                    "uid": uid,
+                    "datetime": ts,
+                    "lat": lat,
+                    "lng": lng,
+                    "duration_minutes": 40.0,
+                    "purpose": purposes[i % 3],
+                    "location_id": h3.latlng_to_cell(lat, lng, 9),
+                }
+            )
+    real_df = pd.DataFrame(real_rows)
+    real_path = tmp_path / "observed.parquet"
+    real_df.to_parquet(real_path, index=False)
+    return traj, str(real_path)
+
+
+def test_generate_comparison_report_writes_json_metrics(tmp_path):
+    traj, real_path = _build_report_fixture(tmp_path)
+    html_path = tmp_path / "report.html"
+    json_path = tmp_path / "metrics.json"
+
+    generate_comparison_report(
+        traj=traj,
+        real_path=real_path,
+        observed_label="observed",
+        output_path=str(html_path),
+        json_output_path=str(json_path),
+    )
+
+    assert html_path.exists()
+    assert json_path.exists()
+    payload = json.loads(json_path.read_text())
+    assert set(payload["wasserstein"]) >= {
+        "jump_lengths_km",
+        "visits_per_user",
+        "radius_of_gyration_km",
+        "dwell_time_min",
+    }
+    assert set(payload["cpc"]) == {"h3_7", "h3_8", "h3_9"}
+    assert set(payload["jsd"]) >= {
+        "activity_distribution",
+        "activity_transitions",
+        "daily_activity_profile",
+    }
+
+
+def test_generate_comparison_report_rejects_unknown_section(tmp_path):
+    traj, real_path = _build_report_fixture(tmp_path)
+
+    with pytest.raises(ValueError, match="Unknown comparison report section"):
+        generate_comparison_report(
+            traj=traj,
+            real_path=real_path,
+            observed_label="observed",
+            output_path=str(tmp_path / "report.html"),
+            sections=["bogus"],
+        )
+
+
+def test_generate_comparison_report_sections_skip_expensive_blocks(tmp_path, monkeypatch):
+    traj, real_path = _build_report_fixture(tmp_path)
+    html_path = tmp_path / "report.html"
+
+    import citybehavex.reports.comparison as comparison_module
+
+    called = {"motifs": False, "profiles": False}
+
+    original_discover = comparison_module.discover_daily_motifs_from_agents
+
+    def fake_discover(*args, **kwargs):
+        called["motifs"] = True
+        return original_discover(*args, **kwargs)
+
+    original_compute_profiles = comparison_module.compute_profiles
+
+    def fake_compute_profiles(*args, **kwargs):
+        called["profiles"] = True
+        return original_compute_profiles(*args, **kwargs)
+
+    monkeypatch.setattr(comparison_module, "discover_daily_motifs_from_agents", fake_discover)
+    monkeypatch.setattr(comparison_module, "compute_profiles", fake_compute_profiles)
+
+    generate_comparison_report(
+        traj=traj,
+        real_path=real_path,
+        observed_label="observed",
+        output_path=str(html_path),
+        sections=["cpc"],
+    )
+
+    assert not called["motifs"]
+    assert not called["profiles"]
+    html = html_path.read_text()
+    assert "Common Part of Commuters" in html
+
+
+def test_all_report_sections_constant_matches_config_validator():
+    from citybehavex.reports.config import ComparisonConfig
+
+    # sanity check that the config's validator and the report's own gating
+    # agree on the recognized section names.
+    ComparisonConfig(sections=sorted(ALL_REPORT_SECTIONS))

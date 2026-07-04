@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from datetime import datetime as _dt
 from html import escape
@@ -24,7 +25,7 @@ from skmob2 import (
     fit_visitation_law,
     jensen_shannon_divergence,
     time_bin_matrix_jensen_shannon_divergence,
-    trajectory_common_part_of_commuters,
+    trajectory_common_part_of_commuters_multi,
     visits_per_user_wasserstein_distance,
     waiting_times,
     wasserstein_distance,
@@ -67,6 +68,14 @@ _END_TS_CANDIDATES = ["end_timestamp", "_end_time", "end_time"]
 # duration comparison. Matches the synthetic SimulationConfig.car_speed_kmh default.
 CAR_SPEED_KMH = 50.0
 CPC_H3_RESOLUTIONS = (7, 8, 9)
+
+# Report sections that can be individually disabled via `ComparisonConfig.sections`
+# (None/omitted = run all of them, the historical/default behavior). Wasserstein
+# jump/visits/RoG/dwell/trip-duration metrics and their ECDF charts are always
+# computed -- they're cheap and feed the always-on Distribution-comparisons
+# section, so gating them would either be a no-op or break that section.
+ACTIVITY_JSD_SECTIONS = {"activity_jsd", "activity_comparison", "motifs", "mobility_profiles"}
+ALL_REPORT_SECTIONS = ACTIVITY_JSD_SECTIONS | {"cpc", "stvd", "micro_activity", "mobility_laws"}
 
 
 @dataclass(frozen=True)
@@ -140,17 +149,7 @@ def _common_part_of_commuters(
     real_traj: skmob2.TrajDataFrame,
     resolutions: tuple[int, ...] = CPC_H3_RESOLUTIONS,
 ) -> list[tuple[int, float]]:
-    return [
-        (
-            resolution,
-            trajectory_common_part_of_commuters(
-                traj,
-                real_traj,
-                resolution=resolution,
-            ),
-        )
-        for resolution in resolutions
-    ]
+    return trajectory_common_part_of_commuters_multi(traj, real_traj, resolutions=resolutions)
 
 
 def _metrics_section_html(
@@ -270,11 +269,11 @@ def _derive_purpose_groups_from_heuristic(visits: pd.DataFrame) -> pd.DataFrame:
         ]
         work_location = _most_frequent_location(work_rows, exclude=home_location)
 
-        user_mask = derived["uid"].eq(uid)
+        idx = user_rows.index
         if home_location is not None:
-            derived.loc[user_mask & derived["location_id"].eq(home_location), "purpose"] = "HOME"
+            derived.loc[idx[user_rows["location_id"].eq(home_location)], "purpose"] = "HOME"
         if work_location is not None:
-            derived.loc[user_mask & derived["location_id"].eq(work_location), "purpose"] = "WORK"
+            derived.loc[idx[user_rows["location_id"].eq(work_location)], "purpose"] = "WORK"
 
     return derived.drop(columns=["_hour"])
 
@@ -937,6 +936,8 @@ def generate_comparison_report_from_paths(
     real_path: str,
     observed_label: str,
     output_path: str,
+    json_output_path: Optional[str] = None,
+    sections: Optional[list[str]] = None,
 ) -> None:
     typer.echo(f"Loading synthetic trajectories from {synthetic_path} ...")
     traj = load_trajectory(synthetic_path)
@@ -948,6 +949,8 @@ def generate_comparison_report_from_paths(
         output_path=output_path,
         synth_activity_col=synth_activity_col,
         synthetic_activities_path=_activities_sidecar_path(synthetic_path),
+        json_output_path=json_output_path,
+        sections=sections,
     )
 
 
@@ -958,7 +961,19 @@ def generate_comparison_report(
     output_path: str,
     synth_activity_col: Optional[str] = None,
     synthetic_activities_path: Optional[str] = None,
+    json_output_path: Optional[str] = None,
+    sections: Optional[list[str]] = None,
 ) -> None:
+    if sections is not None:
+        unknown = set(sections) - ALL_REPORT_SECTIONS
+        if unknown:
+            raise ValueError(
+                f"Unknown comparison report section(s): {sorted(unknown)}. "
+                f"Valid sections: {sorted(ALL_REPORT_SECTIONS)}"
+            )
+    enabled_sections = set(sections) if sections is not None else set(ALL_REPORT_SECTIONS)
+    need_activity_visits = bool(enabled_sections & ACTIVITY_JSD_SECTIONS)
+    metrics: dict = {"wasserstein": {}, "jsd": {}}
     typer.echo(f"Loading observed trajectories from {real_path} ...")
     real_df = pd.read_parquet(real_path)
     _dt_col = detect_column(real_df, _DATETIME_CANDIDATES)
@@ -977,6 +992,7 @@ def generate_comparison_report(
     synth_jumps = traj.jump_lengths(merge=True)
     real_jumps = real_traj.jump_lengths(merge=True)
     w_jump = wasserstein_distance(synth_jumps, real_jumps)
+    metrics["wasserstein"]["jump_lengths_km"] = w_jump
 
     # Collapse the slot-by-slot synthetic trajectory into distinct stay episodes
     # so visits-per-user counts visits (not 15-min slots), comparable to the
@@ -996,13 +1012,19 @@ def generate_comparison_report(
         user_id_col1=traj.uid_col,
         user_id_col2=real_traj.uid_col,
     )
+    metrics["wasserstein"]["visits_per_user"] = w_visits
 
     synth_rog = traj.radius_of_gyration()["radius_of_gyration"].to_numpy()
     real_rog = real_traj.radius_of_gyration()["radius_of_gyration"].to_numpy()
     w_rog = wasserstein_distance(synth_rog, real_rog)
+    metrics["wasserstein"]["radius_of_gyration_km"] = w_rog
 
-    typer.echo("Computing Common Part of Commuters ...")
-    cpc_rows = _common_part_of_commuters(traj, real_traj)
+    if "cpc" in enabled_sections:
+        typer.echo("Computing Common Part of Commuters ...")
+        cpc_rows = _common_part_of_commuters(traj, real_traj)
+    else:
+        cpc_rows = []
+    metrics["cpc"] = {f"h3_{resolution}": value for resolution, value in cpc_rows}
 
     # Dwell time = time spent at a location. The synthetic simulation records this
     # directly as departure - arrival (`dwell_minutes`); otherwise fall back to
@@ -1018,6 +1040,7 @@ def generate_comparison_report(
     else:
         real_dwell = waiting_times_minutes(real_traj)
     w_dwell = wasserstein_distance(synth_dwell, real_dwell)
+    metrics["wasserstein"]["dwell_time_min"] = w_dwell
 
     # Trip (travel) duration. The synthetic side carries a genuine car trip
     # duration per leg; the observed visit table has no travel-time ground truth,
@@ -1033,6 +1056,8 @@ def generate_comparison_report(
         w_trip = wasserstein_distance(synth_trip, real_trip)
     else:
         real_trip = synth_trip = w_trip = None
+    if w_trip is not None:
+        metrics["wasserstein"]["trip_duration_min"] = w_trip
 
     js_rows: list[tuple[str, str, str]] = []
     synthetic_visits = None
@@ -1045,58 +1070,71 @@ def generate_comparison_report(
     synth_location_col = detect_column(traj.df, _LOCATION_CANDIDATES)
     location_resolution = _location_resolution(real_df, real_location_col)
 
-    synthetic_visit_result = _prepare_activity_visits(
-        traj.df,
-        label="synthetic",
-        uid_col=traj.uid_col,
-        datetime_col=traj.datetime_col,
-        activity_col=(
-            synth_activity_col
-            if synth_activity_col and synth_activity_col in traj.df.columns
-            else None
-        ),
-        location_col=synth_location_col,
-        lat_col=traj.lat_col,
-        lng_col=traj.lng_col,
-        location_resolution=location_resolution,
-    )
-    observed_visit_result = _prepare_activity_visits(
-        real_df,
-        label=observed_label,
-        uid_col=real_traj.uid_col,
-        datetime_col=real_start_col,
-        activity_col=real_activity_col,
-        location_col=real_location_col,
-        lat_col=real_traj.lat_col,
-        lng_col=real_traj.lng_col,
-        location_resolution=location_resolution,
-        end_col=real_end_col,
-    )
-    if synthetic_visit_result is not None:
-        synthetic_visits = synthetic_visit_result.visits
-        if synthetic_visit_result.warning:
-            activity_warnings.append(synthetic_visit_result.warning)
-    if observed_visit_result is not None:
-        observed_visits = observed_visit_result.visits
-        if observed_visit_result.warning:
-            activity_warnings.append(observed_visit_result.warning)
-    for warning in activity_warnings:
-        typer.echo(f"Warning: {warning}", err=True)
+    if need_activity_visits:
+        synthetic_visit_result = _prepare_activity_visits(
+            traj.df,
+            label="synthetic",
+            uid_col=traj.uid_col,
+            datetime_col=traj.datetime_col,
+            activity_col=(
+                synth_activity_col
+                if synth_activity_col and synth_activity_col in traj.df.columns
+                else None
+            ),
+            location_col=synth_location_col,
+            lat_col=traj.lat_col,
+            lng_col=traj.lng_col,
+            location_resolution=location_resolution,
+        )
+        observed_visit_result = _prepare_activity_visits(
+            real_df,
+            label=observed_label,
+            uid_col=real_traj.uid_col,
+            datetime_col=real_start_col,
+            activity_col=real_activity_col,
+            location_col=real_location_col,
+            lat_col=real_traj.lat_col,
+            lng_col=real_traj.lng_col,
+            location_resolution=location_resolution,
+            end_col=real_end_col,
+        )
+        if synthetic_visit_result is not None:
+            synthetic_visits = synthetic_visit_result.visits
+            if synthetic_visit_result.warning:
+                activity_warnings.append(synthetic_visit_result.warning)
+        if observed_visit_result is not None:
+            observed_visits = observed_visit_result.visits
+            if observed_visit_result.warning:
+                activity_warnings.append(observed_visit_result.warning)
+        for warning in activity_warnings:
+            typer.echo(f"Warning: {warning}", err=True)
 
-    if synthetic_visits is not None and observed_visits is not None:
+    if (
+        "activity_jsd" in enabled_sections
+        and synthetic_visits is not None
+        and observed_visits is not None
+    ):
+        activity_distribution_jsd = activity_distribution_jensen_shannon_divergence(
+            synthetic_visits, observed_visits
+        )
+        metrics["jsd"]["activity_distribution"] = activity_distribution_jsd
         js_rows.append(
             (
                 "Activity distribution",
-                f"{activity_distribution_jensen_shannon_divergence(synthetic_visits, observed_visits):.4f}",
+                f"{activity_distribution_jsd:.4f}",
                 "",
             )
         )
         synth_transition = activity_transition_matrix(synthetic_visits)
         real_transition = activity_transition_matrix(observed_visits)
+        activity_transitions_jsd = activity_transition_matrix_jensen_shannon_divergence(
+            synth_transition, real_transition
+        )
+        metrics["jsd"]["activity_transitions"] = activity_transitions_jsd
         js_rows.append(
             (
                 "Activity transitions",
-                f"{activity_transition_matrix_jensen_shannon_divergence(synth_transition, real_transition):.4f}",
+                f"{activity_transitions_jsd:.4f}",
                 "",
             )
         )
@@ -1106,10 +1144,14 @@ def generate_comparison_report(
         real_daily, real_categories, _ = daily_activity_distribution(
             observed_visits
         )
+        daily_activity_profile_jsd = time_bin_matrix_jensen_shannon_divergence(
+            synth_daily, real_daily, synth_categories, real_categories
+        )
+        metrics["jsd"]["daily_activity_profile"] = daily_activity_profile_jsd
         js_rows.append(
             (
                 "Daily activity profile",
-                f"{time_bin_matrix_jensen_shannon_divergence(synth_daily, real_daily, synth_categories, real_categories):.4f}",
+                f"{daily_activity_profile_jsd:.4f}",
                 "",
             )
         )
@@ -1132,105 +1174,118 @@ def generate_comparison_report(
     if fig_trip:
         ecdf_charts_html += fig_trip._repr_html_()
 
-    typer.echo("Rendering mobility-law charts ...")
-    real_location_col = detect_column(real_df, _LOCATION_CANDIDATES)
-    real_activity_col = detect_column(real_df, _ACTIVITY_CANDIDATES)
-    mobility_observed_visits = _mobility_law_visits(
-        real_df,
-        uid_col=real_traj.uid_col,
-        datetime_col=real_traj.datetime_col,
-        lat_col=real_traj.lat_col,
-        lng_col=real_traj.lng_col,
-        location_col=real_location_col,
-        activity_col=real_activity_col,
-    )
-    mobility_synthetic_visits = _mobility_law_visits(
-        traj.df,
-        uid_col=traj.uid_col,
-        datetime_col=traj.datetime_col,
-        lat_col=traj.lat_col,
-        lng_col=traj.lng_col,
-        location_col=synth_location_col,
-        activity_col=(
-            synth_activity_col
-            if synth_activity_col and synth_activity_col in traj.df.columns
-            else None
-        ),
-    )
-    mobility_laws_section_html = _mobility_laws_section_html(
-        observed_visits=mobility_observed_visits,
-        synthetic_visits=mobility_synthetic_visits,
-        observed_jumps=real_jumps,
-        synthetic_jumps=synth_jumps,
-        observed_rog=real_rog,
-        synthetic_rog=synth_rog,
-        observed_label=observed_label,
-    )
-
-    if observed_visits is not None and synthetic_visits is not None:
-        typer.echo(
-            f"Rendering activity comparison for {observed_label} and synthetic trajectories ..."
+    if "mobility_laws" in enabled_sections:
+        typer.echo("Rendering mobility-law charts ...")
+        real_location_col = detect_column(real_df, _LOCATION_CANDIDATES)
+        real_activity_col = detect_column(real_df, _ACTIVITY_CANDIDATES)
+        mobility_observed_visits = _mobility_law_visits(
+            real_df,
+            uid_col=real_traj.uid_col,
+            datetime_col=real_traj.datetime_col,
+            lat_col=real_traj.lat_col,
+            lng_col=real_traj.lng_col,
+            location_col=real_location_col,
+            activity_col=real_activity_col,
         )
-    activity_section_html = _activity_comparison_section_html(
-        observed_visits,
-        synthetic_visits,
-        observed_label,
-        activity_warnings,
-    )
-    micro_activity_section_html = _micro_activity_section_html(synthetic_activities_path)
+        mobility_synthetic_visits = _mobility_law_visits(
+            traj.df,
+            uid_col=traj.uid_col,
+            datetime_col=traj.datetime_col,
+            lat_col=traj.lat_col,
+            lng_col=traj.lng_col,
+            location_col=synth_location_col,
+            activity_col=(
+                synth_activity_col
+                if synth_activity_col and synth_activity_col in traj.df.columns
+                else None
+            ),
+        )
+        mobility_laws_section_html = _mobility_laws_section_html(
+            observed_visits=mobility_observed_visits,
+            synthetic_visits=mobility_synthetic_visits,
+            observed_jumps=real_jumps,
+            synthetic_jumps=synth_jumps,
+            observed_rog=real_rog,
+            synthetic_rog=synth_rog,
+            observed_label=observed_label,
+        )
+    else:
+        mobility_laws_section_html = ""
+
+    if "activity_comparison" in enabled_sections:
+        if observed_visits is not None and synthetic_visits is not None:
+            typer.echo(
+                f"Rendering activity comparison for {observed_label} and synthetic trajectories ..."
+            )
+        activity_section_html = _activity_comparison_section_html(
+            observed_visits,
+            synthetic_visits,
+            observed_label,
+            activity_warnings,
+        )
+    else:
+        activity_section_html = ""
+
+    if "micro_activity" in enabled_sections:
+        micro_activity_section_html = _micro_activity_section_html(synthetic_activities_path)
+    else:
+        micro_activity_section_html = ""
 
     motif_section_html = ""
-    try:
-        if observed_visits is not None:
-            observed_motif_visits = _motif_visits(observed_visits)
-            _, real_motif_dist = discover_daily_motifs_from_agents(
-                observed_motif_visits,
-                user_id_col="uid",
-                location_id_col="location_id",
-                purpose_col="purpose",
-                timestamp_col="start_timestamp",
-                end_timestamp_col="end_timestamp",
-            )
-        else:
-            real_motif_dist = None
-
-        synth_motif_dist = None
-        if synthetic_visits is not None:
-            synthetic_motif_visits = _motif_visits(synthetic_visits)
-            _, synth_motif_dist = discover_daily_motifs_from_agents(
-                synthetic_motif_visits,
-                user_id_col="uid",
-                location_id_col="location_id",
-                purpose_col="purpose",
-                timestamp_col="start_timestamp",
-                end_timestamp_col="end_timestamp",
-            )
-            if real_motif_dist is not None:
-                js_rows.append(
-                    (
-                        "Daily motifs",
-                        f"{_motif_distribution_jsd(synth_motif_dist, real_motif_dist):.4f}",
-                        "",
-                    )
+    if "motifs" in enabled_sections:
+        try:
+            if observed_visits is not None:
+                observed_motif_visits = _motif_visits(observed_visits)
+                _, real_motif_dist = discover_daily_motifs_from_agents(
+                    observed_motif_visits,
+                    user_id_col="uid",
+                    location_id_col="location_id",
+                    purpose_col="purpose",
+                    timestamp_col="start_timestamp",
+                    end_timestamp_col="end_timestamp",
                 )
+            else:
+                real_motif_dist = None
 
-        if real_motif_dist is not None or synth_motif_dist is not None:
-            fig_motif = plot_motif_literature_comparison(
-                reference_distribution=real_motif_dist,
-                comparison_distribution=synth_motif_dist,
-                labels=(observed_label, "synthetic"),
-                bundle_libs=False,
-            )
-            motif_section_html = f"""
+            synth_motif_dist = None
+            if synthetic_visits is not None:
+                synthetic_motif_visits = _motif_visits(synthetic_visits)
+                _, synth_motif_dist = discover_daily_motifs_from_agents(
+                    synthetic_motif_visits,
+                    user_id_col="uid",
+                    location_id_col="location_id",
+                    purpose_col="purpose",
+                    timestamp_col="start_timestamp",
+                    end_timestamp_col="end_timestamp",
+                )
+                if real_motif_dist is not None:
+                    daily_motifs_jsd = _motif_distribution_jsd(synth_motif_dist, real_motif_dist)
+                    metrics["jsd"]["daily_motifs"] = daily_motifs_jsd
+                    js_rows.append(
+                        (
+                            "Daily motifs",
+                            f"{daily_motifs_jsd:.4f}",
+                            "",
+                        )
+                    )
+
+            if real_motif_dist is not None or synth_motif_dist is not None:
+                fig_motif = plot_motif_literature_comparison(
+                    reference_distribution=real_motif_dist,
+                    comparison_distribution=synth_motif_dist,
+                    labels=(observed_label, "synthetic"),
+                    bundle_libs=False,
+                )
+                motif_section_html = f"""
   <div class="section-header">
     <span>Motif comparison &mdash; literature vs {observed_label}{" vs synthetic" if synth_motif_dist is not None else ""}</span>
   </div>
   <div class="charts">{fig_motif._repr_html_()}</div>"""
-    except Exception as exc:
-        typer.echo(f"Warning: motif chart skipped: {exc}", err=True)
+        except Exception as exc:
+            typer.echo(f"Warning: motif chart skipped: {exc}", err=True)
 
     stvd_section_html = ""
-    if traj.lat_col and traj.lng_col and real_traj.lat_col and real_traj.lng_col:
+    if "stvd" in enabled_sections and traj.lat_col and traj.lng_col and real_traj.lat_col and real_traj.lng_col:
         try:
             typer.echo("Rendering STVD map ...")
             stvd_layers = _compute_stvd_layers(traj, real_traj, resolutions=[7, 9])
@@ -1248,7 +1303,7 @@ def generate_comparison_report(
             typer.echo(f"Warning: STVD chart skipped: {exc}", err=True)
 
     profiles_section_html = ""
-    if observed_visits is not None and synthetic_visits is not None:
+    if "mobility_profiles" in enabled_sections and observed_visits is not None and synthetic_visits is not None:
         try:
             typer.echo("Rendering mobility profiles ...")
             obs_profiles = compute_profiles(observed_visits)
@@ -1332,3 +1387,9 @@ def generate_comparison_report(
     output.write_text(full_html, encoding="utf-8")
     summary = "  ".join(f"{n}: {v}" for n, v, _ in w_rows)
     typer.echo(f"Comparison report -> {output_path}  ({summary})")
+
+    if json_output_path:
+        json_out = Path(json_output_path)
+        json_out.parent.mkdir(parents=True, exist_ok=True)
+        json_out.write_text(json.dumps(metrics, indent=2), encoding="utf-8")
+        typer.echo(f"Comparison metrics -> {json_output_path}")
