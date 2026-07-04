@@ -33,6 +33,16 @@ def get_charts(
         if experiment.observed_path is not None and experiment.observed_path.exists()
         else None
     )
+    road_nodes_path = (
+        experiment.road_nodes_path
+        if experiment.road_nodes_path is not None and experiment.road_nodes_path.exists()
+        else None
+    )
+    road_edges_path = (
+        experiment.road_edges_path
+        if experiment.road_edges_path is not None and experiment.road_edges_path.exists()
+        else None
+    )
 
     payload = get_or_build(
         exp_id,
@@ -44,9 +54,15 @@ def get_charts(
             str(observed_path) if observed_path is not None else None,
             experiment.label,
             synthetic_activities_path=str(selected.activities_path),
+            road_nodes_path=str(road_nodes_path) if road_nodes_path is not None else None,
+            road_edges_path=str(road_edges_path) if road_edges_path is not None else None,
         ),
         refresh=refresh,
-        extra_paths=(selected.social_network_path, selected.activities_path),
+        extra_paths=tuple(
+            p
+            for p in (selected.social_network_path, selected.activities_path, road_nodes_path, road_edges_path)
+            if p is not None
+        ),
     )
     payload = {**payload, "run_id": selected.run_id}
     return ApiResponseWrapper(data=payload)

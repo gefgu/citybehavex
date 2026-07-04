@@ -50,6 +50,11 @@ from skmob_vis import (
 )
 
 from citybehavex.activities import build_catalog
+from citybehavex.metrics import (
+    build_road_network_handle,
+    jump_lengths_km as road_jump_lengths_km,
+    radius_of_gyration_km as road_radius_of_gyration_km,
+)
 from citybehavex.profiles import PROFILE_METRICS, compute_profiles
 
 _DATETIME_CANDIDATES = [
@@ -963,6 +968,9 @@ def generate_comparison_report(
     synthetic_activities_path: Optional[str] = None,
     json_output_path: Optional[str] = None,
     sections: Optional[list[str]] = None,
+    road_nodes_df: Optional[pd.DataFrame] = None,
+    road_edges_df: Optional[pd.DataFrame] = None,
+    road_snap_max_distance_m: float = 750.0,
 ) -> None:
     if sections is not None:
         unknown = set(sections) - ALL_REPORT_SECTIONS
@@ -989,8 +997,40 @@ def generate_comparison_report(
 
     typer.echo("Computing mobility metrics ...")
     labels = ("synthetic", observed_label)
-    synth_jumps = traj.jump_lengths(merge=True)
-    real_jumps = real_traj.jump_lengths(merge=True)
+
+    # When a cached road graph is supplied, recompute jump lengths / radius of
+    # gyration as road-network distance (instead of skmob2's straight-line
+    # Haversine) for both synthetic and real trajectories -- otherwise fall
+    # back to the plain skmob2 calls unchanged.
+    road_handle = (
+        build_road_network_handle(road_edges_df)
+        if road_nodes_df is not None and road_edges_df is not None and len(road_nodes_df) and len(road_edges_df)
+        else None
+    )
+    if road_handle is not None:
+        synth_jumps = road_jump_lengths_km(
+            traj.df,
+            uid_col=traj.uid_col,
+            lat_col=traj.lat_col,
+            lng_col=traj.lng_col,
+            datetime_col=traj.datetime_col,
+            handle=road_handle,
+            nodes_df=road_nodes_df,
+            snap_max_distance_m=road_snap_max_distance_m,
+        )
+        real_jumps = road_jump_lengths_km(
+            real_traj.df,
+            uid_col=real_traj.uid_col,
+            lat_col=real_traj.lat_col,
+            lng_col=real_traj.lng_col,
+            datetime_col=real_traj.datetime_col,
+            handle=road_handle,
+            nodes_df=road_nodes_df,
+            snap_max_distance_m=road_snap_max_distance_m,
+        )
+    else:
+        synth_jumps = traj.jump_lengths(merge=True)
+        real_jumps = real_traj.jump_lengths(merge=True)
     w_jump = wasserstein_distance(synth_jumps, real_jumps)
     metrics["wasserstein"]["jump_lengths_km"] = w_jump
 
@@ -1014,8 +1054,28 @@ def generate_comparison_report(
     )
     metrics["wasserstein"]["visits_per_user"] = w_visits
 
-    synth_rog = traj.radius_of_gyration()["radius_of_gyration"].to_numpy()
-    real_rog = real_traj.radius_of_gyration()["radius_of_gyration"].to_numpy()
+    if road_handle is not None:
+        synth_rog = road_radius_of_gyration_km(
+            traj.df,
+            uid_col=traj.uid_col,
+            lat_col=traj.lat_col,
+            lng_col=traj.lng_col,
+            handle=road_handle,
+            nodes_df=road_nodes_df,
+            snap_max_distance_m=road_snap_max_distance_m,
+        )["radius_of_gyration"].to_numpy()
+        real_rog = road_radius_of_gyration_km(
+            real_traj.df,
+            uid_col=real_traj.uid_col,
+            lat_col=real_traj.lat_col,
+            lng_col=real_traj.lng_col,
+            handle=road_handle,
+            nodes_df=road_nodes_df,
+            snap_max_distance_m=road_snap_max_distance_m,
+        )["radius_of_gyration"].to_numpy()
+    else:
+        synth_rog = traj.radius_of_gyration()["radius_of_gyration"].to_numpy()
+        real_rog = real_traj.radius_of_gyration()["radius_of_gyration"].to_numpy()
     w_rog = wasserstein_distance(synth_rog, real_rog)
     metrics["wasserstein"]["radius_of_gyration_km"] = w_rog
 

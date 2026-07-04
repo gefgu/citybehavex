@@ -27,7 +27,7 @@ _MPH_TO_KMH = 1.609344
 _EARTH_RADIUS_M = 6371000.0
 
 
-def _haversine_m(lat1: np.ndarray, lng1: np.ndarray, lat2: np.ndarray, lng2: np.ndarray) -> np.ndarray:
+def haversine_m(lat1: np.ndarray, lng1: np.ndarray, lat2: np.ndarray, lng2: np.ndarray) -> np.ndarray:
     phi1, phi2 = np.radians(lat1), np.radians(lat2)
     dphi = np.radians(lat2 - lat1)
     dlambda = np.radians(lng2 - lng1)
@@ -281,6 +281,6 @@ def snap_locations_to_graph(
     _, indices = tree.kneighbors(loc_xy)
     nearest_idx = indices[:, 0]
 
-    dist_m = _haversine_m(loc_lat, loc_lng, node_lat[nearest_idx], node_lng[nearest_idx])
+    dist_m = haversine_m(loc_lat, loc_lng, node_lat[nearest_idx], node_lng[nearest_idx])
     node_idx = nodes_df["node_idx"].to_numpy(dtype=np.int64)[nearest_idx]
     return np.where(dist_m <= max_distance_m, node_idx, -1).astype(np.int64)

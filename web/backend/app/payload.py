@@ -63,6 +63,11 @@ from .reports_bridge import (
     load_trajectory,
     waiting_times_minutes,
 )
+from citybehavex.metrics import (
+    build_road_network_handle,
+    jump_lengths_km as road_jump_lengths_km,
+    radius_of_gyration_km as road_radius_of_gyration_km,
+)
 from citybehavex.simulation.core import social_network_sidecar_path
 
 # STVD bivariate palette (volume-diff bin x peak-shift bin), matching
@@ -392,6 +397,9 @@ def build_comparison_payload(
     observed_path: Optional[str],
     observed_label: str,
     synthetic_activities_path: Optional[str] = None,
+    road_nodes_path: Optional[str] = None,
+    road_edges_path: Optional[str] = None,
+    road_snap_max_distance_m: float = 750.0,
 ) -> dict[str, Any]:
     warnings: list[str] = []
 
@@ -401,6 +409,22 @@ def build_comparison_payload(
         except Exception as exc:  # noqa: BLE001 - degrade gracefully per section
             warnings.append(f"{section}: {exc}")
             return None
+
+    # When a cached road graph is supplied, jump lengths / radius of gyration
+    # are recomputed as road-network distance (instead of skmob2's
+    # straight-line Haversine) for both synthetic and real trajectories --
+    # built once here and reused across every distribution-filter group below,
+    # since preparing the contraction hierarchy (not querying it) is the
+    # expensive step. Falls back to plain skmob2 calls when absent/missing.
+    road_nodes_df = None
+    road_handle = None
+    if road_nodes_path and road_edges_path and Path(road_nodes_path).exists() and Path(road_edges_path).exists():
+        road_nodes_df = pd.read_parquet(road_nodes_path)
+        road_edges_df = pd.read_parquet(road_edges_path)
+        if len(road_nodes_df) and len(road_edges_df):
+            road_handle = build_road_network_handle(road_edges_df)
+        else:
+            road_nodes_df = None
 
     traj = load_trajectory(synthetic_path)
     synth_activity_col = detect_column(traj.df, _ACTIVITY_CANDIDATES)
@@ -442,6 +466,33 @@ def build_comparison_payload(
     jsd: list[dict[str, Any]] = []
     cpc_metrics: list[dict[str, Any]] = []
 
+    def _jumps_for(tr) -> np.ndarray:
+        if road_handle is not None:
+            return road_jump_lengths_km(
+                tr.df,
+                uid_col=tr.uid_col,
+                lat_col=tr.lat_col,
+                lng_col=tr.lng_col,
+                datetime_col=tr.datetime_col,
+                handle=road_handle,
+                nodes_df=road_nodes_df,
+                snap_max_distance_m=road_snap_max_distance_m,
+            )
+        return tr.jump_lengths(merge=True)
+
+    def _rog_for(tr) -> np.ndarray:
+        if road_handle is not None:
+            return road_radius_of_gyration_km(
+                tr.df,
+                uid_col=tr.uid_col,
+                lat_col=tr.lat_col,
+                lng_col=tr.lng_col,
+                handle=road_handle,
+                nodes_df=road_nodes_df,
+                snap_max_distance_m=road_snap_max_distance_m,
+            )["radius_of_gyration"].to_numpy()
+        return tr.radius_of_gyration()["radius_of_gyration"].to_numpy()
+
     def distribution_group(meta: dict[str, Any]) -> dict[str, Any]:
         group = _empty_group(meta)
         synth_df = _filter_df(traj.df, traj.datetime_col, meta)
@@ -456,16 +507,16 @@ def build_comparison_payload(
             else None
         )
 
-        synth_jumps = synth_traj.jump_lengths(merge=True)
-        real_jumps = real_group_traj.jump_lengths(merge=True) if real_group_traj is not None else None
+        synth_jumps = _jumps_for(synth_traj)
+        real_jumps = _jumps_for(real_group_traj) if real_group_traj is not None else None
         synth_stays = _collapse_to_stays(
             synth_df, uid_col=traj.uid_col, lat_col=traj.lat_col,
             lng_col=traj.lng_col, datetime_col=traj.datetime_col,
         )
         synth_visits_count = synth_stays[traj.uid_col].value_counts().to_list()
         real_visits_count = real_group_df[real_traj.uid_col].value_counts().to_list() if real_group_df is not None and real_traj is not None else None
-        synth_rog = synth_traj.radius_of_gyration()["radius_of_gyration"].to_numpy()
-        real_rog = real_group_traj.radius_of_gyration()["radius_of_gyration"].to_numpy() if real_group_traj is not None else None
+        synth_rog = _rog_for(synth_traj)
+        real_rog = _rog_for(real_group_traj) if real_group_traj is not None else None
         synth_dwell = (
             [d for d in synth_df["dwell_minutes"].dropna().tolist() if d >= 0]
             if "dwell_minutes" in synth_df.columns

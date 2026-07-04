@@ -79,3 +79,8 @@ profiles:
 comparison:
   path: data/yjmob/yjmob_wgs84_simple.parquet
   label: yjmob100k
+  # WIP: road-network-based jump_lengths/radius_of_gyration is implemented
+  # (citybehavex/metrics/road_distance.py) but disabled by default pending
+  # further performance validation on large real datasets. Set true to use
+  # road-network distance instead of straight-line Haversine.
+  road_network_distance: false

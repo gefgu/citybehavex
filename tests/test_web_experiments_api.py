@@ -148,10 +148,19 @@ def test_charts_endpoint_allows_missing_observed_path(monkeypatch, tmp_path):
         observed_path=tmp_path / "missing_observed.parquet",
         label="observed",
         run=lambda run_id=None: selected,
+        road_nodes_path=None,
+        road_edges_path=None,
     )
     monkeypatch.setattr(charts_mod, "get_experiment", lambda exp_id: experiment)
 
-    def fake_build(synthetic_path, observed_path, observed_label, synthetic_activities_path=None):
+    def fake_build(
+        synthetic_path,
+        observed_path,
+        observed_label,
+        synthetic_activities_path=None,
+        road_nodes_path=None,
+        road_edges_path=None,
+    ):
         assert observed_path is None
         return {
             "mode": "synthetic_only",

@@ -1,12 +1,19 @@
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Optional
 
+import pandas as pd
 import typer
 
 from .config import CityBehavExConfig, apply_overrides, load_config
 from .llm import LLMConfig
 from .reports import ComparisonConfig
+from .reports.comparison import (
+    _activities_sidecar_path,
+    generate_comparison_report,
+    load_trajectory,
+)
 from .roads import RoadNetworkConfig
 from .simulation import run_simulation
 from .simulation import SimulationConfig
@@ -106,24 +113,51 @@ def report(
         help="Observed series label. Defaults to comparison.label.",
     ),
     output: Optional[str] = typer.Option(
-        None,
-        help="Deprecated standalone HTML output path.",
-        hidden=True,
+        "report.html",
+        help="HTML report output path.",
     ),
     json_output: Optional[str] = typer.Option(
         None,
         "--json",
-        help="Deprecated standalone metrics JSON path.",
-        hidden=True,
+        help="Metrics JSON output path.",
     ),
 ):
-    """Deprecated: use the live web UI for comparison charts."""
-    typer.echo(
-        "The standalone HTML report command is deprecated. "
-        "Run the web app and open /experiments to view live comparison charts.",
-        err=True,
+    """Generate an HTML + JSON mobility comparison report.
+
+    Jump lengths / radius of gyration are recomputed as road-network distance
+    (instead of straight-line Haversine) when the config's road_network is
+    enabled and its cached graph parquet files exist -- otherwise falls back
+    to the plain Haversine-based metrics.
+    """
+    loaded = load_config(config)
+    synthetic_path = synthetic or loaded.simulation.output
+    real_path = comparison or loaded.comparison.path
+    label = comparison_label or loaded.comparison.label
+
+    rn = loaded.road_network
+    road_nodes_df = road_edges_df = None
+    if (
+        rn.enabled
+        and loaded.comparison.road_network_distance
+        and Path(rn.nodes_output).exists()
+        and Path(rn.edges_output).exists()
+    ):
+        typer.echo(f"Loading cached road graph from {rn.nodes_output} / {rn.edges_output} ...")
+        road_nodes_df = pd.read_parquet(rn.nodes_output)
+        road_edges_df = pd.read_parquet(rn.edges_output)
+
+    traj = load_trajectory(synthetic_path)
+    generate_comparison_report(
+        traj=traj,
+        real_path=real_path,
+        observed_label=label,
+        output_path=output,
+        synthetic_activities_path=_activities_sidecar_path(synthetic_path),
+        json_output_path=json_output,
+        road_nodes_df=road_nodes_df,
+        road_edges_df=road_edges_df,
+        road_snap_max_distance_m=rn.snap_max_distance_m,
     )
-    raise typer.Exit(1)
 
 
 @app.command()

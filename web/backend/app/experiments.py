@@ -128,6 +128,8 @@ class Experiment:
     profiles_enabled: bool
     profiles_output: Optional[Path]
     profiles_path: Optional[Path]
+    road_nodes_path: Optional[Path]
+    road_edges_path: Optional[Path]
     params: dict[str, Any]
     runs: list[Run]
 
@@ -143,6 +145,12 @@ class Experiment:
             "profiles_output": _display_path(self.profiles_output),
             "profiles_path": _display_path(self.profiles_path),
             "profiles_exists": bool(self.profiles_path and self.profiles_path.exists()),
+            "road_network_available": bool(
+                self.road_nodes_path
+                and self.road_nodes_path.exists()
+                and self.road_edges_path
+                and self.road_edges_path.exists()
+            ),
             "params": self.params,
             "runs": [r.to_dict(with_summary=with_summary) for r in self.runs],
         }
@@ -164,6 +172,9 @@ def _load_experiment(config_path: Path) -> Experiment:
     observed_path = _resolve(cfg.comparison.path)
     profiles_output = _resolve(cfg.profiles.output)
     profiles_path = profiles_output if cfg.profiles.enabled else None
+    road_distance_enabled = cfg.road_network.enabled and cfg.comparison.road_network_distance
+    road_nodes_path = _resolve(cfg.road_network.nodes_output) if road_distance_enabled else None
+    road_edges_path = _resolve(cfg.road_network.edges_output) if road_distance_enabled else None
     params = {
         "agents": cfg.simulation.agents,
         "days": cfg.simulation.days,
@@ -180,6 +191,8 @@ def _load_experiment(config_path: Path) -> Experiment:
         profiles_enabled=cfg.profiles.enabled,
         profiles_output=profiles_output,
         profiles_path=profiles_path,
+        road_nodes_path=road_nodes_path,
+        road_edges_path=road_edges_path,
         params=params,
         runs=_discover_runs(synthetic_output),
     )

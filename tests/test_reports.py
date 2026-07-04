@@ -719,6 +719,69 @@ def test_generate_comparison_report_writes_json_metrics(tmp_path):
     }
 
 
+def test_generate_comparison_report_uses_road_network_distance_when_provided(tmp_path):
+    """When a cached road graph is supplied, jump_lengths_km must come from
+    road-network routing, not skmob2's straight-line Haversine. Build a tiny
+    complete graph over every unique fixture coordinate, with each direct
+    edge's length set to exactly 2x its Haversine distance (and travel-time
+    weight derived consistently from that same length, so the direct edge is
+    always the unique time-optimal route by the triangle inequality) -- the
+    reported jump_lengths_km Wasserstein distance must then come out at
+    exactly 2x the plain-Haversine baseline, since 1-D Wasserstein distance
+    scales linearly under a uniform scaling of both distributions.
+    """
+    import itertools
+
+    import numpy as np
+
+    from citybehavex.roads import haversine_m
+
+    traj, real_path = _build_report_fixture(tmp_path)
+    real_df = pd.read_parquet(real_path)
+
+    coords = (
+        pd.concat([traj.df[["lat", "lng"]], real_df[["lat", "lng"]]], ignore_index=True)
+        .drop_duplicates()
+        .reset_index(drop=True)
+    )
+    lat = coords["lat"].to_numpy()
+    lng = coords["lng"].to_numpy()
+    pairs = list(itertools.permutations(range(len(coords)), 2))
+    from_node = np.array([p[0] for p in pairs], dtype=np.int64)
+    to_node = np.array([p[1] for p in pairs], dtype=np.int64)
+    length_m = haversine_m(lat[from_node], lng[from_node], lat[to_node], lng[to_node]) * 2.0
+    weight_ds = np.maximum(1, np.round(length_m)).astype(np.int64)
+
+    road_nodes_df = pd.DataFrame({"node_idx": np.arange(len(coords), dtype=np.int64), "lat": lat, "lng": lng})
+    road_edges_df = pd.DataFrame(
+        {"from_node": from_node, "to_node": to_node, "length_m": length_m, "weight_ds": weight_ds}
+    )
+
+    baseline_json = tmp_path / "baseline_metrics.json"
+    generate_comparison_report(
+        traj=traj,
+        real_path=real_path,
+        observed_label="observed",
+        output_path=str(tmp_path / "baseline_report.html"),
+        json_output_path=str(baseline_json),
+    )
+    baseline = json.loads(baseline_json.read_text())["wasserstein"]["jump_lengths_km"]
+
+    road_json = tmp_path / "road_metrics.json"
+    generate_comparison_report(
+        traj=traj,
+        real_path=real_path,
+        observed_label="observed",
+        output_path=str(tmp_path / "road_report.html"),
+        json_output_path=str(road_json),
+        road_nodes_df=road_nodes_df,
+        road_edges_df=road_edges_df,
+    )
+    road = json.loads(road_json.read_text())["wasserstein"]["jump_lengths_km"]
+
+    assert road == pytest.approx(2.0 * baseline, rel=1e-6)
+
+
 def test_generate_comparison_report_rejects_unknown_section(tmp_path):
     traj, real_path = _build_report_fixture(tmp_path)
 
