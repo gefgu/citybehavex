@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import time
+from collections import Counter
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional
@@ -597,8 +598,11 @@ def simulation_dates(config: CityBehavExConfig) -> tuple[pd.Timestamp, pd.Timest
 def maybe_build_diaries(
     config: CityBehavExConfig,
     tessellation_df: pd.DataFrame,
+    start_date: pd.Timestamp,
+    end_date: pd.Timestamp,
 ) -> Optional[tuple[dict[str, DiaryBatch], LLMStats, float]]:
-    """Fetch one diary batch per day type (weekday/weekend), or None if no LLM
+    """Fetch one diary batch per day type needed for [start_date, end_date)
+    (weekday/weekend plus any overlapping special days), or None if no LLM
     client and no validated cache are configured."""
     valid_cache = config.llm.validated_diaries_path
     has_llm_client = all([config.llm.base_url, config.llm.api_key, config.llm.model])
@@ -614,8 +618,11 @@ def maybe_build_diaries(
         config.diaries.max_locations,
         config.llm.diary_count,
     )
+    day_types = config.diaries.day_types_for_range(
+        start_date.date(), (end_date - timedelta(days=1)).date()
+    )
     batches: dict[str, DiaryBatch] = {}
-    for day_type in ("weekday", "weekend"):
+    for day_type in day_types:
         batches[day_type] = fetch_diary_batch(
             config.llm,
             city_profile=config.diaries.profile_for(day_type),
@@ -693,9 +700,10 @@ def _build_schedule(
         config.embedding,
         config.simulation.granularity_minutes,
     )
+    counts = Counter(bank.day_type.tolist())
     typer.echo(
         f"ddCRP schedule bank: {len(bank.diaries)} diaries "
-        f"({int((~bank.is_weekend).sum())} weekday / {int(bank.is_weekend.sum())} weekend), "
+        f"({', '.join(f'{n} {t}' for t, n in counts.items())}), "
         f"embeddings={'on' if bank.embedded else 'off (popularity CRP, no profile similarity)'}"
     )
 
@@ -708,10 +716,15 @@ def _build_schedule(
         else:
             typer.echo("Profile embeddings unavailable — falling back to popularity CRP")
 
+    day_types = [
+        config.diaries.resolve_day_type((start_date + pd.Timedelta(days=d)).date())
+        for d in range(config.simulation.days)
+    ]
     diary_arrays, chosen, crp_info = build_ddcrp_diary(
         bank,
         start_date,
         config.simulation.days,
+        day_types,
         config.simulation.agents,
         config.simulation.random_state,
         config.schedule,
@@ -743,7 +756,7 @@ def _save_crp_artifact(
         {
             "agent": np.repeat(np.arange(n_agents, dtype=np.int64), K),
             "diary_id": np.tile(diary_ids, n_agents),
-            "is_weekend": np.tile(bank.is_weekend, n_agents),
+            "day_type": np.tile(bank.day_type, n_agents),
             "sim": crp_info.agent_diary_sim.reshape(-1),
             "usage_count": usage_counts.reshape(-1),
             "T_a": np.repeat(crp_info.T_per_agent, K),
@@ -976,7 +989,7 @@ def run_simulation(config: CityBehavExConfig) -> skmob2.TrajDataFrame:
     tessellation_df, relevance_column, home_tile_pool = load_or_build_tessellation(config)
     start_date, end_date = simulation_dates(config)
     profiles = maybe_build_profiles(config, tessellation_df, relevance_column, home_tile_pool)
-    diary_result = maybe_build_diaries(config, tessellation_df)
+    diary_result = maybe_build_diaries(config, tessellation_df, start_date, end_date)
     core_timing = CoreTiming()
 
     if diary_result is None:

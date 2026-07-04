@@ -279,7 +279,7 @@ def query_agent_crp(crp_path: Path, uid: int) -> list[dict[str, Any]]:
     con = duckdb.connect()
     try:
         rows = con.execute(
-            f"""SELECT diary_id, is_weekend, sim, usage_count, T_a, alpha_a
+            f"""SELECT diary_id, day_type, sim, usage_count, T_a, alpha_a
                 FROM read_parquet('{quote_path(crp_path)}')
                 WHERE agent = $uid
                 ORDER BY usage_count DESC""",

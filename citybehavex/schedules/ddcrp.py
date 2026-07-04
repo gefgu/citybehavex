@@ -13,8 +13,9 @@ where:
 - ``s_k = cosine(agent_profile_embedding, diary_embedding[k])``
 - ``T`` and ``alpha`` are drawn per-agent from Beta distributions
 
-This is a Chinese Restaurant Process with semantic smoothing. Weekday and weekend
-are **hard-separated**: a weekday only draws from the weekday bank and vice versa.
+This is a Chinese Restaurant Process with semantic smoothing. Day types are
+**hard-separated**: a day only draws from its own day type's bank (e.g. weekday,
+weekend, or a named special day like "emergency").
 
 Fixed purpose→code map in ``diary_to_abs_locs``:
   HOME=0, WORK=1, OTHER=2
@@ -74,10 +75,10 @@ def diary_to_abs_locs(diary: Diary, slots_per_day: int, granularity_minutes: int
 
 @dataclass
 class DiaryBank:
-    """Combined weekday+weekend diary bank with embeddings and slot masks."""
+    """Combined diary bank (one bucket per day type) with embeddings and slot masks."""
 
     diaries: list[Diary]
-    is_weekend: np.ndarray          # bool[K]
+    day_type: np.ndarray            # str[K] -- e.g. "weekday"/"weekend"/"emergency"
     embeddings: np.ndarray | None   # float32[K, dim] or None (fallback: identity)
     slot_locs: np.ndarray           # int32[K, slots_per_day]
     slots_per_day: int
@@ -90,20 +91,17 @@ def build_diary_bank(
     embedding_config: EmbeddingConfig,
     granularity_minutes: int,
 ) -> DiaryBank:
-    """Concatenate the weekday/weekend banks, embed them, precompute slot masks."""
+    """Concatenate the per-day-type banks, embed them, precompute slot masks."""
     if 1440 % granularity_minutes != 0:
         raise ValueError("granularity_minutes must divide 1440")
     slots_per_day = 1440 // granularity_minutes
 
     diaries: list[Diary] = []
-    is_weekend: list[bool] = []
-    for day_type in ("weekday", "weekend"):
-        batch = diary_batches.get(day_type)
-        if batch is None:
-            continue
+    day_type: list[str] = []
+    for day_type_name, batch in diary_batches.items():
         for diary in batch.diaries:
             diaries.append(diary)
-            is_weekend.append(day_type == "weekend")
+            day_type.append(day_type_name)
     if not diaries:
         raise ValueError("diary bank is empty")
 
@@ -116,7 +114,7 @@ def build_diary_bank(
 
     return DiaryBank(
         diaries=diaries,
-        is_weekend=np.asarray(is_weekend, dtype=bool),
+        day_type=np.asarray(day_type, dtype=object),
         embeddings=embeddings,
         slot_locs=slot_locs,
         slots_per_day=slots_per_day,
@@ -142,6 +140,7 @@ def build_ddcrp_diary(
     bank: DiaryBank,
     start_date: pd.Timestamp,
     days: int,
+    day_types: list[str],
     n_agents: int,
     random_state: int,
     params: ScheduleConfig,
@@ -158,6 +157,10 @@ def build_ddcrp_diary(
     When ``profile_embeddings`` is ``None`` (embeddings off), ``s_k`` is treated
     as a constant → weights reduce to pure popularity-weighted CRP.
 
+    ``day_types`` gives the day type label (e.g. "weekday"/"weekend"/"emergency")
+    for each of the ``days`` simulated days; a day only draws from the bank
+    diaries tagged with the matching label.
+
     Returns ``(diary_arrays, chosen, info)`` where ``chosen[agent, day]`` is the
     global bank index of the diary that agent used that day, and ``info``
     carries the per-agent ``T_a``/``alpha_a``/similarity state used to make
@@ -169,14 +172,16 @@ def build_ddcrp_diary(
 
     # Day metadata.
     day_ts = np.empty(days, dtype=np.int64)
-    day_is_weekend = np.empty(days, dtype=bool)
     for d in range(days):
         day = pd.Timestamp(start_date) + pd.Timedelta(days=d)
         day_ts[d] = int(day.timestamp())
-        day_is_weekend[d] = day.dayofweek >= 5
 
-    weekday_idx = np.flatnonzero(~bank.is_weekend)
-    weekend_idx = np.flatnonzero(bank.is_weekend)
+    type_idx: dict[str, np.ndarray] = {
+        t: np.flatnonzero(bank.day_type == t) for t in set(day_types)
+    }
+    for t, idx in type_idx.items():
+        if idx.size == 0:
+            raise ValueError(f"diary bank has no diaries for day type {t!r}")
 
     # Pre-compute per-agent profile↔diary similarities [n_agents, K].
     # Falls back to zeros (constant) when embeddings are unavailable.
@@ -209,8 +214,7 @@ def build_ddcrp_diary(
         agent_chosen = np.empty(days, dtype=np.int64)
 
         for d in range(days):
-            is_we = bool(day_is_weekend[d])
-            candidates = weekend_idx if is_we else weekday_idx
+            candidates = type_idx[day_types[d]]
             sims_k = agent_sims[candidates]
             counts_k = usage_counts[candidates]
             effective_counts = np.where(counts_k > 0, counts_k, alpha_a)

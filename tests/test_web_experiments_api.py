@@ -150,6 +150,7 @@ def test_charts_endpoint_allows_missing_observed_path(monkeypatch, tmp_path):
         run=lambda run_id=None: selected,
         road_nodes_path=None,
         road_edges_path=None,
+        special_days=[],
     )
     monkeypatch.setattr(charts_mod, "get_experiment", lambda exp_id: experiment)
 
@@ -160,6 +161,7 @@ def test_charts_endpoint_allows_missing_observed_path(monkeypatch, tmp_path):
         synthetic_activities_path=None,
         road_nodes_path=None,
         road_edges_path=None,
+        special_days=None,
     ):
         assert observed_path is None
         return {

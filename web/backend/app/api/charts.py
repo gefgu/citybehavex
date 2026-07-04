@@ -56,6 +56,7 @@ def get_charts(
             synthetic_activities_path=str(selected.activities_path),
             road_nodes_path=str(road_nodes_path) if road_nodes_path is not None else None,
             road_edges_path=str(road_edges_path) if road_edges_path is not None else None,
+            special_days=experiment.special_days,
         ),
         refresh=refresh,
         extra_paths=tuple(
