@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import numpy as np
 import pandas as pd
+import h3
 
 import citybehavex._core as core
 from citybehavex.activities import (
@@ -14,7 +15,11 @@ from citybehavex.profiles import generate_profiles
 from citybehavex.profiles.config import AgentProfilesConfig
 from citybehavex.simulation.core import simulate_agents
 from citybehavex.simulation.core import build_social_graph_artifact
-from citybehavex.simulation.runner import _append_home_anchors
+from citybehavex.simulation.runner import (
+    _append_home_anchors,
+    _append_work_scores,
+    _derive_home_anchor_candidates_from_tessellation,
+)
 
 _SLOT = 900
 _SPEED = 50.0
@@ -585,6 +590,130 @@ def test_home_anchors_are_appended_and_profiles_use_only_home_pool(tmp_path):
     )
     assert {p.home_tile for p in profiles}.issubset(set(home_pool.tolist()))
     assert {p.work_tile for p in profiles}.issubset({0, 1})
+
+
+def test_poi_building_work_scores_favor_high_poi_and_building_cells(tmp_path):
+    resolution = 8
+    low_lat, low_lng = 48.8566, 2.3522
+    high_lat, high_lng = 48.92, 2.48
+    high_cell = h3.latlng_to_cell(high_lat, high_lng, resolution)
+    building_path = tmp_path / "buildings.parquet"
+    pd.DataFrame({"h3_cell": [high_cell], "building_count": [25]}).to_parquet(building_path, index=False)
+    tess = pd.DataFrame(
+        {
+            "tile_id": ["low", "high"],
+            "lat": [low_lat, high_lat],
+            "lng": [low_lng, high_lng],
+            "purpose": ["OTHER", "WORK"],
+            "relevance": [1.0, 10.0],
+        }
+    )
+    config = CityBehavExConfig.model_validate(
+        {
+            "tessellation": {"resolution": resolution},
+            "profiles": {
+                "enabled": True,
+                "overture_building_features_path": str(building_path),
+            },
+            "road_network": {"enabled": False},
+        }
+    )
+
+    enriched, relevance_column = _append_work_scores(config, tess, "relevance")
+
+    assert relevance_column == "work_score"
+    assert "building_count" in enriched.columns
+    assert enriched.loc[1, "building_count"] == 25
+    assert enriched.loc[1, "work_score"] > enriched.loc[0, "work_score"]
+
+
+def test_legacy_poi_location_inference_preserves_relevance_work_weights(tmp_path):
+    resolution = 8
+    building_path = tmp_path / "buildings.parquet"
+    pd.DataFrame({"h3_cell": ["unused"], "building_count": [99]}).to_parquet(building_path, index=False)
+    tess = pd.DataFrame(
+        {
+            "tile_id": ["a", "b"],
+            "lat": [48.8566, 48.92],
+            "lng": [2.3522, 2.48],
+            "relevance": [1.0, 10.0],
+        }
+    )
+    config = CityBehavExConfig.model_validate(
+        {
+            "tessellation": {"resolution": resolution},
+            "profiles": {
+                "enabled": True,
+                "location_inference_method": "legacy_poi",
+                "overture_building_features_path": str(building_path),
+            },
+            "road_network": {"enabled": False},
+        }
+    )
+
+    enriched, relevance_column = _append_work_scores(config, tess, "relevance")
+
+    assert relevance_column == "relevance"
+    assert "work_score" not in enriched.columns
+    assert "building_count" not in enriched.columns
+
+
+def test_poi_building_home_anchors_use_cached_buildings(tmp_path):
+    resolution = 8
+    min_lng, min_lat, max_lng, max_lat = 2.30, 48.82, 2.53, 48.95
+    boundary = h3.LatLngPoly(
+        [
+            (min_lat, min_lng),
+            (min_lat, max_lng),
+            (max_lat, max_lng),
+            (max_lat, min_lng),
+        ]
+    )
+    cells = sorted(h3.polygon_to_cells(boundary, resolution))
+    building_cell = cells[len(cells) // 2]
+    poi_cell = cells[0] if cells[0] != building_cell else cells[-1]
+    building_lat, building_lng = h3.cell_to_latlng(building_cell)
+    poi_lat, poi_lng = h3.cell_to_latlng(poi_cell)
+    building_path = tmp_path / "buildings.parquet"
+    pd.DataFrame({"h3_cell": [building_cell], "building_count": [100]}).to_parquet(building_path, index=False)
+    tess = pd.DataFrame(
+        {
+            "tile_id": ["poi_dense", "residential_like"],
+            "lat": [poi_lat, building_lat],
+            "lng": [poi_lng, building_lng],
+            "relevance": [100.0, 0.0],
+        }
+    )
+    config = CityBehavExConfig.model_validate(
+        {
+            "simulation": {
+                "agents": 200,
+                "random_state": 11,
+                "min_lon": min_lng,
+                "min_lat": min_lat,
+                "max_lon": max_lng,
+                "max_lat": max_lat,
+            },
+            "tessellation": {"resolution": resolution},
+            "profiles": {
+                "enabled": True,
+                "home_anchor_h3_resolution": resolution,
+                "home_poi_inverse_weight": 0.0,
+                "overture_building_features_path": str(building_path),
+            },
+            "road_network": {"enabled": False},
+        }
+    )
+
+    anchors = _derive_home_anchor_candidates_from_tessellation(config, tess, "relevance", 200)
+    anchor_cells = pd.Series(
+        h3.latlng_to_cell(lat, lng, resolution)
+        for lat, lng in zip(anchors["lat"], anchors["lng"])
+    )
+
+    assert len(anchors) == 200
+    assert anchor_cells.value_counts().idxmax() == building_cell
+    assert (anchor_cells == building_cell).sum() > (anchor_cells == poi_cell).sum()
 
 
 def test_activity_column_absent_when_disabled():

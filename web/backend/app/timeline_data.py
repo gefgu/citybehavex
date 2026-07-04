@@ -268,6 +268,29 @@ def _attach_waypoints(segments: list[dict[str, Any]], moving_path: Path) -> None
             s["waypoints"] = waypoints_by_key.get((s["uid"], s["stop_id"]))
 
 
+def query_agent_crp(crp_path: Path, uid: int) -> list[dict[str, Any]]:
+    """One row per bank diary for ``uid``: ddCRP usage/similarity/params.
+
+    ``crp_path`` is the ``*_crp.parquet`` sidecar written by
+    ``citybehavex.simulation.runner._save_crp_artifact`` (long form: one row
+    per agent x bank diary). ``T_a``/``alpha_a`` are repeated on every row for
+    the agent, so callers don't need a second query to fetch them.
+    """
+    con = duckdb.connect()
+    try:
+        rows = con.execute(
+            f"""SELECT diary_id, is_weekend, sim, usage_count, T_a, alpha_a
+                FROM read_parquet('{quote_path(crp_path)}')
+                WHERE agent = $uid
+                ORDER BY usage_count DESC""",
+            {"uid": uid},
+        ).fetchall()
+        cols = [d[0] for d in con.description]
+    finally:
+        con.close()
+    return [dict(zip(cols, r)) for r in rows]
+
+
 def query_agent_trips(trajectory_path: Path, uid: int) -> list[dict[str, Any]]:
     con = duckdb.connect()
     try:

@@ -74,6 +74,8 @@ activities:
 profiles:
   enabled: true
   output: data/yjmob/yjmob_agent_profiles.parquet
+  overture_feature_h3_resolution: 9
+  overture_building_features_output: data/yjmob/yjmob_overture_buildings_h3r9.parquet
 comparison:
   path: data/yjmob/yjmob_wgs84_simple.parquet
   label: yjmob100k
