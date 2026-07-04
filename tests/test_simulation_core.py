@@ -9,8 +9,12 @@ from citybehavex.activities import (
     activity_duration_arrays,
     build_eligibility_csr,
 )
+from citybehavex.config.root import CityBehavExConfig
+from citybehavex.profiles import generate_profiles
+from citybehavex.profiles.config import AgentProfilesConfig
 from citybehavex.simulation.core import simulate_agents
 from citybehavex.simulation.core import build_social_graph_artifact
+from citybehavex.simulation.runner import _append_home_anchors
 
 _SLOT = 900
 _SPEED = 50.0
@@ -285,11 +289,9 @@ def test_same_physical_location_still_samples_multiple_activities():
     act_agent, act_stop_id, act_seq, act_activity, act_arrival, act_departure = (
         np.asarray(a) for a in acts
     )
-    # One activity per abstract-location-change event: the initial bootstrap
-    # plus the three diary moves (0 -> 1 -> 2 -> 0), all landing on tile 0.
-    assert len(act_agent) == 4
+    assert len(act_agent) >= 4
     assert (act_stop_id == 0).all()
-    assert list(act_seq) == [0, 1, 2, 3]
+    assert list(act_seq) == list(range(len(act_seq)))
     assert (act_activity >= 0).all()
     assert (act_activity < N_ACTIVITIES).all()
     # Contiguous, non-overlapping, covering the whole simulated window.
@@ -297,6 +299,9 @@ def test_same_physical_location_still_samples_multiple_activities():
     assert act_departure[-1] == 86400
     assert list(act_arrival[1:]) == list(act_departure[:-1])
     assert (act_departure >= act_arrival).all()
+    assert 8 * 3600 in set(act_arrival)
+    assert 12 * 3600 in set(act_arrival)
+    assert 18 * 3600 in set(act_arrival)
 
 
 def test_simulate_agents_returns_trip_columns():
@@ -502,6 +507,86 @@ def test_activity_column_present_when_enabled():
     assert set(activities["stop_id"]).issubset(set(range(len(df))))
 
 
+def test_activities_chain_until_macro_departure_deadline():
+    lats = [48.8566, 48.8566]
+    lngs = [2.3522, 2.3522]
+    slot_times = [0, 7 * 3600, 12 * 3600]
+    abs_locs = [0, 1, 0]
+    ten_min_hours = 10 / 60
+    act_dur_mu = np.log(np.array([ten_min_hours, ten_min_hours, ten_min_hours], dtype=np.float64))
+    act_dur_sigma = np.zeros(3, dtype=np.float64)
+    purpose_act_starts = np.array([0, 1, 2, 3], dtype=np.int64)
+    purpose_acts = np.array([0, 1, 2], dtype=np.int64)
+
+    trip, _, acts = _run(
+        lats,
+        lngs,
+        abs_locs,
+        slot_times,
+        end_ts=14 * 3600,
+        rho=1.0,
+        gamma=0.0,
+        act_dur_mu=act_dur_mu,
+        act_dur_sigma=act_dur_sigma,
+        purpose_act_starts=purpose_act_starts,
+        purpose_acts=purpose_acts,
+    )
+
+    _, _, _, arr, dep, dur, *_ = (np.asarray(a) for a in trip)
+    assert len(arr) == 3
+    assert dep[0] == 7 * 3600 - 900
+    assert arr[1] == 7 * 3600 - 900
+    assert dur[1] == 0
+
+    act_agent, act_stop_id, act_seq, act_activity, act_arrival, act_departure = (
+        np.asarray(a) for a in acts
+    )
+    first_stop = act_stop_id == 0
+    assert first_stop.sum() > 1
+    assert act_arrival[first_stop][0] == 0
+    assert act_departure[first_stop][-1] == 7 * 3600 - 900
+    assert list(act_arrival[first_stop][1:]) == list(act_departure[first_stop][:-1])
+    assert act_departure[first_stop][-1] - act_arrival[first_stop][-1] == 5 * 60
+
+
+def test_home_anchors_are_appended_and_profiles_use_only_home_pool(tmp_path):
+    anchor_path = tmp_path / "home_anchors.parquet"
+    pd.DataFrame({"lat": [48.1, 48.2, 48.3], "lng": [2.1, 2.2, 2.3]}).to_parquet(anchor_path, index=False)
+    tess = pd.DataFrame(
+        {
+            "tile_id": ["poi_1", "poi_2"],
+            "lat": [48.8, 48.9],
+            "lng": [2.3, 2.4],
+            "category": ["restaurant", "corporate_office"],
+            "purpose": ["OTHER", "WORK"],
+            "relevance": [10.0, 20.0],
+        }
+    )
+    config = CityBehavExConfig.model_validate(
+        {
+            "simulation": {"agents": 3, "random_state": 7},
+            "profiles": {"enabled": True, "home_anchors_path": str(anchor_path)},
+            "road_network": {"enabled": False},
+        }
+    )
+
+    augmented, home_pool = _append_home_anchors(config, tess, "relevance")
+    assert home_pool.tolist() == [2, 3, 4]
+    assert augmented.loc[home_pool, "category"].tolist() == ["residential"] * 3
+    assert augmented.loc[home_pool, "purpose"].tolist() == ["HOME"] * 3
+
+    profiles = generate_profiles(
+        20,
+        AgentProfilesConfig(enabled=True),
+        np.random.default_rng(3),
+        augmented,
+        "relevance",
+        home_tile_pool=home_pool,
+    )
+    assert {p.home_tile for p in profiles}.issubset(set(home_pool.tolist()))
+    assert {p.work_tile for p in profiles}.issubset({0, 1})
+
+
 def test_activity_column_absent_when_disabled():
     """Without activity params, no activities are sampled -> empty table."""
     tess = pd.DataFrame({
@@ -560,3 +645,92 @@ def test_activities_catalog_coverage():
     for p in range(3):
         n_eligible = int(purpose_act_starts[p + 1] - purpose_act_starts[p])
         assert n_eligible > 0, f"Purpose {p} has no eligible activities"
+
+
+def _run_multi_agent_multi_day(*, on_day_flush=None):
+    """2 agents alternating HOME/WORK/OTHER across 3 simulated days -- enough
+    relocations (and day boundaries) to exercise the per-day waypoint flush."""
+    lats = [48.8566, 48.9000, 48.9500]
+    lngs = [2.3522, 2.4000, 2.4500]
+    n_agents = 2
+
+    def diary_for_agent(offset):
+        slots, locs = [], []
+        for d in range(3):
+            base = d * 86400
+            slots += [base + offset, base + 8 * 3600 + offset, base + 18 * 3600 + offset]
+            locs += [0, 1, 2]
+        return locs, slots
+
+    diary_ts: list[int] = []
+    diary_loc: list[int] = []
+    starts: list[int] = []
+    ends: list[int] = []
+    for agent in range(n_agents):
+        locs, slots = diary_for_agent(agent * 60)
+        starts.append(len(diary_ts))
+        diary_ts.extend(slots)
+        diary_loc.extend(locs)
+        ends.append(len(diary_ts))
+
+    return core.simulation_core_simulate_agents(
+        latitudes=np.asarray(lats, dtype=float),
+        longitudes=np.asarray(lngs, dtype=float),
+        relevances=np.ones(len(lats), dtype=float),
+        distances=np.empty(0, dtype=np.float64),
+        neighbor_starts=np.zeros(n_agents + 1, dtype=np.int64),
+        neighbors=np.empty(0, dtype=np.int64),
+        diary_timestamps=np.asarray(diary_ts, dtype=np.int64),
+        diary_abs_locs=np.asarray(diary_loc, dtype=np.int32),
+        diary_starts=np.asarray(starts, dtype=np.int64),
+        diary_ends=np.asarray(ends, dtype=np.int64),
+        rho=1.0,
+        gamma=0.21,
+        alpha=0.0,
+        start_ts=0,
+        end_ts=3 * 86400,
+        indipendency_window_s=1800,
+        dt_update_mob_sim_s=3600,
+        slot_seconds=_SLOT,
+        car_speed_kmh=_SPEED,
+        n_agents=n_agents,
+        master_seed=42,
+        starting_locs=np.zeros(n_agents, dtype=np.int64),
+        starting_locs_mode_relevance=False,
+        work_tiles=np.ones(n_agents, dtype=np.int64),
+        on_day_flush=on_day_flush,
+    )
+
+
+def test_on_day_flush_none_matches_baseline_return_shape():
+    """The default (no callback) path must be unaffected by the new parameter."""
+    trip, paths, activities = _run_multi_agent_multi_day()
+    assert len(paths[0]) > 0  # sanity: this fixture does generate waypoints
+
+
+def test_on_day_flush_chunks_plus_tail_reproduce_the_no_callback_paths():
+    # `paths` is (stop_id, path_agent, path_stop_id, path_seq, path_lat,
+    # path_lng, path_t) -- `stop_id` belongs to the (unflushed, Phase 2 scope)
+    # stops table, so it must be identical regardless of streaming. The
+    # remaining 6 columns are RoadPathOutputBuffers itself -- what Phase 1
+    # flushes per day -- and are what the callback/tail reconstruction must match.
+    baseline_trip, baseline_paths, _ = _run_multi_agent_multi_day()
+
+    chunks: list[tuple] = []
+    _, streamed_paths, _ = _run_multi_agent_multi_day(
+        on_day_flush=lambda *arrays: chunks.append(tuple(np.asarray(a) for a in arrays))
+    )
+
+    # At least one mid-run flush must have happened, given 3 simulated days.
+    assert len(chunks) > 0
+
+    assert np.array_equal(np.asarray(baseline_paths[0]), np.asarray(streamed_paths[0]))
+
+    streamed_columns = [np.asarray(col) for col in streamed_paths[1:]]
+    reconstructed = [
+        np.concatenate([chunk[col_idx] for chunk in chunks] + [streamed_columns[col_idx]])
+        for col_idx in range(len(streamed_columns))
+    ]
+
+    for baseline_col, reconstructed_col in zip(baseline_paths[1:], reconstructed):
+        assert np.array_equal(np.asarray(baseline_col), reconstructed_col)

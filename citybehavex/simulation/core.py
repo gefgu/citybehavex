@@ -6,7 +6,7 @@ import json
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 import numpy as np
 import pandas as pd
@@ -140,6 +140,30 @@ def build_social_graph_artifact(
     )
 
 
+def _build_moving_frame(
+    path_agent: np.ndarray,
+    path_stop_id: np.ndarray,
+    path_seq: np.ndarray,
+    path_lat: np.ndarray,
+    path_lng: np.ndarray,
+    path_t: np.ndarray,
+) -> pd.DataFrame:
+    """Build the one-row-per-waypoint `moving` frame from the raw arrays the
+    Rust core returns -- shared by the final one-shot build and the per-day
+    streaming callback so both produce identically-shaped chunks."""
+    path_t_arr = np.asarray(path_t, dtype=np.int64)
+    return pd.DataFrame(
+        {
+            "uid": np.asarray(path_agent, dtype=np.int64),
+            "stop_id": np.asarray(path_stop_id, dtype=np.int64),
+            "seq": np.asarray(path_seq, dtype=np.int32),
+            "lat": np.asarray(path_lat, dtype=float),
+            "lng": np.asarray(path_lng, dtype=float),
+            "t": path_t_arr.astype("datetime64[s]"),
+        }
+    )
+
+
 def simulate_agents(
     tessellation_df: pd.DataFrame,
     relevance_column: str | None,
@@ -158,6 +182,9 @@ def simulate_agents(
     profile_graph_exact_threshold: int = 10_000,
     dt_update_mob_sim_hours: float = 24 * 7,
     indipendency_window_hours: float = 0.5,
+    gravity_deterrence_exponent: float = -2.0,
+    gravity_origin_exponent: float = 1.0,
+    gravity_destination_exponent: float = 1.0,
     rsl: bool = False,
     timing: CoreTiming | None = None,
     starting_locs: np.ndarray | None = None,
@@ -179,6 +206,7 @@ def simulate_agents(
     max_leg_waypoints: int = 16,
     return_social_graph: bool = False,
     social_node_profiles: list[str] | None = None,
+    on_day_flush: Callable[[pd.DataFrame], None] | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame] | tuple[
     pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame, SocialGraphArtifact
 ]:
@@ -299,6 +327,12 @@ def simulate_agents(
                 dtype=np.float64,
             )
 
+    rust_on_day_flush = None
+    if on_day_flush is not None:
+
+        def rust_on_day_flush(agent, dest_stop_id, seq, lat, lng, t):
+            on_day_flush(_build_moving_frame(agent, dest_stop_id, seq, lat, lng, t))
+
     start = time.perf_counter()
     (
         (
@@ -354,6 +388,10 @@ def simulate_agents(
         r_node_lngs,
         r_location_node,
         int(max_leg_waypoints),
+        float(gravity_deterrence_exponent),
+        float(gravity_origin_exponent),
+        float(gravity_destination_exponent),
+        rust_on_day_flush,
     )
     elapsed = time.perf_counter() - start
     if timing is not None:
@@ -395,17 +433,7 @@ def simulate_agents(
         }
     )
 
-    path_t_arr = np.asarray(path_t, dtype=np.int64)
-    moving = pd.DataFrame(
-        {
-            "uid": np.asarray(path_agent, dtype=np.int64),
-            "stop_id": np.asarray(path_stop_id, dtype=np.int64),
-            "seq": np.asarray(path_seq, dtype=np.int32),
-            "lat": np.asarray(path_lat, dtype=float),
-            "lng": np.asarray(path_lng, dtype=float),
-            "t": path_t_arr.astype("datetime64[s]"),
-        }
-    )
+    moving = _build_moving_frame(path_agent, path_stop_id, path_seq, path_lat, path_lng, path_t)
 
     act_arrival_arr = np.asarray(act_arrival, dtype=np.int64)
     act_departure_arr = np.asarray(act_departure, dtype=np.int64)

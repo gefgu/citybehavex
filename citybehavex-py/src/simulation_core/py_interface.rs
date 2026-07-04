@@ -7,6 +7,7 @@ use crate::simulation_core::inputs::{
     ActivityInputs, CoreInputs, DiaryInputs, InitialLocationInputs, LocationInputs,
     RoadNetworkInputs, SimulationParams, SocialGraphInputs,
 };
+use crate::simulation_core::outputs::RoadPathOutputBuffers;
 
 /// Borrowed slice from an optional numpy array, or an empty slice when absent.
 fn opt_slice<'a, T: numpy::Element>(v: &'a Option<PyReadonlyArray1<'_, T>>) -> PyResult<&'a [T]> {
@@ -54,7 +55,10 @@ fn opt_i64_as_usize_vec(v: &Option<PyReadonlyArray1<'_, i64>>) -> PyResult<Optio
     profile_act_sims=None,
     road_edge_from=None, road_edge_to=None, road_edge_weight_ds=None,
     road_node_lats=None, road_node_lngs=None, location_road_node=None,
-    max_leg_waypoints=16usize
+    max_leg_waypoints=16usize,
+    gravity_deterrence_exponent=-2.0f64, gravity_origin_exponent=1.0f64,
+    gravity_destination_exponent=1.0f64,
+    on_day_flush=None
 ))]
 pub fn simulation_core_simulate_agents<'py>(
     py: Python<'py>,
@@ -100,6 +104,10 @@ pub fn simulation_core_simulate_agents<'py>(
     road_node_lngs: Option<PyReadonlyArray1<'py, f64>>,
     location_road_node: Option<PyReadonlyArray1<'py, i64>>,
     max_leg_waypoints: usize,
+    gravity_deterrence_exponent: f64,
+    gravity_origin_exponent: f64,
+    gravity_destination_exponent: f64,
+    on_day_flush: Option<Py<PyAny>>,
 ) -> PyResult<(
     (
         Bound<'py, PyArray1<i64>>,
@@ -171,6 +179,28 @@ pub fn simulation_core_simulate_agents<'py>(
     let road_node_lngs_s = opt_slice(&road_node_lngs)?;
     let location_road_node_s = opt_slice(&location_road_node)?;
 
+    // Marshal one day's worth of closed waypoint rows to the Python callback
+    // (if given) as numpy arrays, in the same column order as the final
+    // `path_*` return tuple below, so callers can share one DataFrame-
+    // building helper for both the streamed chunks and the final tail.
+    let mut on_day_flush_closure = on_day_flush.map(|callback| {
+        move |chunk: RoadPathOutputBuffers| -> Result<(), String> {
+            let agent = chunk.agent.into_pyarray(py);
+            let dest_stop_id = chunk.dest_stop_id.into_pyarray(py);
+            let seq = chunk.seq.into_pyarray(py);
+            let lat = chunk.lat.into_pyarray(py);
+            let lng = chunk.lng.into_pyarray(py);
+            let t = chunk.t.into_pyarray(py);
+            callback
+                .call1(py, (agent, dest_stop_id, seq, lat, lng, t))
+                .map(|_| ())
+                .map_err(|e| e.to_string())
+        }
+    });
+    let on_day_flush_ref = on_day_flush_closure
+        .as_mut()
+        .map(|f| f as &mut dyn FnMut(RoadPathOutputBuffers) -> Result<(), String>);
+
     let output = simulate(CoreInputs {
         locations: LocationInputs {
             lats,
@@ -193,6 +223,9 @@ pub fn simulation_core_simulate_agents<'py>(
             rho,
             gamma,
             alpha,
+            gravity_deterrence_exponent,
+            gravity_origin_exponent,
+            gravity_destination_exponent,
             start_ts,
             end_ts,
             indipendency_window_s,
@@ -228,7 +261,7 @@ pub fn simulation_core_simulate_agents<'py>(
             location_node: location_road_node_s,
             max_leg_waypoints,
         },
-    })
+    }, on_day_flush_ref)
     .map_err(PyValueError::new_err)?;
 
     Ok((

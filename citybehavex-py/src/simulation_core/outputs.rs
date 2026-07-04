@@ -127,6 +127,15 @@ pub(crate) struct RoadPathOutputBuffers {
 }
 
 impl RoadPathOutputBuffers {
+    /// Take everything accumulated so far, leaving an empty buffer behind.
+    /// Waypoint rows are never patched after being pushed (unlike stop/
+    /// activity rows, which track an "open" row per agent for later
+    /// departure-patching), so a day-boundary flush can safely drain the
+    /// whole buffer with no risk of losing an in-progress row.
+    pub(crate) fn take_day_chunk(&mut self) -> RoadPathOutputBuffers {
+        std::mem::take(self)
+    }
+
     pub(crate) fn push_leg(
         &mut self,
         agent: i64,

@@ -28,6 +28,8 @@ struct RoadRuntime<'a> {
     inputs: &'a RoadNetworkInputs<'a>,
 }
 
+const MACRO_DEPARTURE_BUFFER_S: i64 = 900;
+
 #[derive(Default)]
 struct FallbackCounts {
     unsnapped: i64,
@@ -37,23 +39,13 @@ struct FallbackCounts {
 struct TripAppendContext<'a> {
     agent_idx: usize,
     next_loc: usize,
-    ts: i64,
     /// Diary abstract-location code that triggered this relocation (0=HOME,
     /// 1=WORK, 2+=OTHER); recorded on the new stop so purpose can be read
     /// directly off it instead of re-derived from arrival timestamps.
     abstract_loc: i32,
     lats: &'a [f64],
     lngs: &'a [f64],
-    car_speed_kmh: f64,
-    slot_seconds: i64,
-    pending_departure: i64,
-    /// Arrival of the most recent event in this agent's timeline — the
-    /// currently-open stop's arrival when activities are disabled, or the
-    /// currently-open micro-activity's arrival when enabled (which can be
-    /// later than the stop's own arrival once a stop has had more than one
-    /// activity sampled into it). Used as the lower clamp bound so a new
-    /// event can never be resolved to start before the previous one did.
-    prev_arrival: i64,
+    departure: i64,
     max_leg_waypoints: usize,
 }
 
@@ -167,13 +159,7 @@ fn push_stop_record(
     agents: &mut [AgentState],
 ) -> (i64, i64, i64) {
     let prev_idx = output.last_output_idx[ctx.agent_idx];
-    let departure = resolve_departure(
-        ctx.pending_departure,
-        ctx.prev_arrival,
-        ctx.ts,
-        ctx.slot_seconds,
-        dur_s,
-    );
+    let departure = ctx.departure.max(output.arrival[prev_idx]);
     let arrival = departure + dur_s;
     output.departure[prev_idx] = departure;
 
@@ -232,26 +218,17 @@ fn push_path_waypoints(
 /// (and thus when its first micro-activity, if any, starts).
 fn append_trip_record(
     ctx: TripAppendContext<'_>,
+    dur_s: i64,
+    wp_lats: &[f64],
+    wp_lngs: &[f64],
+    wp_cum_ds: &[i64],
     output: &mut TripOutputBuffers,
     agents: &mut [AgentState],
-    road: Option<&mut RoadRuntime<'_>>,
     paths: &mut RoadPathOutputBuffers,
-    fallback: &mut FallbackCounts,
 ) -> (i64, i64) {
-    let cur_loc = agents[ctx.agent_idx].current_location;
-    let (dur_s, wp_lats, wp_lngs, wp_cum_ds) = route_leg(
-        cur_loc,
-        ctx.next_loc,
-        ctx.lats,
-        ctx.lngs,
-        ctx.car_speed_kmh,
-        road,
-        fallback,
-    );
-
     let (departure, arrival, stop_id) = push_stop_record(&ctx, dur_s, output, agents);
     push_path_waypoints(
-        &ctx, stop_id, departure, dur_s, &wp_lats, &wp_lngs, &wp_cum_ds, paths,
+        &ctx, stop_id, departure, dur_s, wp_lats, wp_lngs, wp_cum_ds, paths,
     );
 
     (departure, arrival)
@@ -367,16 +344,19 @@ fn validate_inputs(inputs: &CoreInputs<'_>) -> Result<usize, String> {
     Ok(n_locations)
 }
 
-fn build_od_rows<'a>(locations: &LocationInputs<'a>) -> Option<CachedGravityOdRows<'a>> {
+fn build_od_rows<'a>(
+    locations: &LocationInputs<'a>,
+    params: &SimulationParams,
+) -> Option<CachedGravityOdRows<'a>> {
     if locations.distances.is_empty() {
         Some(CachedGravityOdRows::new(
             locations.lats,
             locations.lngs,
             locations.relevances,
             "power_law",
-            -2.0,
-            1.0,
-            1.0,
+            params.gravity_deterrence_exponent,
+            params.gravity_origin_exponent,
+            params.gravity_destination_exponent,
         ))
     } else {
         None
@@ -460,22 +440,16 @@ fn sample_initial_activities(
     output: &TripOutputBuffers,
     activities: &mut ActivityOutputBuffers,
 ) {
-    for (i, data) in par_data.iter_mut().enumerate() {
-        let AgentParData {
-            activity_counts,
-            rng,
-            pending_departure,
-            activity_seq,
-            scratch,
-            ..
-        } = data;
-        let (act_idx, dur) =
-            sample_activity_and_duration(i, 0, activity_counts, rng, &inputs.activities, scratch);
-        let stop_id = output.stop_id[output.last_output_idx[i]];
-        let new_idx = activities.push(i, stop_id, 0, inputs.params.start_ts);
-        activities.activity[new_idx] = act_idx;
-        *pending_departure = inputs.params.start_ts + dur;
-        *activity_seq = 1;
+    for i in 0..par_data.len() {
+        start_activity_sample(
+            i,
+            0,
+            inputs.params.start_ts,
+            output,
+            par_data,
+            &inputs.activities,
+            activities,
+        );
     }
 }
 
@@ -580,21 +554,21 @@ fn collect_sorted_moves(
     commit_buf.sort_unstable_by_key(|&(ts, a, _, _)| (ts, a));
 }
 
-/// Samples and records the next micro-activity for a stop that just opened
-/// or advanced, patching the previous activity's departure to close it out.
+fn current_stop_abstract_loc(a: usize, output: &TripOutputBuffers) -> i32 {
+    output.abstract_loc[output.last_output_idx[a]]
+}
+
+/// Samples and opens the next micro-activity for the currently-open stop.
 #[allow(clippy::too_many_arguments)]
-fn record_activity_sample(
+fn start_activity_sample(
     a: usize,
     abstract_loc: i32,
-    departure: i64,
     arrival: i64,
     output: &TripOutputBuffers,
     par_data: &mut [AgentParData],
     activities_in: &ActivityInputs<'_>,
     activities: &mut ActivityOutputBuffers,
 ) {
-    activities.departure[activities.last_idx[a]] = departure;
-
     let current_stop_id = output.stop_id[output.last_output_idx[a]];
     let seq = par_data[a].activity_seq;
     par_data[a].activity_seq += 1;
@@ -616,6 +590,43 @@ fn record_activity_sample(
     let new_idx = activities.push(a, current_stop_id, seq, arrival);
     activities.activity[new_idx] = act_idx;
     *pending_departure = arrival + dur;
+}
+
+/// Close the currently-open micro-activity at `until`, sampling additional
+/// same-stop activities as needed. The last sampled activity is truncated when
+/// it would overrun `until`, so macro-schedule deadlines remain authoritative.
+fn fill_activities_until(
+    a: usize,
+    abstract_loc: i32,
+    until: i64,
+    output: &TripOutputBuffers,
+    par_data: &mut [AgentParData],
+    activities_in: &ActivityInputs<'_>,
+    activities: &mut ActivityOutputBuffers,
+) {
+    loop {
+        let last_idx = activities.last_idx[a];
+        let last_arrival = activities.arrival[last_idx];
+        let deadline = until.max(last_arrival);
+        let pending_departure = par_data[a].pending_departure;
+        if pending_departure <= 0 || pending_departure >= deadline {
+            activities.departure[last_idx] = deadline;
+            par_data[a].pending_departure = 0;
+            break;
+        }
+
+        let next_arrival = pending_departure.max(last_arrival);
+        activities.departure[last_idx] = next_arrival;
+        start_activity_sample(
+            a,
+            abstract_loc,
+            next_arrival,
+            output,
+            par_data,
+            activities_in,
+            activities,
+        );
+    }
 }
 
 /// Commits a single sorted move: either a real relocation (routes a trip,
@@ -650,13 +661,6 @@ fn commit_one_move(
         return;
     }
 
-    let pending_departure = if activities_on {
-        par_data[a].pending_departure
-    } else {
-        0
-    };
-    par_data[a].pending_departure = 0;
-
     // Lower clamp bound for the new departure/arrival: the currently open
     // micro-activity's arrival when activities are on (which may be later
     // than the stop's own arrival, if this stop already had other
@@ -667,7 +671,7 @@ fn commit_one_move(
         output.arrival[output.last_output_idx[a]]
     };
 
-    let (departure, arrival) = if is_new_location {
+    if is_new_location {
         let mut road_runtime = match (road_graph, road_calc.as_mut()) {
             (Some(g), Some(c)) => Some(RoadRuntime {
                 graph: g,
@@ -676,48 +680,79 @@ fn commit_one_move(
             }),
             _ => None,
         };
-        let (departure, arrival) = append_trip_record(
+        let (dur_s, wp_lats, wp_lngs, wp_cum_ds) = route_leg(
+            cur_loc,
+            loc,
+            inputs.locations.lats,
+            inputs.locations.lngs,
+            inputs.params.car_speed_kmh,
+            road_runtime.as_mut(),
+            fallback,
+        );
+        let departure = if activities_on {
+            let current_abs_loc = current_stop_abstract_loc(a, output);
+            let latest_departure = (ts - dur_s - MACRO_DEPARTURE_BUFFER_S).max(prev_arrival);
+            fill_activities_until(
+                a,
+                current_abs_loc,
+                latest_departure,
+                output,
+                par_data,
+                &inputs.activities,
+                activities,
+            );
+            latest_departure
+        } else {
+            resolve_departure(0, prev_arrival, ts, inputs.params.slot_seconds, dur_s)
+        };
+        let (_, arrival) = append_trip_record(
             TripAppendContext {
                 agent_idx: a,
                 next_loc: loc,
-                ts,
                 abstract_loc,
                 lats: inputs.locations.lats,
                 lngs: inputs.locations.lngs,
-                car_speed_kmh: inputs.params.car_speed_kmh,
-                slot_seconds: inputs.params.slot_seconds,
-                pending_departure,
-                prev_arrival,
+                departure,
                 max_leg_waypoints: inputs.road_network.max_leg_waypoints,
             },
+            dur_s,
+            &wp_lats,
+            &wp_lngs,
+            &wp_cum_ds,
             output,
             agents,
-            road_runtime.as_mut(),
             paths,
-            fallback,
         );
         par_data[a].activity_seq = 0;
-        (departure, arrival)
+        if activities_on {
+            start_activity_sample(
+                a,
+                abstract_loc,
+                arrival,
+                output,
+                par_data,
+                &inputs.activities,
+                activities,
+            );
+        }
     } else {
         // Same physical location: the stop stays open, no waypoint leg, no
-        // travel — the "departure" here is purely a boundary between two
-        // micro-activities within the same stay.
-        let departure = resolve_departure(
-            pending_departure,
-            prev_arrival,
-            ts,
-            inputs.params.slot_seconds,
-            0,
+        // travel. Fill activities under the old abstract purpose up to the
+        // macro boundary, then begin the new abstract purpose at exactly `ts`.
+        let current_abs_loc = current_stop_abstract_loc(a, output);
+        fill_activities_until(
+            a,
+            current_abs_loc,
+            ts.max(prev_arrival),
+            output,
+            par_data,
+            &inputs.activities,
+            activities,
         );
-        (departure, departure)
-    };
-
-    if activities_on {
-        record_activity_sample(
+        start_activity_sample(
             a,
             abstract_loc,
-            departure,
-            arrival,
+            ts.max(prev_arrival),
             output,
             par_data,
             &inputs.activities,
@@ -822,14 +857,17 @@ fn flatten_encounters(par_data: &[AgentParData]) -> (Vec<i64>, Vec<i64>, Vec<i64
     (enc_agent, enc_contact, enc_tile, enc_ts)
 }
 
-pub(crate) fn simulate(inputs: CoreInputs<'_>) -> Result<SimulationOutput, String> {
+pub(crate) fn simulate(
+    inputs: CoreInputs<'_>,
+    mut on_day_flush: Option<&mut dyn FnMut(RoadPathOutputBuffers) -> Result<(), String>>,
+) -> Result<SimulationOutput, String> {
     let n_locations = validate_inputs(&inputs)?;
     if inputs.params.n_agents == 0 {
         return Ok(SimulationOutput::empty());
     }
     let activities_on = inputs.activities.enabled();
     let master_seed = inputs.params.master_seed.unwrap_or_else(rand::random);
-    let od_rows = build_od_rows(&inputs.locations);
+    let od_rows = build_od_rows(&inputs.locations, &inputs.params);
 
     let mut agents = new_agent_states(inputs.params.n_agents, n_locations);
     let mut par_data = new_agent_par_data(&inputs, master_seed);
@@ -874,6 +912,12 @@ pub(crate) fn simulate(inputs: CoreInputs<'_>) -> Result<SimulationOutput, Strin
                 current_day,
                 day_start_instant.elapsed()
             );
+            if let Some(flush) = on_day_flush.as_deref_mut() {
+                let chunk = paths.take_day_chunk();
+                if !chunk.agent.is_empty() {
+                    flush(chunk)?;
+                }
+            }
             current_day = simulated_day;
             day_start_instant = std::time::Instant::now();
         }
