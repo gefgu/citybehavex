@@ -194,12 +194,36 @@ def _poi_counts_by_h3(
     return pd.DataFrame({"h3_cell": cells, "weight": weights}).groupby("h3_cell")["weight"].sum()
 
 
+def _jitter_h3_cell_centers(
+    sampled_cells: np.ndarray,
+    resolution: int,
+    rng: np.random.Generator,
+) -> pd.DataFrame:
+    centers = np.array([h3.cell_to_latlng(c) for c in sampled_cells])
+    edge_len_m = h3.average_hexagon_edge_length(resolution, unit="m")
+    lat_jitter_deg = 0.4 * edge_len_m / 111_320.0
+    lng_scale_m = 111_320.0 * np.cos(np.radians(centers[:, 0]))
+    lng_jitter_deg = 0.4 * edge_len_m / np.where(lng_scale_m > 0, lng_scale_m, 111_320.0)
+
+    lat = centers[:, 0].copy()
+    lng = centers[:, 1].copy()
+    for i, cell in enumerate(sampled_cells):
+        for _attempt in range(12):
+            candidate_lat = centers[i, 0] + rng.uniform(-lat_jitter_deg, lat_jitter_deg)
+            candidate_lng = centers[i, 1] + rng.uniform(-lng_jitter_deg[i], lng_jitter_deg[i])
+            if h3.latlng_to_cell(candidate_lat, candidate_lng, resolution) == cell:
+                lat[i] = candidate_lat
+                lng[i] = candidate_lng
+                break
+    return pd.DataFrame({"lat": lat, "lng": lng})
+
+
 def _append_work_scores(
     config: CityBehavExConfig,
     tessellation_df: pd.DataFrame,
     relevance_column: str,
 ) -> tuple[pd.DataFrame, str]:
-    if not config.profiles.enabled or config.profiles.location_inference_method == "legacy_poi":
+    if not config.profiles.enabled:
         return tessellation_df, relevance_column
     if not {"lat", _lng_column(tessellation_df)}.issubset(tessellation_df.columns):
         raise ValueError("POI + building work scoring requires tessellation lat/lng columns")
@@ -247,7 +271,9 @@ def _home_anchors_output_path(config: CityBehavExConfig) -> Path:
     if configured:
         return Path(configured)
     profile_out = Path(config.profiles.output)
-    return profile_out.with_name(f"{profile_out.stem}_home_anchors.parquet")
+    method = config.profiles.location_inference_method
+    resolution = config.profiles.home_anchor_h3_resolution
+    return profile_out.with_name(f"{profile_out.stem}_home_anchors_{method}_v3_h3r{resolution}.parquet")
 
 
 def _read_home_anchor_candidates(path: Path) -> pd.DataFrame:
@@ -318,16 +344,7 @@ def _derive_legacy_home_anchor_candidates_from_tessellation(
 
     rng = np.random.default_rng(config.simulation.random_state)
     sampled_cells = rng.choice(np.asarray(cells), size=limit, p=weights, replace=True)
-
-    centers = np.array([h3.cell_to_latlng(c) for c in sampled_cells])
-    edge_len_m = h3.average_hexagon_edge_length(resolution, unit="m")
-    lat_jitter_deg = edge_len_m / 111_320.0
-    lng_scale_m = 111_320.0 * np.cos(np.radians(centers[:, 0]))
-    lng_jitter_deg = edge_len_m / np.where(lng_scale_m > 0, lng_scale_m, 111_320.0)
-
-    lat = centers[:, 0] + rng.uniform(-lat_jitter_deg, lat_jitter_deg, size=limit)
-    lng = centers[:, 1] + rng.uniform(-lng_jitter_deg, lng_jitter_deg, size=limit)
-    return pd.DataFrame({"lat": lat, "lng": lng})
+    return _jitter_h3_cell_centers(sampled_cells, resolution, rng)
 
 
 def _derive_home_anchor_candidates_from_tessellation(
@@ -336,9 +353,6 @@ def _derive_home_anchor_candidates_from_tessellation(
     relevance_column: str,
     limit: int,
 ) -> pd.DataFrame:
-    if config.profiles.location_inference_method == "legacy_poi":
-        return _derive_legacy_home_anchor_candidates_from_tessellation(config, tessellation_df, limit)
-
     min_lon, min_lat, max_lon, max_lat = _resolve_spatial_bounds(config, tessellation_df)
     resolution = config.profiles.home_anchor_h3_resolution
     boundary = h3.LatLngPoly(
@@ -357,13 +371,21 @@ def _derive_home_anchor_candidates_from_tessellation(
     poi_counts = _poi_counts_by_h3(tessellation_df, resolution, base_column)
     buildings = _load_or_build_building_features(config, tessellation_df, resolution)
     building_counts = buildings.set_index("h3_cell")["building_count"]
+    cells = sorted(cell for cell in cells if float(building_counts.get(cell, 0.0)) > 0)
+    if not cells:
+        raise ValueError(
+            "POI + building HOME inference found no building cells inside the configured bbox; "
+            "provide a matching overture_building_features_path/cache or check the bbox/resolution"
+        )
 
     poi = np.array([poi_counts.get(cell, 0.0) for cell in cells], dtype=float)
     building = np.array([building_counts.get(cell, 0.0) for cell in cells], dtype=float)
+    poi_scaled = _minmax(poi)
+    building_scaled = _minmax(np.log1p(building))
     pc = config.profiles
-    weights = (
-        pc.home_building_weight * _minmax(building)
-        + pc.home_poi_inverse_weight * (1.0 - _minmax(poi))
+    weights = building_scaled * (
+        pc.home_building_weight
+        + pc.home_poi_inverse_weight * (1.0 - poi_scaled)
     )
     if float(weights.sum()) <= 0:
         weights = np.ones(len(cells), dtype=float)
@@ -371,17 +393,8 @@ def _derive_home_anchor_candidates_from_tessellation(
 
     rng = np.random.default_rng(config.simulation.random_state)
     sampled_cells = rng.choice(np.asarray(cells), size=limit, p=weights, replace=True)
-
-    centers = np.array([h3.cell_to_latlng(c) for c in sampled_cells])
-    edge_len_m = h3.average_hexagon_edge_length(resolution, unit="m")
-    lat_jitter_deg = edge_len_m / 111_320.0
-    lng_scale_m = 111_320.0 * np.cos(np.radians(centers[:, 0]))
-    lng_jitter_deg = edge_len_m / np.where(lng_scale_m > 0, lng_scale_m, 111_320.0)
-
-    lat = centers[:, 0] + rng.uniform(-lat_jitter_deg, lat_jitter_deg, size=limit)
-    lng = centers[:, 1] + rng.uniform(-lng_jitter_deg, lng_jitter_deg, size=limit)
     typer.echo("Derived residential HOME anchors from POI + Overture building scores")
-    return pd.DataFrame({"lat": lat, "lng": lng})
+    return _jitter_h3_cell_centers(sampled_cells, resolution, rng)
 
 
 def _load_or_build_home_anchor_candidates(
@@ -400,10 +413,7 @@ def _load_or_build_home_anchor_candidates(
         typer.echo(f"Loading cached residential HOME anchors from {out} ...")
         return _read_home_anchor_candidates(out)
 
-    if config.profiles.location_inference_method == "legacy_poi":
-        typer.echo("Deriving residential HOME anchors from tessellation POI density ...")
-    else:
-        typer.echo("Deriving residential HOME anchors from POI + Overture building scores ...")
+    typer.echo("Deriving residential HOME anchors from POI + Overture building scores ...")
     anchors = _derive_home_anchor_candidates_from_tessellation(
         config,
         tessellation_df,
