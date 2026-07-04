@@ -583,7 +583,7 @@ def test_home_anchors_are_appended_and_profiles_use_only_home_pool(tmp_path):
 
     profiles = generate_profiles(
         20,
-        AgentProfilesConfig(enabled=True),
+        AgentProfilesConfig(enabled=True, work_from_home_probability=0.0),
         np.random.default_rng(3),
         augmented,
         "relevance",
@@ -591,6 +591,219 @@ def test_home_anchors_are_appended_and_profiles_use_only_home_pool(tmp_path):
     )
     assert {p.home_tile for p in profiles}.issubset(set(home_pool.tolist()))
     assert {p.work_tile for p in profiles}.issubset({0, 1})
+
+
+def test_work_distance_model_none_preserves_relevance_weighted_sampling():
+    tess = pd.DataFrame(
+        {
+            "tile_id": ["near_work", "far_work", "home"],
+            "lat": [0.01, 0.50, 0.0],
+            "lng": [0.0, 0.0, 0.0],
+            "purpose": ["WORK", "WORK", "HOME"],
+            "relevance": [1.0, 100.0, 1.0],
+        }
+    )
+    config = AgentProfilesConfig(
+        enabled=True,
+        work_distance_model="none",
+        work_from_home_probability=1.0,
+    )
+
+    profiles = generate_profiles(
+        300,
+        config,
+        np.random.default_rng(6),
+        tess,
+        "relevance",
+        home_tile_pool=np.array([2]),
+    )
+    work_counts = pd.Series([p.work_tile for p in profiles]).value_counts()
+
+    assert work_counts.get(1, 0) > work_counts.get(0, 0) * 20
+    assert {p.home_tile for p in profiles} == {2}
+
+
+def test_conditional_work_sampling_excludes_home_rows_from_work_pool():
+    tess = pd.DataFrame(
+        {
+            "tile_id": ["work", "home_as_attractive", "home"],
+            "lat": [0.20, 0.0, 0.0],
+            "lng": [0.0, 0.0, 0.0],
+            "purpose": ["WORK", "HOME", "HOME"],
+            "relevance": [1.0, 100000.0, 1.0],
+        }
+    )
+    config = AgentProfilesConfig(enabled=True, work_from_home_probability=0.0)
+
+    profiles = generate_profiles(
+        50,
+        config,
+        np.random.default_rng(7),
+        tess,
+        "relevance",
+        home_tile_pool=np.array([2]),
+    )
+
+    assert {p.home_tile for p in profiles} == {2}
+    assert {p.work_tile for p in profiles} == {0}
+
+
+def test_conditional_work_sampling_expands_when_radius_has_no_candidates():
+    tess = pd.DataFrame(
+        {
+            "tile_id": ["far_work", "home"],
+            "lat": [1.0, 0.0],
+            "lng": [0.0, 0.0],
+            "purpose": ["WORK", "HOME"],
+            "relevance": [1.0, 1.0],
+        }
+    )
+    config = AgentProfilesConfig(
+        enabled=True,
+        work_distance_max_km=1.0,
+        work_distance_fallback="expand",
+        work_from_home_probability=0.0,
+    )
+
+    profiles = generate_profiles(
+        20,
+        config,
+        np.random.default_rng(8),
+        tess,
+        "relevance",
+        home_tile_pool=np.array([1]),
+    )
+
+    assert {p.work_tile for p in profiles} == {0}
+
+
+def test_work_from_home_probability_assigns_work_to_home_tile():
+    tess = pd.DataFrame(
+        {
+            "tile_id": ["work", "home"],
+            "lat": [0.20, 0.0],
+            "lng": [0.0, 0.0],
+            "purpose": ["WORK", "HOME"],
+            "relevance": [100.0, 1.0],
+        }
+    )
+    config = AgentProfilesConfig(enabled=True, work_from_home_probability=1.0)
+
+    profiles = generate_profiles(
+        30,
+        config,
+        np.random.default_rng(9),
+        tess,
+        "relevance",
+        home_tile_pool=np.array([1]),
+    )
+
+    assert {p.home_tile for p in profiles} == {1}
+    assert {p.work_tile for p in profiles} == {1}
+
+
+def test_exponential_work_distance_favors_nearer_candidates_monotonically():
+    tess = pd.DataFrame(
+        {
+            "tile_id": ["near_work", "mid_work", "far_work", "home"],
+            "lat": [0.01, 0.05, 0.20, 0.0],
+            "lng": [0.0, 0.0, 0.0, 0.0],
+            "purpose": ["WORK", "WORK", "WORK", "HOME"],
+            "relevance": [1.0, 1.0, 1.0, 1.0],
+        }
+    )
+    config = AgentProfilesConfig(
+        enabled=True,
+        work_distance_model="exponential",
+        work_distance_exponential_lambda=0.3,
+        work_distance_density_correction_power=0.0,
+        work_from_home_probability=0.0,
+    )
+
+    profiles = generate_profiles(
+        1000,
+        config,
+        np.random.default_rng(11),
+        tess,
+        "relevance",
+        home_tile_pool=np.array([3]),
+    )
+    counts = pd.Series([p.work_tile for p in profiles]).value_counts()
+
+    assert counts.get(0, 0) > counts.get(1, 0) > counts.get(2, 0)
+
+
+def test_density_correction_reduces_far_ring_selection():
+    tess = pd.DataFrame(
+        {
+            "tile_id": ["near_work", "far_work_1", "far_work_2", "far_work_3", "home"],
+            "lat": [0.01, 0.20, 0.20, 0.20, 0.0],
+            "lng": [0.0, 0.00, 0.01, -0.01, 0.0],
+            "purpose": ["WORK", "WORK", "WORK", "WORK", "HOME"],
+            "relevance": [1.0, 1.0, 1.0, 1.0, 1.0],
+        }
+    )
+    base_config = AgentProfilesConfig(
+        enabled=True,
+        work_distance_model="exponential",
+        work_distance_exponential_lambda=0.05,
+        work_distance_max_km=100.0,
+        work_distance_density_correction_power=0.0,
+        work_from_home_probability=0.0,
+    )
+    corrected_config = base_config.model_copy(update={"work_distance_density_correction_power": 1.0})
+
+    base_profiles = generate_profiles(
+        1200,
+        base_config,
+        np.random.default_rng(12),
+        tess,
+        "relevance",
+        home_tile_pool=np.array([4]),
+    )
+    corrected_profiles = generate_profiles(
+        1200,
+        corrected_config,
+        np.random.default_rng(12),
+        tess,
+        "relevance",
+        home_tile_pool=np.array([4]),
+    )
+    base_far_share = np.mean([p.work_tile in {1, 2, 3} for p in base_profiles])
+    corrected_far_share = np.mean([p.work_tile in {1, 2, 3} for p in corrected_profiles])
+
+    assert corrected_far_share < base_far_share * 0.5
+
+
+def test_log1p_attractiveness_keeps_local_work_competitive_with_far_megahub():
+    tess = pd.DataFrame(
+        {
+            "tile_id": ["near_work", "far_megahub", "home"],
+            "lat": [0.01, 0.10, 0.0],
+            "lng": [0.0, 0.0, 0.0],
+            "purpose": ["WORK", "WORK", "HOME"],
+            "relevance": [10.0, 10000.0, 1.0],
+        }
+    )
+    config = AgentProfilesConfig(
+        enabled=True,
+        work_distance_model="exponential",
+        work_distance_exponential_lambda=0.1,
+        work_distance_density_correction_power=1.0,
+        work_from_home_probability=0.0,
+    )
+
+    profiles = generate_profiles(
+        1000,
+        config,
+        np.random.default_rng(13),
+        tess,
+        "relevance",
+        home_tile_pool=np.array([2]),
+    )
+    work_counts = pd.Series([p.work_tile for p in profiles]).value_counts()
+
+    assert work_counts.get(0, 0) > work_counts.get(1, 0)
 
 
 def test_poi_building_work_scores_favor_high_poi_and_building_cells(tmp_path):

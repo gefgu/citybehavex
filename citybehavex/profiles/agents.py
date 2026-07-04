@@ -22,6 +22,8 @@ from pydantic import BaseModel, ConfigDict
 from citybehavex.math import sample_beta_scaled_ints, sample_multinomial_index, sample_weighted_indices
 from citybehavex.profiles.config import AgentProfilesConfig
 
+EARTH_RADIUS_KM = 6371.0088
+
 # ---------------------------------------------------------------------------
 # Category labels (ordered to match config weight lists)
 # ---------------------------------------------------------------------------
@@ -123,6 +125,92 @@ def profile_to_narrative(profile: AgentProfile) -> str:
 # ---------------------------------------------------------------------------
 
 
+def _haversine_km(
+    lat1: np.ndarray | float,
+    lng1: np.ndarray | float,
+    lat2: np.ndarray | float,
+    lng2: np.ndarray | float,
+) -> np.ndarray:
+    lat1_rad = np.radians(np.asarray(lat1, dtype=float))
+    lng1_rad = np.radians(np.asarray(lng1, dtype=float))
+    lat2_rad = np.radians(np.asarray(lat2, dtype=float))
+    lng2_rad = np.radians(np.asarray(lng2, dtype=float))
+    dlat = lat2_rad - lat1_rad
+    dlng = lng2_rad - lng1_rad
+    a = np.sin(dlat / 2) ** 2 + np.cos(lat1_rad) * np.cos(lat2_rad) * np.sin(dlng / 2) ** 2
+    return EARTH_RADIUS_KM * 2 * np.arcsin(np.sqrt(a))
+
+
+def _work_attractiveness_weights(work_weights: np.ndarray, config: AgentProfilesConfig) -> np.ndarray:
+    weights = np.asarray(work_weights, dtype=float)
+    return np.log1p(np.maximum(weights, 0.0))
+
+
+def _distance_friction_weights(dist_km: np.ndarray, config: AgentProfilesConfig) -> np.ndarray:
+    dist = np.asarray(dist_km, dtype=float)
+    friction = np.exp(-float(config.work_distance_exponential_lambda) * np.maximum(dist, 0.0))
+    correction_power = float(config.work_distance_density_correction_power)
+    if correction_power > 0:
+        correction_dist = np.maximum(dist, config.work_distance_min_km)
+        friction = friction / (correction_dist**correction_power)
+    return friction
+
+
+def _sample_conditional_work_tiles(
+    home_tiles: np.ndarray,
+    work_pool: np.ndarray,
+    rel_vals: np.ndarray,
+    tessellation_df: pd.DataFrame,
+    config: AgentProfilesConfig,
+    rng: np.random.Generator,
+) -> np.ndarray:
+    if config.work_distance_model == "none":
+        return work_pool[sample_weighted_indices(rel_vals[work_pool], len(home_tiles), rng)]
+
+    lng_col = "lng" if "lng" in tessellation_df.columns else "lon"
+    if "lat" not in tessellation_df.columns or lng_col not in tessellation_df.columns:
+        return work_pool[sample_weighted_indices(rel_vals[work_pool], len(home_tiles), rng)]
+
+    lat = pd.to_numeric(tessellation_df["lat"], errors="coerce").to_numpy(dtype=float)
+    lng = pd.to_numeric(tessellation_df[lng_col], errors="coerce").to_numpy(dtype=float)
+    work_lat = lat[work_pool]
+    work_lng = lng[work_pool]
+    base_work_weights = rel_vals[work_pool].astype(float, copy=False)
+    adjusted_work_weights = _work_attractiveness_weights(base_work_weights, config)
+    sampled = np.empty(len(home_tiles), dtype=np.int64)
+    global_fallback = work_pool[sample_weighted_indices(adjusted_work_weights, len(home_tiles), rng)]
+
+    for i, home_tile in enumerate(home_tiles):
+        if rng.random() < config.work_from_home_probability:
+            sampled[i] = home_tile
+            continue
+
+        home_lat = lat[home_tile]
+        home_lng = lng[home_tile]
+        if not np.isfinite(home_lat) or not np.isfinite(home_lng):
+            sampled[i] = global_fallback[i]
+            continue
+
+        dist_km = _haversine_km(home_lat, home_lng, work_lat, work_lng)
+        finite = np.isfinite(dist_km)
+        within = finite & (dist_km <= config.work_distance_max_km)
+        candidate_mask = within if within.any() else finite
+        if config.work_distance_fallback == "global" and not within.any():
+            sampled[i] = global_fallback[i]
+            continue
+
+        candidate_weights = adjusted_work_weights[candidate_mask] * _distance_friction_weights(
+            dist_km[candidate_mask],
+            config,
+        )
+        if candidate_weights.sum() <= 0:
+            sampled[i] = global_fallback[i]
+            continue
+        choice = sample_weighted_indices(candidate_weights, 1, rng)[0]
+        sampled[i] = work_pool[candidate_mask][choice]
+    return sampled
+
+
 def generate_profiles(
     n: int,
     config: AgentProfilesConfig,
@@ -167,8 +255,14 @@ def generate_profiles(
         home_tiles = rng.choice(pool, size=n, replace=len(pool) < n)
     else:
         home_tiles = rng.integers(0, n_tiles, size=n)
-    # Work tiles: relevance-weighted
-    work_tiles = work_pool[sample_weighted_indices(rel_vals[work_pool], n, rng)]
+    work_tiles = _sample_conditional_work_tiles(
+        home_tiles,
+        work_pool,
+        rel_vals,
+        tessellation_df,
+        config,
+        rng,
+    )
 
     # Gender
     genders = rng.integers(0, 2, size=n)  # 0=female, 1=male

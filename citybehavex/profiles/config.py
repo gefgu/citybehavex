@@ -26,6 +26,13 @@ class AgentProfilesConfig(BaseModel):
     home_building_weight: float = Field(default=1.0, ge=0)
     work_poi_weight: float = Field(default=0.75, ge=0)
     work_building_weight: float = Field(default=1.0, ge=0)
+    work_distance_model: Literal["exponential", "none"] = "exponential"
+    work_distance_exponential_lambda: float = Field(default=0.3, gt=0)
+    work_distance_max_km: float = Field(default=60.0, gt=0)
+    work_distance_min_km: float = Field(default=0.25, gt=0)
+    work_distance_fallback: Literal["expand", "global"] = "expand"
+    work_distance_density_correction_power: float = Field(default=1.0, ge=0.0)
+    work_from_home_probability: float = Field(default=0.05, ge=0.0, le=1.0)
 
     age_beta_a: float = Field(default=2.0, gt=0)
     age_beta_b: float = Field(default=5.0, gt=0)

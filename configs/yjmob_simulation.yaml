@@ -76,6 +76,17 @@ profiles:
   output: data/yjmob/yjmob_agent_profiles.parquet
   overture_feature_h3_resolution: 9
   overture_building_features_output: data/yjmob/yjmob_overture_buildings_h3r9.parquet
+  home_building_weight: 1.0
+  home_poi_inverse_weight: 0.5
+  work_building_weight: 1.0
+  work_poi_weight: 0.75
+  work_distance_model: exponential
+  work_distance_exponential_lambda: 0.3
+  work_distance_max_km: 60.0
+  work_distance_min_km: 0.25
+  work_distance_fallback: expand
+  work_distance_density_correction_power: 1.0
+  work_from_home_probability: 0.05
 comparison:
   path: data/yjmob/yjmob_wgs84_simple.parquet
   label: yjmob100k

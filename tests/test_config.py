@@ -64,6 +64,11 @@ def test_profiles_default_to_poi_building_location_inference():
     assert config.home_building_weight == 1.0
     assert config.work_poi_weight == 0.75
     assert config.work_building_weight == 1.0
+    assert config.work_distance_model == "exponential"
+    assert config.work_distance_exponential_lambda == 0.3
+    assert config.work_distance_max_km == 60.0
+    assert config.work_distance_density_correction_power == 1.0
+    assert config.work_from_home_probability == 0.05
 
 
 def test_simulation_config_rejects_tessellation_and_bbox():
