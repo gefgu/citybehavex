@@ -5,8 +5,11 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional
 
+import h3
 import numpy as np
 import pandas as pd
+import pyarrow as pa
+import pyarrow.parquet as pq
 import skmob2
 import typer
 from skmob2.models import DensityEPR
@@ -22,10 +25,157 @@ from citybehavex.simulation.core import CoreTiming, simulate_agents, social_netw
 from citybehavex.tessellation import build_poi_tessellation, build_tessellation, purpose_distribution
 
 
-def load_or_build_tessellation(config: CityBehavExConfig) -> tuple[pd.DataFrame, str]:
+def load_or_build_tessellation(config: CityBehavExConfig) -> tuple[pd.DataFrame, str, np.ndarray | None]:
     tessellation_df, relevance_column = _load_or_build_tessellation_df(config)
+    tessellation_df, home_tile_pool = _append_home_anchors(config, tessellation_df, relevance_column)
     tessellation_df = _maybe_snap_to_roads(config, tessellation_df)
-    return tessellation_df, relevance_column
+    return tessellation_df, relevance_column, home_tile_pool
+
+
+def _home_anchors_output_path(config: CityBehavExConfig) -> Path:
+    configured = config.profiles.home_anchors_output
+    if configured:
+        return Path(configured)
+    profile_out = Path(config.profiles.output)
+    return profile_out.with_name(f"{profile_out.stem}_home_anchors.parquet")
+
+
+def _read_home_anchor_candidates(path: Path) -> pd.DataFrame:
+    df = pd.read_parquet(path)
+    if {"lat", "lng"}.issubset(df.columns):
+        return df[["lat", "lng"]].copy()
+
+    if "geometry" in df.columns:
+        try:
+            import geopandas as gpd
+
+            gdf = gpd.read_parquet(path)
+            centroids = gdf.geometry.centroid
+            return pd.DataFrame({"lat": centroids.y, "lng": centroids.x})
+        except Exception as exc:  # noqa: BLE001
+            raise ValueError(f"could not extract home-anchor centroids from {path}") from exc
+
+    raise ValueError(f"home anchors at {path} must have lat/lng or geometry columns")
+
+
+def _derive_home_anchor_candidates_from_tessellation(
+    config: CityBehavExConfig,
+    tessellation_df: pd.DataFrame,
+    limit: int,
+) -> pd.DataFrame:
+    """Approximate residential HOME anchors from the local POI tessellation.
+
+    There is no ground-truth "residential building" signal in the POI-derived
+    tessellation (Overture ``places`` only covers businesses/amenities), and
+    fetching Overture's ``buildings`` theme over the network for this is
+    prohibitively slow for a large metro bbox. Instead, tile the bbox with H3
+    cells and weight sampling toward cells with fewer nearby POIs, since dense
+    POI clusters are commercial/downtown cores while sparser cells are more
+    likely residential.
+    """
+    sim = config.simulation
+    tess = config.tessellation
+    min_lon = sim.min_lon if sim.min_lon is not None else tess.min_lon
+    min_lat = sim.min_lat if sim.min_lat is not None else tess.min_lat
+    max_lon = sim.max_lon if sim.max_lon is not None else tess.max_lon
+    max_lat = sim.max_lat if sim.max_lat is not None else tess.max_lat
+    lng_col = "lng" if "lng" in tessellation_df.columns else "lon"
+    if None in [min_lon, min_lat, max_lon, max_lat]:
+        min_lon, max_lon = float(tessellation_df[lng_col].min()), float(tessellation_df[lng_col].max())
+        min_lat, max_lat = float(tessellation_df["lat"].min()), float(tessellation_df["lat"].max())
+
+    resolution = config.profiles.home_anchor_h3_resolution
+    boundary = h3.LatLngPoly(
+        [
+            (min_lat, min_lon),
+            (min_lat, max_lon),
+            (max_lat, max_lon),
+            (max_lat, min_lon),
+        ]
+    )
+    cells = list(h3.polygon_to_cells(boundary, resolution))
+    if not cells:
+        raise ValueError("no H3 cells found for the configured bounding box")
+
+    poi_cells = [
+        h3.latlng_to_cell(lat, lng, resolution)
+        for lat, lng in zip(tessellation_df["lat"], tessellation_df[lng_col])
+    ]
+    poi_counts = pd.Series(poi_cells).value_counts()
+
+    weights = np.array([1.0 / (1.0 + poi_counts.get(cell, 0)) for cell in cells], dtype=float)
+    weights /= weights.sum()
+
+    rng = np.random.default_rng(config.simulation.random_state)
+    sampled_cells = rng.choice(np.asarray(cells), size=limit, p=weights, replace=True)
+
+    centers = np.array([h3.cell_to_latlng(c) for c in sampled_cells])
+    edge_len_m = h3.average_hexagon_edge_length(resolution, unit="m")
+    lat_jitter_deg = edge_len_m / 111_320.0
+    lng_scale_m = 111_320.0 * np.cos(np.radians(centers[:, 0]))
+    lng_jitter_deg = edge_len_m / np.where(lng_scale_m > 0, lng_scale_m, 111_320.0)
+
+    lat = centers[:, 0] + rng.uniform(-lat_jitter_deg, lat_jitter_deg, size=limit)
+    lng = centers[:, 1] + rng.uniform(-lng_jitter_deg, lng_jitter_deg, size=limit)
+    return pd.DataFrame({"lat": lat, "lng": lng})
+
+
+def _load_or_build_home_anchor_candidates(config: CityBehavExConfig, tessellation_df: pd.DataFrame) -> pd.DataFrame:
+    if config.profiles.home_anchors_path:
+        path = Path(config.profiles.home_anchors_path)
+        if path.exists():
+            typer.echo(f"Loading residential HOME anchors from {path} ...")
+            return _read_home_anchor_candidates(path)
+
+    out = _home_anchors_output_path(config)
+    if out.exists():
+        typer.echo(f"Loading cached residential HOME anchors from {out} ...")
+        return _read_home_anchor_candidates(out)
+
+    typer.echo("Deriving residential HOME anchors from tessellation POI density ...")
+    anchors = _derive_home_anchor_candidates_from_tessellation(config, tessellation_df, config.simulation.agents)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    anchors.to_parquet(out, index=False)
+    typer.echo(f"Saved {len(anchors):,} HOME anchor candidates -> {out}")
+    return anchors
+
+
+def _append_home_anchors(
+    config: CityBehavExConfig,
+    tessellation_df: pd.DataFrame,
+    relevance_column: str,
+) -> tuple[pd.DataFrame, np.ndarray | None]:
+    if not config.profiles.enabled:
+        return tessellation_df, None
+
+    anchors = _load_or_build_home_anchor_candidates(config, tessellation_df)
+    anchors = anchors.replace([np.inf, -np.inf], np.nan).dropna(subset=["lat", "lng"]).reset_index(drop=True)
+    if len(anchors) == 0:
+        raise ValueError("no valid residential HOME anchors are available")
+
+    n_agents = config.simulation.agents
+    rng = np.random.default_rng(config.simulation.random_state)
+    chosen = anchors.iloc[rng.choice(len(anchors), size=n_agents, replace=len(anchors) < n_agents)].reset_index(drop=True)
+
+    start_idx = len(tessellation_df)
+    rows = pd.DataFrame({col: [pd.NA] * n_agents for col in tessellation_df.columns})
+    rows["lat"] = chosen["lat"].to_numpy(dtype=float)
+    lng_col = "lng" if "lng" in tessellation_df.columns else "lon"
+    rows[lng_col] = chosen["lng"].to_numpy(dtype=float)
+    if "lng" in tessellation_df.columns and "lon" in rows.columns:
+        rows["lon"] = rows["lng"]
+    rows["tile_id"] = [f"home_anchor_{i + 1}" for i in range(n_agents)]
+    rows["category"] = "residential"
+    rows["purpose"] = "HOME"
+    if relevance_column in rows.columns:
+        rows[relevance_column] = float(config.profiles.home_anchor_relevance)
+    elif "relevance" in rows.columns:
+        rows["relevance"] = float(config.profiles.home_anchor_relevance)
+
+    augmented = pd.concat([tessellation_df, rows], ignore_index=True)
+    home_tile_pool = np.arange(start_idx, start_idx + n_agents, dtype=np.int64)
+    typer.echo(f"Appended {n_agents:,} synthetic residential HOME anchors")
+    return augmented, home_tile_pool
 
 
 def _maybe_snap_to_roads(config: CityBehavExConfig, tessellation_df: pd.DataFrame) -> pd.DataFrame:
@@ -289,6 +439,10 @@ def _build_activity_data(
     if not config.activities.enabled:
         return None, None, None, None, None
     act_dur_mu, act_dur_sigma = activity_duration_arrays()
+    if config.activities.act_dur_scale != 1.0:
+        act_dur_mu = act_dur_mu + np.log(config.activities.act_dur_scale)
+    if config.activities.act_dur_sigma_scale != 1.0:
+        act_dur_sigma = act_dur_sigma * config.activities.act_dur_sigma_scale
     purpose_act_starts, purpose_acts = build_eligibility_csr()
     act_embs = None
     if config.activities.embed_activities:
@@ -305,6 +459,31 @@ def _build_activity_data(
 def _stamp_path(path: str, ts: str) -> str:
     p = Path(path)
     return str(p.with_name(f"{p.stem}_{ts}{p.suffix}"))
+
+
+class _IncrementalParquetWriter:
+    """Appends DataFrame chunks to a parquet file as they arrive, opening the
+    writer lazily on the first non-empty chunk (parquet needs a schema up
+    front). Used to stream per-day waypoint chunks straight to disk instead
+    of accumulating the whole run's waypoints in memory."""
+
+    def __init__(self, path: str) -> None:
+        self._path = path
+        self._writer: pq.ParquetWriter | None = None
+        self.rows_written = 0
+
+    def write(self, chunk: pd.DataFrame) -> None:
+        if chunk.empty:
+            return
+        table = pa.Table.from_pandas(chunk, preserve_index=False)
+        if self._writer is None:
+            self._writer = pq.ParquetWriter(self._path, table.schema)
+        self._writer.write_table(table)
+        self.rows_written += len(chunk)
+
+    def close(self) -> None:
+        if self._writer is not None:
+            self._writer.close()
 
 
 def _run_simulation_core(
@@ -366,6 +545,12 @@ def _run_simulation_core(
             max_leg_waypoints=rn.max_leg_waypoints,
         )
 
+    base = output_path or config.simulation.output
+    moving_path = base.replace(".parquet", "_moving.parquet")
+    stream_moving = config.simulation.stream_output and rn.enabled
+    moving_writer = _IncrementalParquetWriter(moving_path) if stream_moving else None
+    on_day_flush = moving_writer.write if moving_writer is not None else None
+
     profile_types = [p.job for p in profiles] if profiles is not None else None
     df, encounters, moving, activities, social_graph = simulate_agents(
         tessellation_df,
@@ -379,6 +564,14 @@ def _run_simulation_core(
         random_state=config.simulation.random_state,
         social_graph_k=config.simulation.social_graph_k,
         profile_graph_exact_threshold=config.simulation.profile_graph_exact_threshold,
+        rho=config.simulation.rho,
+        gamma=config.simulation.gamma,
+        alpha=config.simulation.alpha,
+        dt_update_mob_sim_hours=config.simulation.dt_update_mob_sim_hours,
+        indipendency_window_hours=config.simulation.indipendency_window_hours,
+        gravity_deterrence_exponent=config.simulation.gravity_deterrence_exponent,
+        gravity_origin_exponent=config.simulation.gravity_origin_exponent,
+        gravity_destination_exponent=config.simulation.gravity_destination_exponent,
         timing=timing,
         starting_locs=home_tiles,
         work_tiles=work_tiles,
@@ -392,9 +585,9 @@ def _run_simulation_core(
         act_temp=config.activities.temperature,
         return_social_graph=True,
         social_node_profiles=profile_types,
+        on_day_flush=on_day_flush,
         **road_kwargs,
     )
-    base = output_path or config.simulation.output
     social_path = social_network_sidecar_path(base)
     social_graph.write_json(social_path)
     typer.echo(
@@ -405,8 +598,14 @@ def _run_simulation_core(
         enc_path = base.replace(".parquet", "_encounters.parquet")
         encounters.to_parquet(enc_path, index=False)
         typer.echo(f"Saved {len(encounters):,} encounters -> {enc_path}")
-    if rn.enabled and len(moving) > 0:
-        moving_path = base.replace(".parquet", "_moving.parquet")
+    if moving_writer is not None:
+        # `moving` here is only the final day's still-open tail -- everything
+        # closed before it was already streamed to disk via on_day_flush.
+        moving_writer.write(moving)
+        moving_writer.close()
+        if moving_writer.rows_written > 0:
+            typer.echo(f"Saved {moving_writer.rows_written:,} waypoints (streamed) -> {moving_path}")
+    elif rn.enabled and len(moving) > 0:
         moving.to_parquet(moving_path, index=False)
         typer.echo(f"Saved {len(moving):,} waypoints -> {moving_path}")
     if config.activities.enabled and len(activities) > 0:
@@ -424,6 +623,7 @@ def maybe_build_profiles(
     config: CityBehavExConfig,
     tessellation_df: pd.DataFrame,
     relevance_column: str,
+    home_tile_pool: np.ndarray | None = None,
 ) -> Optional[list[AgentProfile]]:
     """Generate or load agent profiles when ``profiles.enabled`` is true."""
     if not config.profiles.enabled:
@@ -437,7 +637,7 @@ def maybe_build_profiles(
             return loaded
         typer.echo(f"Warning: profiles_path {pc.profiles_path!r} not usable — generating")
     rng = np.random.default_rng(config.simulation.random_state)
-    profiles = generate_profiles(n, pc, rng, tessellation_df, relevance_column)
+    profiles = generate_profiles(n, pc, rng, tessellation_df, relevance_column, home_tile_pool=home_tile_pool)
     typer.echo(f"Generated {len(profiles)} agent profiles")
     if pc.output:
         from pathlib import Path
@@ -452,10 +652,11 @@ def run_simulation(config: CityBehavExConfig) -> skmob2.TrajDataFrame:
     ts = datetime.now().strftime("%Y%m%dT%H%M%S")
     stamped_output = _stamp_path(config.simulation.output, ts)
     stamped_html = _stamp_path(config.comparison.html, ts)
+    stamped_json = _stamp_path(config.comparison.json_output, ts) if config.comparison.json_output else None
 
-    tessellation_df, relevance_column = load_or_build_tessellation(config)
+    tessellation_df, relevance_column, home_tile_pool = load_or_build_tessellation(config)
     start_date, end_date = simulation_dates(config)
-    profiles = maybe_build_profiles(config, tessellation_df, relevance_column)
+    profiles = maybe_build_profiles(config, tessellation_df, relevance_column, home_tile_pool)
     diary_result = maybe_build_diaries(config, tessellation_df)
     core_timing = CoreTiming()
 
@@ -510,5 +711,7 @@ def run_simulation(config: CityBehavExConfig) -> skmob2.TrajDataFrame:
                 ".parquet",
                 "_activities.parquet",
             ),
+            json_output_path=stamped_json,
+            sections=config.comparison.sections,
         )
     return traj
