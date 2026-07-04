@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import yaml
+import pandas as pd
+from types import SimpleNamespace
 from fastapi.testclient import TestClient
 
+from web.backend.app.api import charts as charts_mod
 from web.backend.app import experiments as experiments_mod
 from web.backend.app.main import create_app
 
@@ -123,3 +126,51 @@ def test_unknown_experiment_and_run_return_404(monkeypatch, tmp_path):
     assert client.patch("/api/experiments/missing", json={"label": "x"}).status_code == 404
     assert client.post("/api/experiments/missing/archive").status_code == 404
     assert client.delete(f"/api/experiments/{exp_id}/runs/missing").status_code == 404
+
+
+def test_charts_endpoint_allows_missing_observed_path(monkeypatch, tmp_path):
+    run = tmp_path / "trajectories_20260101T010203.parquet"
+    pd.DataFrame(
+        {
+            "uid": [1],
+            "datetime": pd.to_datetime(["2026-01-01 00:00"]),
+            "lat": [48.85],
+            "lng": [2.35],
+        }
+    ).to_parquet(run, index=False)
+    selected = SimpleNamespace(
+        run_id="20260101T010203",
+        path=run,
+        activities_path=tmp_path / "missing_activities.parquet",
+        social_network_path=tmp_path / "missing_social.json",
+    )
+    experiment = SimpleNamespace(
+        observed_path=tmp_path / "missing_observed.parquet",
+        label="observed",
+        run=lambda run_id=None: selected,
+    )
+    monkeypatch.setattr(charts_mod, "get_experiment", lambda exp_id: experiment)
+
+    def fake_build(synthetic_path, observed_path, observed_label, synthetic_activities_path=None):
+        assert observed_path is None
+        return {
+            "mode": "synthetic_only",
+            "labels": {"synthetic": "synthetic"},
+            "metrics": {"wasserstein": [], "jsd": [], "cpc": []},
+            "ecdf": {"groups": []},
+            "mobility_laws": None,
+            "activity": None,
+            "micro_activity_usage": None,
+            "profiles": None,
+            "motifs": None,
+            "stvd": None,
+            "social_network": None,
+            "warnings": [],
+        }
+
+    monkeypatch.setattr(charts_mod, "build_comparison_payload", fake_build)
+
+    response = charts_mod.get_charts("demo", run="20260101T010203", refresh=True)
+
+    assert response.data["mode"] == "synthetic_only"
+    assert response.data["run_id"] == "20260101T010203"

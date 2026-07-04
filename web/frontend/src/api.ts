@@ -281,6 +281,7 @@ export interface ActivityBlock {
   transition_difference: {
     categories: string[];
     labels: string[];
+    matrix_mode: "difference" | "raw";
     matrix: number[][];
     limit: number;
   };
@@ -288,9 +289,24 @@ export interface ActivityBlock {
     categories: string[];
     n_bins: number;
     labels: string[];
+    matrix_mode: "difference" | "raw";
     matrix: number[][];
     limit: number;
   } | null;
+}
+export interface FilteredActivityBlock extends ActivityBlock {
+  filter_key: string;
+  filter_label: string;
+}
+export interface FilteredBlockMap<T> {
+  filter_key: string;
+  filter_label: string;
+  blocks: Record<string, T>;
+}
+export interface FilteredSingleBlock<T> {
+  filter_key: string;
+  filter_label: string;
+  block: T;
 }
 export interface MicroActivityUsageBlock {
   bin_size_minutes: number;
@@ -344,20 +360,21 @@ export interface SocialNetworkBlock {
   degrees?: number[];
 }
 export interface ChartPayload {
+  mode: "comparison" | "synthetic_only";
   run_id: string;
-  labels: { synthetic: string; observed: string };
+  labels: { synthetic: string; observed?: string };
   metrics: {
-    wasserstein: { name: string; value: number; unit: string }[];
-    jsd: { name: string; value: number }[];
-    cpc: { resolution: number; value: number }[];
+    wasserstein: { filter_key: string; filter_label: string; metric_name: string; name?: string; value: number; unit?: string }[];
+    jsd: { filter_key?: string; filter_label?: string; metric_name?: string; name?: string; value: number }[];
+    cpc: { filter_key: string; filter_label: string; resolution: number; value: number }[];
   };
-  ecdf: Record<string, EcdfBlock>;
-  mobility_laws: Record<string, LawBlock> | null;
-  activity: ActivityBlock | null;
-  micro_activity_usage: MicroActivityUsageBlock | null;
+  ecdf: { groups: FilteredBlockMap<EcdfBlock>[] };
+  mobility_laws: { groups: FilteredBlockMap<LawBlock>[] } | null;
+  activity: { groups: FilteredActivityBlock[] } | null;
+  micro_activity_usage: { groups: FilteredSingleBlock<MicroActivityUsageBlock>[] } | null;
   profiles: ProfilesBlock | null;
-  motifs: MotifsBlock | null;
-  stvd: StvdBlock | null;
+  motifs: { groups: FilteredSingleBlock<MotifsBlock>[] } | null;
+  stvd: { groups: FilteredSingleBlock<StvdBlock>[] } | null;
   social_network: SocialNetworkBlock | null;
   warnings: string[];
 }

@@ -102,19 +102,84 @@ def _ecdf(values: Any, cutoff: float = 0.98) -> list[list[float]]:
 def _ecdf_block(
     label_syn: str,
     syn_values: Any,
-    label_obs: str,
-    obs_values: Any,
+    label_obs: str | None,
+    obs_values: Any | None,
     x_label: str,
     x_unit: str,
 ) -> dict[str, Any]:
-    return {
-        "x_label": x_label,
-        "x_unit": x_unit,
-        "series": [
-            {"name": label_syn, "role": "synthetic", "points": _ecdf(syn_values)},
-            {"name": label_obs, "role": "observed", "points": _ecdf(obs_values)},
-        ],
+    series = [{"name": label_syn, "role": "synthetic", "points": _ecdf(syn_values)}]
+    if label_obs is not None and obs_values is not None:
+        series.append({"name": label_obs, "role": "observed", "points": _ecdf(obs_values)})
+    return {"x_label": x_label, "x_unit": x_unit, "series": series}
+
+
+FILTERS = [
+    {"key": "all", "label": "All", "kind": "base"},
+    {"key": "weekday", "label": "Weekday", "kind": "day"},
+    {"key": "weekend", "label": "Weekend", "kind": "day"},
+]
+
+DISTRIBUTION_FILTERS = [
+    *FILTERS,
+    {"key": "morning", "label": "Morning", "kind": "time", "start": 6, "end": 12},
+    {"key": "afternoon", "label": "Afternoon", "kind": "time", "start": 12, "end": 18},
+    {"key": "evening", "label": "Evening", "kind": "time", "start": 18, "end": 24},
+    {"key": "night", "label": "Night", "kind": "time", "start": 0, "end": 6},
+]
+
+
+def _empty_group(meta: dict[str, Any], blocks_key: str = "blocks") -> dict[str, Any]:
+    return {"filter_key": meta["key"], "filter_label": meta["label"], blocks_key: {}}
+
+
+def _filter_df(df: pd.DataFrame, datetime_col: str | None, meta: dict[str, Any]) -> pd.DataFrame:
+    if meta["key"] == "all" or not datetime_col or datetime_col not in df.columns:
+        return df
+    dt = pd.to_datetime(df[datetime_col], errors="coerce")
+    if meta["kind"] == "day":
+        mask = dt.dt.dayofweek < 5
+        if meta["key"] == "weekend":
+            mask = ~mask
+    else:
+        hour = dt.dt.hour
+        mask = (hour >= int(meta["start"])) & (hour < int(meta["end"]))
+    return df.loc[mask.fillna(False)].copy()
+
+
+def _filter_visits(visits: pd.DataFrame | None, meta: dict[str, Any]) -> pd.DataFrame | None:
+    if visits is None:
+        return None
+    return _filter_df(visits, "start_timestamp", meta)
+
+
+def _traj_like(source: skmob2.TrajDataFrame, df: pd.DataFrame) -> skmob2.TrajDataFrame:
+    return skmob2.TrajDataFrame(
+        df,
+        datetime_col=source.datetime_col,
+        lat_col=source.lat_col,
+        lng_col=source.lng_col,
+        uid_col=source.uid_col,
+    )
+
+
+def _metric_row(
+    meta: dict[str, Any],
+    metric_name: str,
+    value: float | None,
+    unit: str = "",
+) -> dict[str, Any] | None:
+    if value is None or not np.isfinite(value):
+        return None
+    row: dict[str, Any] = {
+        "filter_key": meta["key"],
+        "filter_label": meta["label"],
+        "metric_name": metric_name,
+        "name": metric_name,
+        "value": float(value),
     }
+    if unit:
+        row["unit"] = unit
+    return row
 
 
 def _geometric_scale(y: np.ndarray, shape: np.ndarray) -> float:
@@ -143,22 +208,22 @@ def _xy(x: np.ndarray, y: np.ndarray) -> list[list[float]]:
 # mobility laws
 # --------------------------------------------------------------------------- #
 def _truncated_powerlaw_series(
-    observed_values: Any,
+    observed_values: Any | None,
     synthetic_values: Any,
-    label_obs: str,
+    label_obs: str | None,
     reference: tuple[float, float, float] = (1.5, 1.75, 400.0),
 ) -> dict[str, Any]:
-    obs = _truncated_powerlaw_dataset(observed_values, label_obs)   # (params, x, y, label)
     syn = _truncated_powerlaw_dataset(synthetic_values, "synthetic")
-    all_x = [np.asarray(obs[1], float), np.asarray(syn[1], float)]
+    datasets = [(*syn, "synthetic")]
+    if observed_values is not None and label_obs is not None:
+        obs = _truncated_powerlaw_dataset(observed_values, label_obs)   # (params, x, y, label)
+        datasets.insert(0, (*obs, "observed"))
+    all_x = [np.asarray(row[1], float) for row in datasets]
     curve_x = _curve_x(all_x, logarithmic=True)
 
     series = []
     fits = []
-    for params, x_pts, y_pts, label, role in (
-        (*obs, "observed"),
-        (*syn, "synthetic"),
-    ):
+    for params, x_pts, y_pts, label, role in datasets:
         c, r0, beta, kappa = (float(v) for v in params)
         curve_y = c * np.power(curve_x + r0, -beta) * np.exp(-curve_x / kappa)
         series.append({"name": label, "role": role, "type": "scatter",
@@ -169,7 +234,7 @@ def _truncated_powerlaw_series(
 
     r0, beta, kappa = reference
     joined_x = np.concatenate(all_x)
-    joined_y = np.concatenate([np.asarray(obs[2], float), np.asarray(syn[2], float)])
+    joined_y = np.concatenate([np.asarray(row[2], float) for row in datasets])
     shape = np.power(joined_x + r0, -beta) * np.exp(-joined_x / kappa)
     c = _geometric_scale(joined_y, shape)
     series.append({"name": "Gonzalez reference", "role": "reference", "type": "line",
@@ -183,14 +248,17 @@ def _truncated_powerlaw_series(
     }
 
 
-def _lognormal_series(observed_visits, synthetic_visits, label_obs) -> dict[str, Any]:
-    obs = _daily_location_lognormal_dataset(observed_visits, label_obs)   # (x, y, mu, sigma, label)
+def _lognormal_series(observed_visits, synthetic_visits, label_obs: str | None) -> dict[str, Any]:
     syn = _daily_location_lognormal_dataset(synthetic_visits, "synthetic")
-    all_x = [np.asarray(obs[0], float), np.asarray(syn[0], float)]
+    datasets = [(*syn, "synthetic")]
+    if observed_visits is not None and label_obs is not None:
+        obs = _daily_location_lognormal_dataset(observed_visits, label_obs)   # (x, y, mu, sigma, label)
+        datasets.insert(0, (*obs, "observed"))
+    all_x = [np.asarray(row[0], float) for row in datasets]
     curve_x = _curve_x(all_x, logarithmic=False)
 
     series, fits = [], []
-    for x_pts, y_pts, mu, sigma, label, role in ((*obs, "observed"), (*syn, "synthetic")):
+    for x_pts, y_pts, mu, sigma, label, role in datasets:
         curve_y = np.exp(-((np.log(curve_x) - mu) ** 2) / (2 * sigma**2)) / (
             curve_x * sigma * np.sqrt(2 * np.pi)
         )
@@ -214,14 +282,17 @@ def _lognormal_series(observed_visits, synthetic_visits, label_obs) -> dict[str,
     }
 
 
-def _distance_frequency_series(observed_visits, synthetic_visits, label_obs) -> dict[str, Any]:
-    obs = _distance_frequency_dataset(observed_visits, label_obs)   # (rf, rho, eta, mu, label)
+def _distance_frequency_series(observed_visits, synthetic_visits, label_obs: str | None) -> dict[str, Any]:
     syn = _distance_frequency_dataset(synthetic_visits, "synthetic")
-    all_x = [np.asarray(obs[0], float), np.asarray(syn[0], float)]
+    datasets = [(*syn, "synthetic")]
+    if observed_visits is not None and label_obs is not None:
+        obs = _distance_frequency_dataset(observed_visits, label_obs)   # (rf, rho, eta, mu, label)
+        datasets.insert(0, (*obs, "observed"))
+    all_x = [np.asarray(row[0], float) for row in datasets]
     curve_x = _curve_x(all_x, logarithmic=True)
 
     series, fits = [], []
-    for rf, rho, eta, mu, label, role in ((*obs, "observed"), (*syn, "synthetic")):
+    for rf, rho, eta, mu, label, role in datasets:
         series.append({"name": label, "role": role, "type": "scatter",
                        "points": _xy(np.asarray(rf, float), np.asarray(rho, float))})
         series.append({"name": f"{label} fit", "role": role, "type": "line",
@@ -230,7 +301,7 @@ def _distance_frequency_series(observed_visits, synthetic_visits, label_obs) -> 
 
     alpha = -2.0
     joined_x = np.concatenate(all_x)
-    joined_y = np.concatenate([np.asarray(obs[1], float), np.asarray(syn[1], float)])
+    joined_y = np.concatenate([np.asarray(row[1], float) for row in datasets])
     scale = _geometric_scale(joined_y, np.power(joined_x, alpha))
     series.append({"name": "Schlapfer reference", "role": "reference", "type": "line",
                    "points": _xy(curve_x, scale * np.power(curve_x, alpha))})
@@ -318,7 +389,7 @@ def _load_social_network_sidecar(synthetic_path: str) -> dict[str, Any] | None:
 # --------------------------------------------------------------------------- #
 def build_comparison_payload(
     synthetic_path: str,
-    observed_path: str,
+    observed_path: Optional[str],
     observed_label: str,
     synthetic_activities_path: Optional[str] = None,
 ) -> dict[str, Any]:
@@ -333,92 +404,113 @@ def build_comparison_payload(
 
     traj = load_trajectory(synthetic_path)
     synth_activity_col = detect_column(traj.df, _ACTIVITY_CANDIDATES)
+    real_df = None
+    real_traj = None
+    real_dt_col = None
+    real_activity_col = None
+    real_start_col = None
+    real_end_col = None
+    real_location_col = None
+    if observed_path and Path(observed_path).exists():
+        real_df = pd.read_parquet(observed_path)
+        real_dt_col = detect_column(real_df, _DATETIME_CANDIDATES)
+        if real_dt_col and not pd.api.types.is_datetime64_any_dtype(real_df[real_dt_col]):
+            real_df[real_dt_col] = pd.to_datetime(real_df[real_dt_col])
+        real_traj = skmob2.TrajDataFrame(
+            real_df,
+            datetime_col=real_dt_col,
+            lat_col=detect_column(real_df, ["lat", "latitude"]),
+            lng_col=detect_column(real_df, ["lng", "lon", "longitude", "long"]),
+            uid_col=detect_column(real_df, ["uid", "user_id", "user", "agent_id", "userid"]),
+        )
+        real_activity_col = detect_column(real_df, _ACTIVITY_CANDIDATES)
+        real_start_col = detect_column(real_df, _DATETIME_CANDIDATES)
+        real_end_col = detect_column(real_df, _END_TS_CANDIDATES)
+        real_location_col = detect_column(real_df, _LOCATION_CANDIDATES)
+    elif observed_path:
+        warnings.append(f"observed comparison parquet not found: {observed_path}")
 
-    real_df = pd.read_parquet(observed_path)
-    real_dt_col = detect_column(real_df, _DATETIME_CANDIDATES)
-    if real_dt_col and not pd.api.types.is_datetime64_any_dtype(real_df[real_dt_col]):
-        real_df[real_dt_col] = pd.to_datetime(real_df[real_dt_col])
-    real_traj = skmob2.TrajDataFrame(
-        real_df,
-        datetime_col=real_dt_col,
-        lat_col=detect_column(real_df, ["lat", "latitude"]),
-        lng_col=detect_column(real_df, ["lng", "lon", "longitude", "long"]),
-        uid_col=detect_column(real_df, ["uid", "user_id", "user", "agent_id", "userid"]),
-    )
+    mode = "comparison" if real_df is not None and real_traj is not None else "synthetic_only"
+    labels = {"synthetic": "synthetic"}
+    if mode == "comparison":
+        labels["observed"] = observed_label
 
-    labels = {"synthetic": "synthetic", "observed": observed_label}
-
-    # ---- base arrays / metrics ------------------------------------------- #
-    synth_jumps = traj.jump_lengths(merge=True)
-    real_jumps = real_traj.jump_lengths(merge=True)
-    w_jump = wasserstein_distance(synth_jumps, real_jumps)
-
-    synth_stays = _collapse_to_stays(
-        traj.df, uid_col=traj.uid_col, lat_col=traj.lat_col,
-        lng_col=traj.lng_col, datetime_col=traj.datetime_col,
-    )
-    synth_visits_count = synth_stays[traj.uid_col].value_counts().to_list()
-    real_visits_count = real_traj.df[real_traj.uid_col].value_counts().to_list()
-    w_visits, _ = visits_per_user_wasserstein_distance(
-        synth_stays, real_df,
-        user_id_col1=traj.uid_col, user_id_col2=real_traj.uid_col,
-    )
-
-    synth_rog = traj.radius_of_gyration()["radius_of_gyration"].to_numpy()
-    real_rog = real_traj.radius_of_gyration()["radius_of_gyration"].to_numpy()
-    w_rog = wasserstein_distance(synth_rog, real_rog)
-
-    cpc_rows = guard("cpc", lambda: _common_part_of_commuters(traj, real_traj)) or []
-
-    duration_col = detect_column(real_df, _DURATION_CANDIDATES)
-    if "dwell_minutes" in traj.df.columns:
-        synth_dwell = [d for d in traj.df["dwell_minutes"].dropna().tolist() if d >= 0]
-    else:
-        synth_dwell = waiting_times_minutes(traj)
-    real_dwell = real_df[duration_col].dropna().tolist() if duration_col else waiting_times_minutes(real_traj)
-    w_dwell = wasserstein_distance(synth_dwell, real_dwell)
-
-    synth_trip = real_trip = None
-    w_trip = None
-    if "trip_duration_minutes" in traj.df.columns:
-        synth_trip = [t for t in traj.df["trip_duration_minutes"].dropna().tolist() if t > 0]
-        real_trip = [(j / CAR_SPEED_KMH) * 60.0 for j in real_jumps if j > 0]
-        if synth_trip and real_trip:
-            w_trip = wasserstein_distance(synth_trip, real_trip)
-    elif duration_col:
-        real_trip = real_df[duration_col].dropna().tolist()
-        synth_trip = waiting_times_minutes(traj)
-        w_trip = wasserstein_distance(synth_trip, real_trip)
-
-    wasserstein = [
-        {"name": "Jump lengths", "value": float(w_jump), "unit": "km"},
-        {"name": "Visits per user", "value": float(w_visits), "unit": "visits"},
-        {"name": "Radius of gyration", "value": float(w_rog), "unit": "km"},
-        {"name": "Dwell time", "value": float(w_dwell), "unit": "min"},
-    ]
-    if w_trip is not None:
-        wasserstein.append({"name": "Trip duration (car)", "value": float(w_trip), "unit": "min"})
-
-    # ---- ECDFs ----------------------------------------------------------- #
-    ecdf = {
-        "jump_lengths": _ecdf_block("synthetic", synth_jumps, observed_label, real_jumps, "jump length", "km"),
-        "visits_per_user": _ecdf_block("synthetic", synth_visits_count, observed_label, real_visits_count, "number of visits", ""),
-        "radius_of_gyration": _ecdf_block("synthetic", synth_rog, observed_label, real_rog, "radius of gyration", "km"),
-        "dwell_time": _ecdf_block("synthetic", synth_dwell, observed_label, real_dwell, "dwell time", "min"),
-    }
-    if synth_trip and real_trip:
-        ecdf["trip_duration"] = _ecdf_block("synthetic", synth_trip, observed_label, real_trip, "trip duration", "min")
-
-    # ---- activity visits (shared by activity/profiles/motifs/JSD) -------- #
-    synthetic_visits = observed_visits = None
-    jsd: list[dict[str, Any]] = []
-    real_activity_col = detect_column(real_df, _ACTIVITY_CANDIDATES)
-    real_start_col = detect_column(real_df, _DATETIME_CANDIDATES)
-    real_end_col = detect_column(real_df, _END_TS_CANDIDATES)
-    real_location_col = detect_column(real_df, _LOCATION_CANDIDATES)
+    duration_col = detect_column(real_df, _DURATION_CANDIDATES) if real_df is not None else None
     synth_location_col = detect_column(traj.df, _LOCATION_CANDIDATES)
-    resolution = _location_resolution(real_df, real_location_col)
+    resolution = _location_resolution(real_df, real_location_col) if real_df is not None else 10
+    wasserstein: list[dict[str, Any]] = []
+    jsd: list[dict[str, Any]] = []
+    cpc_metrics: list[dict[str, Any]] = []
 
+    def distribution_group(meta: dict[str, Any]) -> dict[str, Any]:
+        group = _empty_group(meta)
+        synth_df = _filter_df(traj.df, traj.datetime_col, meta)
+        if synth_df.empty:
+            warnings.append(f"{meta['label']} distribution filter has no synthetic rows")
+            return group
+        synth_traj = _traj_like(traj, synth_df)
+        real_group_df = _filter_df(real_df, real_dt_col, meta) if real_df is not None else None
+        real_group_traj = (
+            _traj_like(real_traj, real_group_df)
+            if real_group_df is not None and real_traj is not None and not real_group_df.empty
+            else None
+        )
+
+        synth_jumps = synth_traj.jump_lengths(merge=True)
+        real_jumps = real_group_traj.jump_lengths(merge=True) if real_group_traj is not None else None
+        synth_stays = _collapse_to_stays(
+            synth_df, uid_col=traj.uid_col, lat_col=traj.lat_col,
+            lng_col=traj.lng_col, datetime_col=traj.datetime_col,
+        )
+        synth_visits_count = synth_stays[traj.uid_col].value_counts().to_list()
+        real_visits_count = real_group_df[real_traj.uid_col].value_counts().to_list() if real_group_df is not None and real_traj is not None else None
+        synth_rog = synth_traj.radius_of_gyration()["radius_of_gyration"].to_numpy()
+        real_rog = real_group_traj.radius_of_gyration()["radius_of_gyration"].to_numpy() if real_group_traj is not None else None
+        synth_dwell = (
+            [d for d in synth_df["dwell_minutes"].dropna().tolist() if d >= 0]
+            if "dwell_minutes" in synth_df.columns
+            else waiting_times_minutes(synth_traj)
+        )
+        real_dwell = None
+        if real_group_df is not None and real_group_traj is not None:
+            real_dwell = real_group_df[duration_col].dropna().tolist() if duration_col else waiting_times_minutes(real_group_traj)
+        synth_trip = real_trip = None
+        if "trip_duration_minutes" in synth_df.columns:
+            synth_trip = [t for t in synth_df["trip_duration_minutes"].dropna().tolist() if t > 0]
+            real_trip = [(j / CAR_SPEED_KMH) * 60.0 for j in (real_jumps if real_jumps is not None else []) if j > 0]
+        elif duration_col and real_group_df is not None:
+            synth_trip = waiting_times_minutes(synth_traj)
+            real_trip = real_group_df[duration_col].dropna().tolist()
+
+        blocks = {
+            "jump_lengths": _ecdf_block("synthetic", synth_jumps, observed_label if real_jumps is not None else None, real_jumps, "jump length", "km"),
+            "visits_per_user": _ecdf_block("synthetic", synth_visits_count, observed_label if real_visits_count is not None else None, real_visits_count, "number of visits", ""),
+            "radius_of_gyration": _ecdf_block("synthetic", synth_rog, observed_label if real_rog is not None else None, real_rog, "radius of gyration", "km"),
+            "dwell_time": _ecdf_block("synthetic", synth_dwell, observed_label if real_dwell is not None else None, real_dwell, "dwell time", "min"),
+        }
+        if synth_trip and (mode == "synthetic_only" or real_trip):
+            blocks["trip_duration"] = _ecdf_block("synthetic", synth_trip, observed_label if real_trip else None, real_trip, "trip duration", "min")
+        group["blocks"] = blocks
+
+        if real_group_df is not None and real_group_traj is not None:
+            for row in (
+                _metric_row(meta, "Jump lengths", wasserstein_distance(synth_jumps, real_jumps), "km") if real_jumps is not None and len(real_jumps) else None,
+                _metric_row(meta, "Visits per user", visits_per_user_wasserstein_distance(
+                    synth_stays, real_group_df,
+                    user_id_col1=traj.uid_col, user_id_col2=real_traj.uid_col,
+                )[0], "visits"),
+                _metric_row(meta, "Radius of gyration", wasserstein_distance(synth_rog, real_rog), "km") if real_rog is not None and len(real_rog) else None,
+                _metric_row(meta, "Dwell time", wasserstein_distance(synth_dwell, real_dwell), "min") if real_dwell else None,
+                _metric_row(meta, "Trip duration (car)", wasserstein_distance(synth_trip, real_trip), "min") if synth_trip and real_trip else None,
+            ):
+                if row is not None:
+                    wasserstein.append(row)
+        return group
+
+    ecdf = {"groups": [guard(f"ecdf.{m['key']}", lambda m=m: distribution_group(m)) for m in DISTRIBUTION_FILTERS]}
+    ecdf["groups"] = [g for g in ecdf["groups"] if g is not None]
+
+    synthetic_visits = None
     synthetic_visit_result = _prepare_activity_visits(
         traj.df,
         label="synthetic",
@@ -434,48 +526,67 @@ def build_comparison_payload(
         lng_col=traj.lng_col,
         location_resolution=resolution,
     )
-    observed_visit_result = _prepare_activity_visits(
-        real_df,
-        label=observed_label,
-        uid_col=real_traj.uid_col,
-        datetime_col=real_start_col,
-        activity_col=real_activity_col,
-        location_col=real_location_col,
-        lat_col=real_traj.lat_col,
-        lng_col=real_traj.lng_col,
-        location_resolution=resolution,
-        end_col=real_end_col,
-    )
     if synthetic_visit_result is not None:
         synthetic_visits = synthetic_visit_result.visits
         if synthetic_visit_result.warning:
             warnings.append(synthetic_visit_result.warning)
-    if observed_visit_result is not None:
-        observed_visits = observed_visit_result.visits
-        if observed_visit_result.warning:
-            warnings.append(observed_visit_result.warning)
+    observed_visits = None
+    if real_df is not None and real_traj is not None:
+        observed_visit_result = _prepare_activity_visits(
+            real_df,
+            label=observed_label,
+            uid_col=real_traj.uid_col,
+            datetime_col=real_start_col,
+            activity_col=real_activity_col,
+            location_col=real_location_col,
+            lat_col=real_traj.lat_col,
+            lng_col=real_traj.lng_col,
+            location_resolution=resolution,
+            end_col=real_end_col,
+        )
+        if observed_visit_result is not None:
+            observed_visits = observed_visit_result.visits
+            if observed_visit_result.warning:
+                warnings.append(observed_visit_result.warning)
 
     activity = None
-    if synthetic_visits is not None and observed_visits is not None:
-        def _activity():
-            jsd.append({"name": "Activity distribution",
-                        "value": float(activity_distribution_jensen_shannon_divergence(synthetic_visits, observed_visits))})
-            synth_transition = activity_transition_matrix(synthetic_visits)
-            real_transition = activity_transition_matrix(observed_visits)
-            jsd.append({"name": "Activity transitions",
-                        "value": float(activity_transition_matrix_jensen_shannon_divergence(synth_transition, real_transition))})
-            synth_daily, synth_cats, synth_bins = daily_activity_distribution(synthetic_visits)
-            real_daily, real_cats, real_bins = daily_activity_distribution(observed_visits)
-            jsd.append({"name": "Daily activity profile",
-                        "value": float(time_bin_matrix_jensen_shannon_divergence(synth_daily, real_daily, synth_cats, real_cats))})
-
-            return _build_activity_block(
-                observed_label,
-                synthetic_visits, observed_visits,
+    if synthetic_visits is not None:
+        def _activity_group(meta: dict[str, Any]):
+            syn_v = _filter_visits(synthetic_visits, meta)
+            obs_v = _filter_visits(observed_visits, meta)
+            if syn_v is None or syn_v.empty:
+                warnings.append(f"{meta['label']} activity filter has no synthetic visits")
+                return None
+            synth_transition = activity_transition_matrix(syn_v)
+            synth_daily, synth_cats, synth_bins = daily_activity_distribution(syn_v)
+            real_transition = real_daily_tuple = None
+            if obs_v is not None and not obs_v.empty:
+                jsd.extend([
+                    row for row in (
+                        _metric_row(meta, "Activity distribution", activity_distribution_jensen_shannon_divergence(syn_v, obs_v)),
+                        _metric_row(meta, "Activity transitions", activity_transition_matrix_jensen_shannon_divergence(
+                            synth_transition, activity_transition_matrix(obs_v)
+                        )),
+                    ) if row is not None
+                ])
+                real_transition = activity_transition_matrix(obs_v)
+                real_daily, real_cats, real_bins = daily_activity_distribution(obs_v)
+                jsd_row = _metric_row(meta, "Daily activity profile", time_bin_matrix_jensen_shannon_divergence(
+                    synth_daily, real_daily, synth_cats, real_cats
+                ))
+                if jsd_row is not None:
+                    jsd.append(jsd_row)
+                real_daily_tuple = (real_daily, real_cats, real_bins)
+            block = _build_activity_block(
+                observed_label if obs_v is not None and not obs_v.empty else None,
+                syn_v, obs_v if obs_v is not None and not obs_v.empty else None,
                 synth_transition, real_transition,
-                (synth_daily, synth_cats, synth_bins), (real_daily, real_cats, real_bins),
+                (synth_daily, synth_cats, synth_bins), real_daily_tuple,
             )
-        activity = guard("activity", _activity)
+            return {"filter_key": meta["key"], "filter_label": meta["label"], **block}
+        activity_groups = [guard(f"activity.{m['key']}", lambda m=m: _activity_group(m)) for m in FILTERS]
+        activity_groups = [g for g in activity_groups if g is not None]
+        activity = {"groups": activity_groups} if activity_groups else None
 
     def _micro_activity_usage():
         if synthetic_activities_path is None:
@@ -486,43 +597,69 @@ def build_comparison_payload(
         activities = pd.read_parquet(path)
         if activities.empty:
             return None
-        return _micro_activity_daily_usage_data(activities)
+        groups = []
+        dt_col = detect_column(activities, ["arrival", "start_timestamp", "datetime"])
+        for meta in FILTERS:
+            filtered = _filter_df(activities, dt_col, meta)
+            if filtered.empty:
+                continue
+            groups.append({
+                "filter_key": meta["key"],
+                "filter_label": meta["label"],
+                "block": _micro_activity_daily_usage_data(filtered),
+            })
+        return {"groups": groups} if groups else None
 
     micro_activity_usage = guard("micro_activity_usage", _micro_activity_usage)
 
     # ---- mobility laws --------------------------------------------------- #
-    def _mobility_laws():
-        real_location_col = detect_column(real_df, _LOCATION_CANDIDATES)
-        real_activity_col = detect_column(real_df, _ACTIVITY_CANDIDATES)
-        obs_law_visits = _mobility_law_visits(
-            real_df, uid_col=real_traj.uid_col, datetime_col=real_traj.datetime_col,
-            lat_col=real_traj.lat_col, lng_col=real_traj.lng_col,
-            location_col=real_location_col, activity_col=real_activity_col,
+    def _mobility_laws_group(meta: dict[str, Any]):
+        synth_df = _filter_df(traj.df, traj.datetime_col, meta)
+        real_group_df = _filter_df(real_df, real_dt_col, meta) if real_df is not None else None
+        if synth_df.empty:
+            return None
+        synth_traj = _traj_like(traj, synth_df)
+        real_group_traj = _traj_like(real_traj, real_group_df) if real_group_df is not None and real_traj is not None and not real_group_df.empty else None
+        synth_jumps = synth_traj.jump_lengths(merge=True)
+        real_jumps = real_group_traj.jump_lengths(merge=True) if real_group_traj is not None else None
+        synth_rog = synth_traj.radius_of_gyration()["radius_of_gyration"].to_numpy()
+        real_rog = real_group_traj.radius_of_gyration()["radius_of_gyration"].to_numpy() if real_group_traj is not None else None
+        obs_law_visits = (
+            _mobility_law_visits(
+                real_group_df, uid_col=real_traj.uid_col, datetime_col=real_traj.datetime_col,
+                lat_col=real_traj.lat_col, lng_col=real_traj.lng_col,
+                location_col=real_location_col, activity_col=real_activity_col,
+            )
+            if real_group_df is not None and real_traj is not None and not real_group_df.empty
+            else None
         )
         syn_law_visits = _mobility_law_visits(
-            traj.df, uid_col=traj.uid_col, datetime_col=traj.datetime_col,
+            synth_df, uid_col=traj.uid_col, datetime_col=traj.datetime_col,
             lat_col=traj.lat_col, lng_col=traj.lng_col, location_col=synth_location_col,
             activity_col=(synth_activity_col if synth_activity_col in traj.df.columns else None),
         )
         block: dict[str, Any] = {}
         block["travel_distance"] = guard(
-            "mobility_laws.travel_distance",
+            f"mobility_laws.{meta['key']}.travel_distance",
             lambda: {"title": "Travel-distance mobility law", "x_label": "travel distance", "x_unit": "km",
-                     **_truncated_powerlaw_series(real_jumps, synth_jumps, observed_label)})
+                     **_truncated_powerlaw_series(real_jumps, synth_jumps, observed_label if real_jumps is not None else None)})
         block["radius_of_gyration"] = guard(
-            "mobility_laws.radius_of_gyration",
+            f"mobility_laws.{meta['key']}.radius_of_gyration",
             lambda: {"title": "Radius-of-gyration mobility law", "x_label": "radius of gyration", "x_unit": "km",
-                     **_truncated_powerlaw_series(real_rog, synth_rog, observed_label)})
+                     **_truncated_powerlaw_series(real_rog, synth_rog, observed_label if real_rog is not None else None)})
         block["daily_locations"] = guard(
-            "mobility_laws.daily_locations",
+            f"mobility_laws.{meta['key']}.daily_locations",
             lambda: {"title": "Daily visited locations", "x_label": "number of locations (N)", "x_unit": "",
-                     **_lognormal_series(obs_law_visits, syn_law_visits, observed_label)})
+                     **_lognormal_series(obs_law_visits, syn_law_visits, observed_label if obs_law_visits is not None else None)})
         block["distance_frequency"] = guard(
-            "mobility_laws.distance_frequency",
+            f"mobility_laws.{meta['key']}.distance_frequency",
             lambda: {"title": "Distance-frequency visitation law", "x_label": "r · f", "x_unit": "km",
-                     **_distance_frequency_series(obs_law_visits, syn_law_visits, observed_label)})
-        return {k: v for k, v in block.items() if v is not None} or None
-    mobility_laws = guard("mobility_laws", _mobility_laws)
+                     **_distance_frequency_series(obs_law_visits, syn_law_visits, observed_label if obs_law_visits is not None else None)})
+        blocks = {k: v for k, v in block.items() if v is not None}
+        return {"filter_key": meta["key"], "filter_label": meta["label"], "blocks": blocks} if blocks else None
+    mobility_groups = [guard(f"mobility_laws.{m['key']}", lambda m=m: _mobility_laws_group(m)) for m in FILTERS]
+    mobility_groups = [g for g in mobility_groups if g is not None]
+    mobility_laws = {"groups": mobility_groups} if mobility_groups else None
 
     # ---- profiles -------------------------------------------------------- #
     profiles = None
@@ -533,20 +670,69 @@ def build_comparison_payload(
     # ---- motifs ---------------------------------------------------------- #
     motifs = None
     if observed_visits is not None or synthetic_visits is not None:
-        motifs = guard("motifs", lambda: _build_motifs_block(observed_label, observed_visits, synthetic_visits, jsd))
+        motif_groups = []
+        for meta in FILTERS:
+            motif = guard(
+                f"motifs.{meta['key']}",
+                lambda meta=meta: _build_motifs_block(
+                    observed_label,
+                    _filter_visits(observed_visits, meta),
+                    _filter_visits(synthetic_visits, meta),
+                    jsd,
+                    meta,
+                ),
+            )
+            if motif is not None:
+                motif_groups.append({"filter_key": meta["key"], "filter_label": meta["label"], "block": motif})
+        motifs = {"groups": motif_groups} if motif_groups else None
 
     # ---- STVD ------------------------------------------------------------ #
     stvd = None
-    if traj.lat_col and traj.lng_col and real_traj.lat_col and real_traj.lng_col:
-        stvd = guard("stvd", lambda: _annotate_stvd(_compute_stvd_layers(traj, real_traj, resolutions=[7, 9])))
+    if mode == "comparison" and traj.lat_col and traj.lng_col and real_traj and real_traj.lat_col and real_traj.lng_col:
+        stvd_groups = []
+        for meta in FILTERS:
+            def _stvd(meta=meta):
+                synth_df = _filter_df(traj.df, traj.datetime_col, meta)
+                real_group_df = _filter_df(real_df, real_dt_col, meta)
+                if synth_df.empty or real_group_df.empty:
+                    return None
+                return {
+                    "filter_key": meta["key"],
+                    "filter_label": meta["label"],
+                    "block": _annotate_stvd(_compute_stvd_layers(
+                        _traj_like(traj, synth_df),
+                        _traj_like(real_traj, real_group_df),
+                        resolutions=[7, 9],
+                    )),
+                }
+            group = guard(f"stvd.{meta['key']}", _stvd)
+            if group is not None:
+                stvd_groups.append(group)
+        stvd = {"groups": stvd_groups} if stvd_groups else None
+
+    if mode == "comparison" and real_traj is not None:
+        for meta in FILTERS:
+            def _cpc(meta=meta):
+                synth_df = _filter_df(traj.df, traj.datetime_col, meta)
+                real_group_df = _filter_df(real_df, real_dt_col, meta)
+                if synth_df.empty or real_group_df.empty:
+                    return []
+                return _common_part_of_commuters(_traj_like(traj, synth_df), _traj_like(real_traj, real_group_df))
+            for resolution_value, value in guard(f"cpc.{meta['key']}", _cpc) or []:
+                cpc_metrics.append({
+                    "filter_key": meta["key"],
+                    "filter_label": meta["label"],
+                    "resolution": resolution_value,
+                    "value": float(value),
+                })
 
     # ---- social network --------------------------------------------------- #
     social_network = guard("social_network", lambda: _load_social_network_sidecar(synthetic_path))
 
     return {
+        "mode": mode,
         "labels": labels,
-        "metrics": {"wasserstein": wasserstein, "jsd": jsd,
-                    "cpc": [{"resolution": r, "value": float(v)} for r, v in cpc_rows]},
+        "metrics": {"wasserstein": wasserstein, "jsd": jsd, "cpc": cpc_metrics},
         "ecdf": ecdf,
         "mobility_laws": mobility_laws,
         "activity": activity,
@@ -582,19 +768,22 @@ def _build_activity_block(
 ) -> dict[str, Any]:
     # purpose distribution (grouped bar)
     syn_dist = _purpose_distribution(synthetic_visits)
-    obs_dist = _purpose_distribution(observed_visits)
+    obs_dist = _purpose_distribution(observed_visits) if observed_visits is not None else {}
     categories = list(dict.fromkeys([*syn_dist, *obs_dist]))
+    purpose_series = [
+        {"name": "synthetic", "role": "synthetic", "values": [syn_dist.get(c, 0.0) for c in categories]},
+    ]
+    if observed_label is not None and observed_visits is not None:
+        purpose_series.append(
+            {"name": observed_label, "role": "observed", "values": [obs_dist.get(c, 0.0) for c in categories]}
+        )
     purpose = {
         "categories": categories,
-        "series": [
-            {"name": "synthetic", "role": "synthetic", "values": [syn_dist.get(c, 0.0) for c in categories]},
-            {"name": observed_label, "role": "observed", "values": [obs_dist.get(c, 0.0) for c in categories]},
-        ],
+        "series": purpose_series,
     }
 
-    # transition difference heatmap (observed - synthetic), percentage points
     syn_cats, syn_mat = _matrix_to_categories(synth_transition)
-    obs_cats, obs_mat = _matrix_to_categories(real_transition)
+    obs_cats, obs_mat = _matrix_to_categories(real_transition) if real_transition is not None else ([], None)
     trans_cats = list(dict.fromkeys([*syn_cats, *obs_cats]))
 
     def _align_sq(cats, mat):
@@ -604,20 +793,33 @@ def _build_activity_block(
         out[np.ix_(src, src)] = mat
         return out
 
-    diff = _align_sq(obs_cats, obs_mat) - _align_sq(syn_cats, syn_mat)
+    if real_transition is not None and observed_label is not None:
+        matrix = _align_sq(obs_cats, obs_mat) - _align_sq(syn_cats, syn_mat)
+        matrix_mode = "difference"
+        labels = ["synthetic", observed_label]
+    else:
+        matrix = _align_sq(syn_cats, syn_mat)
+        matrix_mode = "raw"
+        labels = ["synthetic"]
     transition = {
         "categories": trans_cats,
-        "labels": ["synthetic", observed_label],
-        "matrix": diff.round(3).tolist(),
-        "limit": max(float(np.abs(diff[np.isfinite(diff)]).max()) if np.isfinite(diff).any() else 0.0, 1.0),
+        "labels": labels,
+        "matrix_mode": matrix_mode,
+        "matrix": matrix.round(3).tolist(),
+        "limit": max(float(np.abs(matrix[np.isfinite(matrix)]).max()) if np.isfinite(matrix).any() else 0.0, 1.0),
     }
 
-    # daily activity difference heatmap
     syn_mat_d, syn_cats_d, syn_bins = synth_daily
-    real_mat_d, real_cats_d, real_bins = real_daily
     daily = None
-    if syn_bins == real_bins:
-        dcats = list(dict.fromkeys([*syn_cats_d, *real_cats_d]))
+    if real_daily is not None:
+        real_mat_d, real_cats_d, real_bins = real_daily
+        can_build_daily = syn_bins == real_bins
+        dcats = list(dict.fromkeys([*syn_cats_d, *real_cats_d])) if can_build_daily else []
+    else:
+        real_mat_d = real_cats_d = None
+        can_build_daily = True
+        dcats = list(syn_cats_d)
+    if can_build_daily:
 
         def _align_daily(cats, mat):
             mat = np.asarray(mat, float)
@@ -627,13 +829,21 @@ def _build_activity_block(
                 out[idx[c]] = mat[i]
             return out
 
-        ddiff = _align_daily(real_cats_d, real_mat_d) - _align_daily(syn_cats_d, syn_mat_d)
+        if real_daily is not None and observed_label is not None:
+            daily_matrix = _align_daily(real_cats_d, real_mat_d) - _align_daily(syn_cats_d, syn_mat_d)
+            daily_mode = "difference"
+            daily_labels = ["synthetic", observed_label]
+        else:
+            daily_matrix = _align_daily(syn_cats_d, syn_mat_d)
+            daily_mode = "raw"
+            daily_labels = ["synthetic"]
         daily = {
             "categories": dcats,
             "n_bins": int(syn_bins),
-            "labels": ["synthetic", observed_label],
-            "matrix": ddiff.round(3).tolist(),
-            "limit": max(float(np.abs(ddiff[np.isfinite(ddiff)]).max()) if np.isfinite(ddiff).any() else 0.0, 1.0),
+            "labels": daily_labels,
+            "matrix_mode": daily_mode,
+            "matrix": daily_matrix.round(3).tolist(),
+            "limit": max(float(np.abs(daily_matrix[np.isfinite(daily_matrix)]).max()) if np.isfinite(daily_matrix).any() else 0.0, 1.0),
         }
 
     return {"purpose": purpose, "transition_difference": transition, "daily_activity_difference": daily}
@@ -695,7 +905,13 @@ def _motif_distribution(visits: pd.DataFrame):
     return dist
 
 
-def _build_motifs_block(observed_label, observed_visits, synthetic_visits, jsd) -> dict[str, Any]:
+def _build_motifs_block(
+    observed_label,
+    observed_visits,
+    synthetic_visits,
+    jsd,
+    filter_meta: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     literature_rows = _literature_distribution_rows(None)
     categories = [row["hex_id"] for row in literature_rows]
     motif_label_keys, motif_label_styles = _motif_axis_label_styles()
@@ -714,8 +930,8 @@ def _build_motifs_block(observed_label, observed_visits, synthetic_visits, jsd) 
 
     series = [_series("Literature", "reference", literature_rows)]
 
-    obs_dist = _motif_distribution(observed_visits) if observed_visits is not None else None
-    synth_dist = _motif_distribution(synthetic_visits) if synthetic_visits is not None else None
+    obs_dist = _motif_distribution(observed_visits) if observed_visits is not None and not observed_visits.empty else None
+    synth_dist = _motif_distribution(synthetic_visits) if synthetic_visits is not None and not synthetic_visits.empty else None
 
     if obs_dist is not None:
         series.append(_series(observed_label, "observed",
@@ -727,8 +943,13 @@ def _build_motifs_block(observed_label, observed_visits, synthetic_visits, jsd) 
             left = dict(zip(synth_dist["motif_id"], synth_dist["count"]))
             right = dict(zip(obs_dist["motif_id"], obs_dist["count"]))
             keys = sorted(set(left) | set(right), key=str)
-            jsd.append({"name": "Daily motifs", "value": float(jensen_shannon_divergence(
-                [left.get(k, 0) for k in keys], [right.get(k, 0) for k in keys]))})
+            value = float(jensen_shannon_divergence([left.get(k, 0) for k in keys], [right.get(k, 0) for k in keys]))
+            if filter_meta is None:
+                jsd.append({"name": "Daily motifs", "metric_name": "Daily motifs", "value": value})
+            else:
+                row = _metric_row(filter_meta, "Daily motifs", value)
+                if row is not None:
+                    jsd.append(row)
 
     return {
         "categories": categories,

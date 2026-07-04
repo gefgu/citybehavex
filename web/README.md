@@ -1,6 +1,6 @@
 # CityBehavEx web app
 
-Interactive replacement for the standalone comparison `.html` report. A FastAPI
+Interactive comparison UI for CityBehavEx runs. A FastAPI
 backend turns a simulation's parquet outputs into JSON plot data; a React + Vite
 frontend renders it (ECharts + Leaflet), styled per [`DESIGN.md`](./DESIGN.md).
 
@@ -86,8 +86,8 @@ backend origin alone (no proxy/CORS needed).
 
 ## Notes
 
-- The scientific metrics reuse `citybehavex.reports.comparison` unchanged, so the
-  numbers match the standalone report exactly. DuckDB is used only for cheap
-  parquet metadata and column-projected loading.
+- The scientific metrics reuse helpers from `citybehavex.reports.comparison`,
+  while the live UI owns the rendered comparison experience. DuckDB is used only
+  for cheap parquet metadata and column-projected loading.
 - First load of a large experiment (e.g. Shanghai's ~10.5M-row observed table)
   builds the whole payload and can take a while; it is then served from cache.

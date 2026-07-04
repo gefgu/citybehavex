@@ -13,18 +13,18 @@ from typing import Any, Callable
 
 from .config import CACHE_DIR
 
-PAYLOAD_CACHE_VERSION = "v3"
+PAYLOAD_CACHE_VERSION = "v4"
 
 
 def _key(
     exp_id: str,
     run_id: str,
     synthetic: Path,
-    observed: Path,
+    observed: Path | None,
     extra_paths: tuple[Path, ...] = (),
 ) -> str:
     syn_mtime = int(synthetic.stat().st_mtime)
-    obs_mtime = int(observed.stat().st_mtime)
+    obs_mtime = int(observed.stat().st_mtime) if observed and observed.exists() else "synthetic-only"
     extra = "__".join(
         f"{path.stem}-{int(path.stat().st_mtime) if path.exists() else 'missing'}"
         for path in extra_paths
@@ -37,7 +37,7 @@ def get_or_build(
     exp_id: str,
     run_id: str,
     synthetic: Path,
-    observed: Path,
+    observed: Path | None,
     build: Callable[[], dict[str, Any]],
     *,
     refresh: bool = False,

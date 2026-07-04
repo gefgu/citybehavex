@@ -332,13 +332,25 @@ body {
 }
 
 /* ---- section headers ---- */
+.section-heading-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-md);
+  margin: var(--space-xxl) 0 var(--space-md);
+}
 .section-header {
   font-size: 11px;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.1em;
   color: var(--muted);
-  margin: var(--space-xxl) 0 var(--space-md);
+  margin: 0;
+}
+.section-controls {
+  display: flex;
+  justify-content: flex-end;
+  min-width: 0;
 }
 
 /* ---- metric tables ---- */
@@ -354,8 +366,51 @@ table.metrics {
 table.metrics td { padding: 4px 16px 4px 0; }
 table.metrics td.value { font-family: ui-monospace, monospace; color: var(--ink); }
 table.metrics td.unit { color: var(--muted); }
+.metric-filter {
+  display: inline-block;
+  min-width: 74px;
+  color: var(--muted);
+  font-size: 12px;
+}
 
 /* ---- charts ---- */
+.segmented-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-sm);
+  background: var(--surface-soft);
+  padding: 3px;
+}
+.segmented-control button {
+  border: 0;
+  border-radius: var(--radius-xs);
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 13px;
+  line-height: 1;
+  margin: 0;
+  padding: 9px 14px;
+  transition:
+    background-color 140ms ease,
+    color 140ms ease,
+    box-shadow 140ms ease;
+}
+.segmented-control button:hover {
+  background: var(--surface-strong);
+  color: var(--ink);
+}
+.segmented-control button.active {
+  background: var(--ink);
+  color: #ffffff;
+  box-shadow: 0 1px 3px rgba(24, 29, 38, 0.18);
+}
+.segmented-control button.active:hover {
+  background: var(--ink-active);
+  color: #ffffff;
+}
 .chart-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(460px, 1fr));
@@ -616,6 +671,18 @@ table.agent-table td:first-child { color: var(--muted); }
     margin-left: 0;
   }
   .hero h1 { font-size: 36px; }
+  .section-heading-row {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .section-controls {
+    justify-content: flex-start;
+    width: 100%;
+  }
+  .segmented-control {
+    max-width: 100%;
+    overflow-x: auto;
+  }
   .hero {
     grid-template-columns: 1fr;
     gap: var(--space-lg);

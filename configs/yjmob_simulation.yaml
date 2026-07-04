@@ -77,4 +77,3 @@ profiles:
 comparison:
   path: data/yjmob/yjmob_wgs84_simple.parquet
   label: yjmob100k
-  html: data/yjmob/yjmob_simulation_comparison.html

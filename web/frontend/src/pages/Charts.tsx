@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import type { ReactNode } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import type { EChartsOption } from "echarts";
 import { fetchCharts, type ChartPayload } from "../api";
@@ -45,12 +46,113 @@ const ECDF_TITLES: Record<string, string> = {
   trip_duration: "Trip duration",
 };
 
+type FilterChoice = { key: string; label: string };
+
+const DAY_FILTERS: FilterChoice[] = [
+  { key: "all", label: "All" },
+  { key: "weekday", label: "Weekday" },
+  { key: "weekend", label: "Weekend" },
+];
+
+const PERIOD_FILTERS: FilterChoice[] = [
+  { key: "all", label: "All day" },
+  { key: "morning", label: "Morning" },
+  { key: "afternoon", label: "Afternoon" },
+  { key: "evening", label: "Evening" },
+  { key: "night", label: "Night" },
+];
+
+function SegmentedControl({
+  label,
+  options,
+  value,
+  onChange,
+}: {
+  label: string;
+  options: FilterChoice[];
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <div className="segmented-control" aria-label={label}>
+      {options.map((option) => (
+        <button
+          className={option.key === value ? "active" : ""}
+          key={option.key}
+          onClick={() => onChange(option.key)}
+          type="button"
+        >
+          {option.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function SectionHeading({
+  title,
+  controls,
+}: {
+  title: string;
+  controls?: ReactNode;
+}) {
+  return (
+    <div className="section-heading-row">
+      <div className="section-header">{title}</div>
+      {controls && <div className="section-controls">{controls}</div>}
+    </div>
+  );
+}
+
+function metricName(m: { metric_name?: string; name?: string }) {
+  return m.metric_name ?? m.name ?? "Metric";
+}
+
+function FilteredMetricTable({
+  title,
+  rows,
+  unit,
+}: {
+  title: string;
+  rows: { filter_key?: string; filter_label?: string; metric_name?: string; name?: string; value: number; unit?: string; resolution?: number }[];
+  unit?: string;
+}) {
+  if (rows.length === 0) return null;
+  return (
+    <div>
+      <h4>{title}</h4>
+      <table className="metrics">
+        <tbody>
+          {rows.map((m, i) => (
+            <tr key={`${m.filter_key ?? "all"}:${metricName(m)}:${m.resolution ?? i}`}>
+              <td>
+                <span className="metric-filter">{m.filter_label ?? "All"}</span>
+                {m.resolution ? `H3 ${m.resolution}` : metricName(m)}
+              </td>
+              <td className="value">{m.value.toFixed(4)}</td>
+              <td className="unit">{m.unit ?? unit ?? ""}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 export function Charts() {
   const { id = "" } = useParams();
   const [params] = useSearchParams();
   const run = params.get("run") ?? undefined;
   const [payload, setPayload] = useState<ChartPayload | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [dayFilter, setDayFilter] = useState("all");
+  const [distributionFilter, setDistributionFilter] = useState("all");
+  const setSyncedDayFilter = (next: string) => {
+    setDayFilter(next);
+    if (["all", "weekday", "weekend"].includes(distributionFilter)) {
+      setDistributionFilter(next);
+    }
+  };
 
   useEffect(() => {
     setPayload(null);
@@ -76,11 +178,39 @@ export function Charts() {
     return <div className="state">Building comparison… (first load can take a while)</div>;
 
   const { metrics } = payload;
+  const metricFilter = distributionFilter === "all" ? dayFilter : distributionFilter;
+  const metricRows = {
+    wasserstein: metrics.wasserstein.filter((m) => m.filter_key === metricFilter),
+    jsd: metrics.jsd.filter((m) => (m.filter_key ?? "all") === dayFilter),
+    cpc: metrics.cpc.filter((m) => m.filter_key === dayFilter),
+  };
+  const ecdfGroup =
+    payload.ecdf.groups.find((group) => group.filter_key === distributionFilter) ??
+    payload.ecdf.groups[0];
+  const mobilityGroup =
+    payload.mobility_laws?.groups.find((group) => group.filter_key === dayFilter) ??
+    payload.mobility_laws?.groups[0];
+  const activityGroup =
+    payload.activity?.groups.find((group) => group.filter_key === dayFilter) ??
+    payload.activity?.groups[0];
+  const microActivityGroup =
+    payload.micro_activity_usage?.groups.find((group) => group.filter_key === dayFilter) ??
+    payload.micro_activity_usage?.groups[0];
+  const motifGroup =
+    payload.motifs?.groups.find((group) => group.filter_key === dayFilter) ??
+    payload.motifs?.groups[0];
+  const stvdGroup =
+    payload.stvd?.groups.find((group) => group.filter_key === dayFilter) ??
+    payload.stvd?.groups[0];
+  const titleLabel =
+    payload.mode === "comparison" && payload.labels.observed
+      ? `${payload.labels.observed} vs synthetic`
+      : "Synthetic analysis";
 
   return (
     <>
       <h1 style={{ margin: "48px 0 4px" }}>
-        {payload.labels.observed} <span style={{ color: "var(--muted)" }}>vs synthetic</span>
+        {titleLabel}
       </h1>
       <p style={{ color: "var(--muted)", marginTop: 0 }}>
         <Link to="/experiments">experiments</Link> / {id} · run{" "}
@@ -93,65 +223,64 @@ export function Charts() {
         </div>
       )}
 
-      {/* metrics */}
-      <div className="section-header">Metrics</div>
-      <div className="metric-tables">
-        <div>
-          <h4>Wasserstein distances</h4>
-          <table className="metrics">
-            <tbody>
-              {metrics.wasserstein.map((m) => (
-                <tr key={m.name}>
-                  <td>{m.name}</td>
-                  <td className="value">{m.value.toFixed(4)}</td>
-                  <td className="unit">{m.unit}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+      <SectionHeading
+        controls={
+          <SegmentedControl
+            label="Metrics day type filter"
+            onChange={setSyncedDayFilter}
+            options={DAY_FILTERS}
+            value={dayFilter}
+          />
+        }
+        title="Metrics"
+      />
+      {payload.mode === "synthetic_only" ? (
+        <div className="network-empty">
+          Synthetic-only mode. Add an observed comparison parquet to show Wasserstein,
+          Jensen-Shannon and CPC metrics.
         </div>
-        <div>
-          <h4>Jensen–Shannon divergences</h4>
-          <table className="metrics">
-            <tbody>
-              {metrics.jsd.map((m) => (
-                <tr key={m.name}>
-                  <td>{m.name}</td>
-                  <td className="value">{m.value.toFixed(4)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+      ) : (
+        <div className="metric-tables">
+          <FilteredMetricTable title="Wasserstein distances" rows={metricRows.wasserstein} />
+          <FilteredMetricTable title="Jensen-Shannon divergences" rows={metricRows.jsd} />
+          <FilteredMetricTable title="Common Part of Commuters" rows={metricRows.cpc} />
         </div>
-        <div>
-          <h4>Common Part of Commuters</h4>
-          <table className="metrics">
-            <tbody>
-              {metrics.cpc.map((m) => (
-                <tr key={m.resolution}>
-                  <td>H3 {m.resolution}</td>
-                  <td className="value">{m.value.toFixed(4)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
+      )}
 
-      {/* ECDFs */}
-      <div className="section-header">Distribution comparisons</div>
-      <div className="chart-grid">
-        {Object.entries(payload.ecdf).map(([key, block]) => (
-          <ChartCard key={key} title={`${ECDF_TITLES[key] ?? key} ECDF`} option={ecdfOption(block)} />
-        ))}
-      </div>
+      <SectionHeading
+        controls={
+          <SegmentedControl
+            label="Distribution filter"
+            onChange={setDistributionFilter}
+            options={[...DAY_FILTERS, ...PERIOD_FILTERS.filter((option) => option.key !== "all")]}
+            value={distributionFilter}
+          />
+        }
+        title="Distribution comparisons"
+      />
+      {ecdfGroup && (
+        <div className="chart-grid">
+          {Object.entries(ecdfGroup.blocks).map(([key, block]) => (
+            <ChartCard key={key} title={`${ECDF_TITLES[key] ?? key} ECDF`} option={ecdfOption(block)} />
+          ))}
+        </div>
+      )}
 
-      {/* mobility laws */}
-      {payload.mobility_laws && (
+      {mobilityGroup && (
         <>
-          <div className="section-header">Mobility laws</div>
+          <SectionHeading
+            controls={
+              <SegmentedControl
+                label="Mobility laws day type filter"
+                onChange={setSyncedDayFilter}
+                options={DAY_FILTERS}
+                value={dayFilter}
+              />
+            }
+            title="Mobility laws"
+          />
           <div className="chart-grid">
-            {Object.entries(payload.mobility_laws).map(([key, block]) => (
+            {Object.entries(mobilityGroup.blocks).map(([key, block]) => (
               <ChartCard
                 key={key}
                 title={block.title}
@@ -163,43 +292,105 @@ export function Charts() {
         </>
       )}
 
-      {/* activity */}
-      {payload.activity && (
+      {activityGroup && (
         <>
-          <div className="section-header">Activity comparison</div>
+          <SectionHeading
+            controls={
+              <SegmentedControl
+                label="Activity day type filter"
+                onChange={setSyncedDayFilter}
+                options={DAY_FILTERS}
+                value={dayFilter}
+              />
+            }
+            title="Activity comparison"
+          />
           <div className="chart-grid">
-            <ChartCard title="Visit purpose comparison" option={purposeOption(payload.activity.purpose)} wide />
+            <ChartCard title="Visit purpose comparison" option={purposeOption(activityGroup.purpose)} wide />
             <ChartCard
-              title="Activity transition difference"
-              option={transitionOption(payload.activity.transition_difference)}
+              title={activityGroup.transition_difference.matrix_mode === "raw" ? "Activity transitions" : "Activity transition difference"}
+              option={transitionOption(activityGroup.transition_difference)}
             />
-            {payload.activity.daily_activity_difference && (
+            {activityGroup.daily_activity_difference && (
               <ChartCard
-                title="Daily activity difference"
-                option={dailyActivityOption(payload.activity.daily_activity_difference)}
+                title={activityGroup.daily_activity_difference.matrix_mode === "raw" ? "Daily activity" : "Daily activity difference"}
+                option={dailyActivityOption(activityGroup.daily_activity_difference)}
               />
             )}
           </div>
         </>
       )}
 
-      {payload.micro_activity_usage && (
+      {microActivityGroup && (
         <>
-          <div className="section-header">Synthetic micro-activity usage</div>
+          <SectionHeading
+            controls={
+              <SegmentedControl
+                label="Micro-activity day type filter"
+                onChange={setSyncedDayFilter}
+                options={DAY_FILTERS}
+                value={dayFilter}
+              />
+            }
+            title="Synthetic micro-activity usage"
+          />
+          <ChartCard
+            title="Mean daily usage over the day"
+            option={microActivityUsageOption(microActivityGroup.block)}
+            wide
+          />
+        </>
+      )}
+
+      {motifGroup && (
+        <>
+          <SectionHeading
+            controls={
+              <SegmentedControl
+                label="Motifs day type filter"
+                onChange={setSyncedDayFilter}
+                options={DAY_FILTERS}
+                value={dayFilter}
+              />
+            }
+            title="Daily motifs"
+          />
           <div className="chart-grid">
-            <ChartCard
-              title="Mean daily usage over the day"
-              option={microActivityUsageOption(payload.micro_activity_usage)}
-              wide
-            />
+            <ChartCard title="Motif literature comparison" option={motifOption(motifGroup.block)} wide />
           </div>
         </>
       )}
 
-      {/* profiles */}
+      {stvdGroup && (
+        <>
+          <SectionHeading
+            controls={
+              <SegmentedControl
+                label="STVD day type filter"
+                onChange={setSyncedDayFilter}
+                options={DAY_FILTERS}
+                value={dayFilter}
+              />
+            }
+            title="Spatial-temporal volume difference"
+          />
+          <StvdMap block={stvdGroup.block} />
+        </>
+      )}
+
+      <SectionHeading title="Social network" />
+      {payload.social_network ? (
+        <SocialNetworkGraph block={payload.social_network} />
+      ) : (
+        <div className="network-empty">
+          No social network sidecar found for this run. Re-run the simulation with the latest code,
+          then refresh the chart payload.
+        </div>
+      )}
+
       {payload.profiles && (
         <>
-          <div className="section-header">Mobility profiles</div>
+          <SectionHeading title="Mobility profiles" />
           <div className="chart-grid">
             <ChartCard
               title="Intermittency vs degree of return"
@@ -215,34 +406,6 @@ export function Charts() {
             ))}
           </div>
         </>
-      )}
-
-      {/* motifs */}
-      {payload.motifs && (
-        <>
-          <div className="section-header">Daily motifs</div>
-          <div className="chart-grid">
-            <ChartCard title="Motif literature comparison" option={motifOption(payload.motifs)} wide />
-          </div>
-        </>
-      )}
-
-      {/* STVD */}
-      {payload.stvd && (
-        <>
-          <div className="section-header">Spatial-temporal volume difference</div>
-          <StvdMap block={payload.stvd} />
-        </>
-      )}
-
-      <div className="section-header">Social network</div>
-      {payload.social_network ? (
-        <SocialNetworkGraph block={payload.social_network} />
-      ) : (
-        <div className="network-empty">
-          No social network sidecar found for this run. Re-run the simulation with the latest code,
-          then refresh the chart payload.
-        </div>
       )}
 
       <div style={{ height: 96 }} />

@@ -94,6 +94,5 @@ profiles:
   output: data/gparis/results/gparis_agent_profiles.parquet
 
 comparison:
-  path: data/gparis/results/gparis_visitation_df.parquet
+  path: data/gparis/gparis_visitation_df.parquet
   label: gparis
-  html: data/gparis/results/gparis_simulation_core_comparison.html

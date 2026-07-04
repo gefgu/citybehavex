@@ -177,6 +177,7 @@ function diffHeatmap(
   limit: number,
   labels: string[],
   xName: string,
+  matrixMode: "difference" | "raw" = "difference",
 ): EChartsOption {
   // matrix[row=y][col=x] -> data [colIndex, rowIndex, value]
   const data: [number, number, number][] = [];
@@ -189,7 +190,8 @@ function diffHeatmap(
       trigger: "item",
       formatter: (p: unknown) => {
         const d = p as { data: [number, number, number] };
-        return `${yLabels[d.data[1]]} → ${xLabels[d.data[0]]}<br/>${d.data[2].toFixed(2)} pp`;
+        const suffix = matrixMode === "difference" ? " pp" : "";
+        return `${yLabels[d.data[1]]} → ${xLabels[d.data[0]]}<br/>${d.data[2].toFixed(2)}${suffix}`;
       },
     },
     xAxis: {
@@ -214,13 +216,13 @@ function diffHeatmap(
       orient: "vertical",
       right: 0,
       top: "center",
-      text: [`${labels[1]} higher`, `${labels[0]} higher`],
+      text: matrixMode === "difference" ? [`${labels[1]} higher`, `${labels[0]} higher`] : ["high", "low"],
       textStyle: { color: COLORS.muted, fontSize: 10 },
       inRange: { color: [COLORS.coral, "#f7f7f7", COLORS.forest] },
     },
     series: [
       {
-        name: `${labels[1]} − ${labels[0]}`,
+        name: matrixMode === "difference" ? `${labels[1]} - ${labels[0]}` : labels[0],
         type: "heatmap",
         data,
         label: { show: xLabels.length <= 8, fontSize: 10, formatter: (p: unknown) => (p as { data: number[] }).data[2].toFixed(0) },
@@ -230,7 +232,7 @@ function diffHeatmap(
 }
 
 export function transitionOption(block: ActivityBlock["transition_difference"]): EChartsOption {
-  return diffHeatmap(block.categories, block.categories, block.matrix, block.limit, block.labels, "to activity");
+  return diffHeatmap(block.categories, block.categories, block.matrix, block.limit, block.labels, "to activity", block.matrix_mode);
 }
 
 export function dailyActivityOption(
@@ -241,7 +243,7 @@ export function dailyActivityOption(
     const h = Math.floor(i / perHour);
     return i % perHour === 0 ? `${String(h).padStart(2, "0")}:00` : "";
   });
-  const opt = diffHeatmap(xLabels, block.categories, block.matrix, block.limit, block.labels, "time of day");
+  const opt = diffHeatmap(xLabels, block.categories, block.matrix, block.limit, block.labels, "time of day", block.matrix_mode);
   (opt.series as { label: { show: boolean } }[])[0].label.show = false;
   return opt;
 }

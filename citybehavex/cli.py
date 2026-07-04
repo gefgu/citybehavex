@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from datetime import datetime
-from pathlib import Path
 from typing import Optional
 
 import typer
@@ -109,50 +107,23 @@ def report(
     ),
     output: Optional[str] = typer.Option(
         None,
-        help="Output HTML path. Defaults to comparison.html.",
+        help="Deprecated standalone HTML output path.",
+        hidden=True,
     ),
     json_output: Optional[str] = typer.Option(
         None,
         "--json",
-        help="Output metrics JSON path. Defaults to comparison.json_output.",
+        help="Deprecated standalone metrics JSON path.",
+        hidden=True,
     ),
 ):
-    """Generate a comparison report from existing trajectory data."""
-    loaded = load_config(config)
-    synthetic_path = synthetic or loaded.simulation.output
-    comparison_path = comparison or loaded.comparison.path
-    observed_label = comparison_label or loaded.comparison.label
-    base_html = output or loaded.comparison.html
-    base_json = json_output or loaded.comparison.json_output
-    ts = datetime.now().strftime("%Y%m%dT%H%M%S")
-    p = Path(base_html)
-    output_path = str(p.with_name(f"{p.stem}_{ts}{p.suffix}"))
-    json_output_path = None
-    if base_json:
-        jp = Path(base_json)
-        json_output_path = str(jp.with_name(f"{jp.stem}_{ts}{jp.suffix}"))
-
-    if comparison_path is None:
-        typer.echo(
-            "Error: provide --comparison or set comparison.path in the config.",
-            err=True,
-        )
-        raise typer.Exit(1)
-
-    from .reports import generate_comparison_report_from_paths
-
-    try:
-        generate_comparison_report_from_paths(
-            synthetic_path=synthetic_path,
-            real_path=comparison_path,
-            observed_label=observed_label,
-            output_path=output_path,
-            json_output_path=json_output_path,
-            sections=loaded.comparison.sections,
-        )
-    except (FileNotFoundError, ValueError) as exc:
-        typer.echo(f"Error: {exc}", err=True)
-        raise typer.Exit(1) from exc
+    """Deprecated: use the live web UI for comparison charts."""
+    typer.echo(
+        "The standalone HTML report command is deprecated. "
+        "Run the web app and open /experiments to view live comparison charts.",
+        err=True,
+    )
+    raise typer.Exit(1)
 
 
 @app.command()
@@ -209,7 +180,6 @@ def simulate(
         None, "--comparison", help="Path to trajectories parquet to compare against."
     ),
     comparison_label: Optional[str] = typer.Option(None, help="Comparison series label"),
-    comparison_html: Optional[str] = typer.Option(None, help="Output comparison HTML path"),
     enable_road_routing: Optional[bool] = typer.Option(
         None,
         "--enable-road-routing/--no-enable-road-routing",
@@ -258,7 +228,6 @@ def simulate(
         {
             "path": comparison,
             "label": comparison_label,
-            "html": comparison_html,
         },
     )
     llm = apply_overrides(
