@@ -62,6 +62,37 @@ uv run --extra embeddings vllm serve nomic-ai/nomic-embed-text-v1.5 \
 The `embeddings` extra (vLLM) is required only for serving; without a GPU set
 `embedding.enabled: false` to fall back to identity similarity.
 
+### Fine-tuning the ModernBERT schedule aligner
+
+To label sampled profile-diary pairs with the LLM server and fine-tune the
+macro-schedule alignment scorer, run:
+
+```bash
+uv run --extra finetuning python scripts/train_modernbert_schedule_aligner.py \
+  --profiles-path data/gparis/results/gparis_agent_profiles.parquet \
+  --diary-path data/llm_diaries_gparis/validated_diaries_weekday.json \
+  --diary-path data/llm_diaries_gparis/validated_diaries_weekend.json \
+  --llm-base-url http://localhost:8081 \
+  --llm-model Qwen/Qwen2.5-32B-Instruct-AWQ \
+  --dataset-output data/llm_diaries_gparis/schedule_alignment_scores.parquet \
+  --output-model-path models/modernbert-schedule-aligner \
+  --sample-size 1000 \
+  --epochs 1 \
+  --batch-size 8 \
+  --learning-rate 2e-5
+```
+
+The script asks the LLM for a reason and a score, but only persists the numeric
+alignment score and pair metadata. To use the trained scorer for macro-schedule
+ddCRP selection, serve the saved model with TEI and set:
+
+```yaml
+schedule:
+  similarity_backend: alignment_model
+  alignment_base_url: http://localhost:8082
+  alignment_model: models/modernbert-schedule-aligner
+```
+
 ## Web app
 
 `web/` is the supported comparison UI: a FastAPI backend serves comparison and

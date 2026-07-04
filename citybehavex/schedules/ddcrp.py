@@ -145,6 +145,7 @@ def build_ddcrp_diary(
     random_state: int,
     params: ScheduleConfig,
     profile_embeddings: np.ndarray | None = None,
+    agent_diary_sim: np.ndarray | None = None,
 ) -> tuple[DiaryArrays, np.ndarray, DdcrpAgentInfo]:
     """Run profile-driven CRP schedule selection for every agent and day.
 
@@ -186,7 +187,14 @@ def build_ddcrp_diary(
     # Pre-compute per-agent profile↔diary similarities [n_agents, K].
     # Falls back to zeros (constant) when embeddings are unavailable.
     K = len(bank.diaries)
-    if profile_embeddings is not None and bank.embeddings is not None:
+    if agent_diary_sim is not None:
+        if agent_diary_sim.shape != (n_agents, K):
+            raise ValueError(
+                "agent_diary_sim must have shape "
+                f"({n_agents}, {K}), got {agent_diary_sim.shape}"
+            )
+        agent_diary_sim = np.clip(agent_diary_sim.astype(np.float64), 0.0, 1.0)
+    elif profile_embeddings is not None and bank.embeddings is not None:
         # Both are L2-normalized: dot product = cosine similarity.
         agent_diary_sim = np.clip(
             profile_embeddings.astype(np.float64) @ bank.embeddings.astype(np.float64).T,
@@ -218,7 +226,9 @@ def build_ddcrp_diary(
             sims_k = agent_sims[candidates]
             counts_k = usage_counts[candidates]
             effective_counts = np.where(counts_k > 0, counts_k, alpha_a)
-            w = effective_counts * np.exp(sims_k / T_a)
+            logits = sims_k / T_a
+            logits = logits - np.max(logits)
+            w = effective_counts * np.exp(logits)
             total = w.sum()
             if not np.isfinite(total) or total <= 0:
                 pick = int(candidates[rng.integers(len(candidates))])

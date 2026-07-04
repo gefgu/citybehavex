@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from .config import ScheduleConfig
+from .alignment import score_alignment_matrix
 from .ddcrp import (
     DdcrpAgentInfo,
     DiaryArrays,
@@ -18,4 +19,5 @@ __all__ = [
     "build_ddcrp_diary",
     "build_diary_bank",
     "diary_to_abs_locs",
+    "score_alignment_matrix",
 ]

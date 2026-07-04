@@ -6,6 +6,7 @@ from citybehavex.config import apply_overrides, load_config
 from citybehavex.llm import LLMConfig
 from citybehavex.llm_diaries import DiariesConfig
 from citybehavex.profiles.config import AgentProfilesConfig
+from citybehavex.schedules import ScheduleConfig
 from citybehavex.simulation import SimulationConfig
 
 
@@ -55,6 +56,22 @@ def test_simulation_config_accepts_bounded_social_graph_settings():
 
 def test_llm_config_defaults_to_thirty_diaries():
     assert LLMConfig().diary_count == 30
+
+
+def test_schedule_alignment_config_defaults_to_embedding_backend():
+    config = ScheduleConfig()
+    assert config.similarity_backend == "embedding"
+    assert config.alignment_base_url is None
+
+
+def test_schedule_alignment_config_accepts_alignment_backend():
+    config = ScheduleConfig(
+        similarity_backend="alignment_model",
+        alignment_base_url="http://localhost:8082",
+        alignment_model="models/modernbert-schedule-aligner",
+    )
+    assert config.similarity_backend == "alignment_model"
+    assert config.alignment_batch_size == 32
 
 
 def test_profiles_default_to_poi_building_location_inference():

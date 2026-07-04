@@ -22,7 +22,13 @@ from citybehavex.embedding import embed_profiles, embed_texts
 from citybehavex.llm_diaries import DiaryBatch, LLMStats, allocate_location_counts, fetch_diary_batch
 from citybehavex.profiles import AgentProfile, generate_profiles, load_profiles, profile_to_narrative, profiles_to_frame
 from citybehavex.roads import build_road_graph, snap_locations_to_graph
-from citybehavex.schedules import DdcrpAgentInfo, DiaryBank, build_ddcrp_diary, build_diary_bank
+from citybehavex.schedules import (
+    DdcrpAgentInfo,
+    DiaryBank,
+    build_ddcrp_diary,
+    build_diary_bank,
+    score_alignment_matrix,
+)
 from citybehavex.simulation.core import CoreTiming, simulate_agents, social_network_sidecar_path
 from citybehavex.tessellation import build_poi_tessellation, build_tessellation, purpose_distribution
 
@@ -708,6 +714,7 @@ def _build_schedule(
     )
 
     profile_embeddings = None
+    narratives = None
     if profiles is not None:
         narratives = [profile_to_narrative(p) for p in profiles]
         profile_embeddings = embed_profiles(narratives, config.embedding)
@@ -715,6 +722,18 @@ def _build_schedule(
             typer.echo(f"Profile embeddings: {profile_embeddings.shape}")
         else:
             typer.echo("Profile embeddings unavailable — falling back to popularity CRP")
+
+    agent_diary_sim = None
+    if (
+        profiles is not None
+        and narratives is not None
+        and config.schedule.similarity_backend == "alignment_model"
+    ):
+        agent_diary_sim = score_alignment_matrix(narratives, bank.diaries, config.schedule)
+        if agent_diary_sim is not None:
+            typer.echo(f"Macro-schedule alignment scores: {agent_diary_sim.shape}")
+        else:
+            typer.echo("Alignment scorer unavailable — falling back to embedding cosine")
 
     day_types = [
         config.diaries.resolve_day_type((start_date + pd.Timedelta(days=d)).date())
@@ -729,6 +748,7 @@ def _build_schedule(
         config.simulation.random_state,
         config.schedule,
         profile_embeddings=profile_embeddings,
+        agent_diary_sim=agent_diary_sim,
     )
     return bank, diary_arrays, chosen, profile_embeddings, crp_info
 
