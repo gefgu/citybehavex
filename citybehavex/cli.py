@@ -111,6 +111,11 @@ def report(
         None,
         help="Output HTML path. Defaults to comparison.html.",
     ),
+    json_output: Optional[str] = typer.Option(
+        None,
+        "--json",
+        help="Output metrics JSON path. Defaults to comparison.json_output.",
+    ),
 ):
     """Generate a comparison report from existing trajectory data."""
     loaded = load_config(config)
@@ -118,9 +123,14 @@ def report(
     comparison_path = comparison or loaded.comparison.path
     observed_label = comparison_label or loaded.comparison.label
     base_html = output or loaded.comparison.html
+    base_json = json_output or loaded.comparison.json_output
     ts = datetime.now().strftime("%Y%m%dT%H%M%S")
     p = Path(base_html)
     output_path = str(p.with_name(f"{p.stem}_{ts}{p.suffix}"))
+    json_output_path = None
+    if base_json:
+        jp = Path(base_json)
+        json_output_path = str(jp.with_name(f"{jp.stem}_{ts}{jp.suffix}"))
 
     if comparison_path is None:
         typer.echo(
@@ -137,6 +147,8 @@ def report(
             real_path=comparison_path,
             observed_label=observed_label,
             output_path=output_path,
+            json_output_path=json_output_path,
+            sections=loaded.comparison.sections,
         )
     except (FileNotFoundError, ValueError) as exc:
         typer.echo(f"Error: {exc}", err=True)

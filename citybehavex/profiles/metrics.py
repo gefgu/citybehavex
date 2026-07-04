@@ -44,18 +44,16 @@ def _stationarity(visits: pd.DataFrame) -> pd.DataFrame:
 def _cluster_and_label(
     profiles: pd.DataFrame, *, n_clusters: int = 3, random_state: int = 0
 ) -> pd.DataFrame:
-    """Cluster users on [intermittency, degree_of_return] with a Gaussian mixture and
+    """Cluster users on [intermittency, degree_of_return] with KMeans and
     label clusters Routiner/Regular/Scouter by descending degree-of-return centroid."""
-    from sklearn.mixture import GaussianMixture
+    from sklearn.cluster import KMeans
     from sklearn.preprocessing import StandardScaler
 
     features = profiles[["intermittency", "degree_of_return"]].to_numpy()
     scaler = StandardScaler()
-    gmm = GaussianMixture(
-        n_components=n_clusters, covariance_type="full", random_state=random_state
-    )
+    kmeans = KMeans(n_clusters=n_clusters, random_state=random_state, n_init=10)
     profiles = profiles.copy()
-    profiles["cluster"] = gmm.fit_predict(scaler.fit_transform(features))
+    profiles["cluster"] = kmeans.fit_predict(scaler.fit_transform(features))
 
     cluster_order = (
         profiles.groupby("cluster")["degree_of_return"]
@@ -110,7 +108,7 @@ def compute_profiles(
     ):
         profiles = profiles.merge(metric_df, on="uid", how="left")
 
-    # GMM needs finite clustering features; sparse single-visit users may lack them.
+    # KMeans needs finite clustering features; sparse single-visit users may lack them.
     profiles = profiles.dropna(subset=["intermittency", "degree_of_return"]).reset_index(drop=True)
     if len(profiles) < n_clusters:
         raise ValueError(
