@@ -2,8 +2,10 @@ import { useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import type { EChartsOption } from "echarts";
-import { fetchCharts, type ChartPayload } from "../api";
+import { fetchCharts, fetchHomeWork, type ChartPayload, type DemographicFilter as DemographicFilterValue, type HomeWorkResponse } from "../api";
 import { EChart } from "../charts/EChart";
+import { DemographicFilter } from "../components/DemographicFilter";
+import { HomeWorkMap } from "../components/HomeWorkMap";
 import { SocialNetworkGraph } from "../components/SocialNetworkGraph";
 import { StvdMap } from "../components/StvdMap";
 import {
@@ -147,6 +149,12 @@ export function Charts() {
   const [error, setError] = useState<string | null>(null);
   const [dayFilter, setDayFilter] = useState("all");
   const [distributionFilter, setDistributionFilter] = useState("all");
+  const [homeWork, setHomeWork] = useState<HomeWorkResponse | null>(null);
+  const [demoFilter, setDemoFilter] = useState<DemographicFilterValue>({
+    gender: null,
+    age_bracket: null,
+    job: null,
+  });
   const setSyncedDayFilter = (next: string) => {
     setDayFilter(next);
     if (["all", "weekday", "weekend"].includes(distributionFilter)) {
@@ -159,6 +167,10 @@ export function Charts() {
     setError(null);
     fetchCharts(id, run).then(setPayload).catch((e) => setError(String(e)));
   }, [id, run]);
+
+  useEffect(() => {
+    fetchHomeWork(id, run, demoFilter).then(setHomeWork).catch(() => setHomeWork(null));
+  }, [id, run, demoFilter]);
 
   const fitSubtitle = useMemo(
     () => (fits: { label: string; params: Record<string, number> }[]) =>
@@ -375,6 +387,41 @@ export function Charts() {
             title="Spatial-temporal volume difference"
           />
           <StvdMap block={stvdGroup.block} />
+        </>
+      )}
+
+      {homeWork && (
+        <>
+          <SectionHeading
+            controls={
+              homeWork.has_profiles ? (
+                <DemographicFilter
+                  options={homeWork.filter_options}
+                  value={demoFilter}
+                  onChange={setDemoFilter}
+                />
+              ) : undefined
+            }
+            title="Home locations"
+          />
+          {homeWork.has_profiles && (
+            <p className="hw-match-note">
+              {homeWork.matched_agents} of {homeWork.total_synthetic_agents} synthetic agents match
+              &nbsp;&middot;&nbsp; real population shown unfiltered (no demographics available)
+            </p>
+          )}
+          <HomeWorkMap
+            block={homeWork.home}
+            syntheticLabel={payload.labels.synthetic}
+            observedLabel={payload.labels.observed}
+          />
+
+          <SectionHeading title="Work locations" />
+          <HomeWorkMap
+            block={homeWork.work}
+            syntheticLabel={payload.labels.synthetic}
+            observedLabel={payload.labels.observed}
+          />
         </>
       )}
 
