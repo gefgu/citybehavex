@@ -11,8 +11,10 @@ _CATEGORY_CSV = Path(__file__).parents[1] / "category" / "unique_categories.csv"
 
 def normalize_purpose_label(value: object) -> str:
     """Collapse category-level purpose labels to the simulator's 3-purpose contract."""
-    if isinstance(value, str) and value.strip().upper() == "WORK":
-        return "WORK"
+    if isinstance(value, str):
+        purpose = value.strip().upper()
+        if purpose in {"HOME", "WORK"}:
+            return purpose
     return "OTHER"
 
 

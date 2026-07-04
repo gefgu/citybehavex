@@ -112,11 +112,14 @@ def _vllm_server(config: EmbeddingConfig) -> Iterator[str]:
     log_path = log_dir / "vllm_embed.log"
 
     cmd = [
-        "vllm",
+        config.vllm_executable,
         "serve",
         config.model,
-        "--task",
-        "embed",
+        # vLLM >=0.11 renamed the old `--task embed` flag to `--runner`; "pooling"
+        # auto-resolves to `--convert embed` for embedding-native models like
+        # nomic-embed-text. `--task embed` is a hard CLI error on newer vLLM.
+        "--runner",
+        "pooling",
         "--trust-remote-code",
         "--port",
         str(port),

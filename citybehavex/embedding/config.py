@@ -19,6 +19,7 @@ class EmbeddingConfig(BaseModel):
     dimensions: int = Field(default=768, gt=0)
     timeout_seconds: float = 120.0
     auto_launch: bool = True
+    vllm_executable: str = "vllm"
     vllm_port: int = 8001
     vllm_startup_timeout_seconds: float = 600.0
     vllm_extra_args: list[str] = Field(default_factory=list)

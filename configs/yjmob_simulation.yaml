@@ -15,6 +15,14 @@ simulation:
   relevance_column: total_poi_count
   granularity_minutes: 30
   car_speed_kmh: 40.0
+  rho: 0.6
+  gamma: 0.21
+  alpha: 0.2
+  dt_update_mob_sim_hours: 168.0
+  indipendency_window_hours: 0.5
+  gravity_deterrence_exponent: -2.0
+  gravity_origin_exponent: 1.0
+  gravity_destination_exponent: 1.0
 road_network:
   enabled: true
   nodes_output: data/yjmob/yjmob_road_graph_nodes.parquet
@@ -42,13 +50,15 @@ diaries:
   location_count_sigma: 0.5
   max_locations: 6
 embedding:
-  enabled: false
+  enabled: true
   model: nomic-ai/nomic-embed-text-v1.5
   base_url: http://localhost:8001
   task_prefix: 'clustering: '
   dimensions: 768
-  auto_launch: false
+  auto_launch: true
+  vllm_executable: /home/gustavo/vllm/.venv/bin/vllm
   vllm_port: 8001
+  vllm_extra_args: ["--gpu-memory-utilization", "0.08", "--enforce-eager", "--max-model-len", "512"]
   cache_dir: data/llm_diaries_yjmob
   cache_path: data/llm_diaries_yjmob/diary_embeddings.npz
 schedule:
@@ -60,7 +70,7 @@ activities:
   enabled: true
   kappa: 1.0
   temperature: 0.5
-  embed_activities: false
+  embed_activities: true
 profiles:
   enabled: true
   output: data/yjmob/yjmob_agent_profiles.parquet

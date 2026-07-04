@@ -129,15 +129,29 @@ def generate_profiles(
     rng: np.random.Generator,
     tessellation_df: pd.DataFrame,
     relevance_column: str = "total_poi_count",
+    home_tile_pool: np.ndarray | None = None,
+    work_tile_pool: np.ndarray | None = None,
 ) -> list[AgentProfile]:
     """Generate ``n`` agent profiles using the distribution config.
 
-    Home tiles are sampled uniformly (any tile can host residents).
+    Home tiles are sampled from `home_tile_pool` when provided (typically
+    synthetic residential anchors appended to the simulator location table),
+    otherwise uniformly for legacy/non-augmented runs.
     Work tiles are sampled weighted by POI/relevance count (commercial bias).
     """
     n_tiles = len(tessellation_df)
     if n_tiles == 0:
         raise ValueError("tessellation_df is empty — cannot assign home/work tiles")
+
+    if work_tile_pool is not None:
+        work_pool = np.asarray(work_tile_pool, dtype=np.int64)
+    elif "purpose" in tessellation_df.columns:
+        purpose = tessellation_df["purpose"].fillna("").astype(str).str.upper()
+        work_pool = np.flatnonzero(purpose.ne("HOME").to_numpy())
+    else:
+        work_pool = np.arange(n_tiles, dtype=np.int64)
+    if len(work_pool) == 0:
+        raise ValueError("work_tile_pool is empty — cannot assign work tiles")
 
     # Work tile relevance weights (high POI → commercial → more workplaces)
     if relevance_column in tessellation_df.columns:
@@ -146,10 +160,15 @@ def generate_profiles(
     else:
         rel_vals = np.ones(n_tiles, dtype=float)
 
-    # Home tiles: uniform
-    home_tiles = rng.integers(0, n_tiles, size=n)
+    if home_tile_pool is not None:
+        pool = np.asarray(home_tile_pool, dtype=np.int64)
+        if len(pool) == 0:
+            raise ValueError("home_tile_pool is empty — cannot assign home tiles")
+        home_tiles = rng.choice(pool, size=n, replace=len(pool) < n)
+    else:
+        home_tiles = rng.integers(0, n_tiles, size=n)
     # Work tiles: relevance-weighted
-    work_tiles = sample_weighted_indices(rel_vals, n, rng)
+    work_tiles = work_pool[sample_weighted_indices(rel_vals[work_pool], n, rng)]
 
     # Gender
     genders = rng.integers(0, 2, size=n)  # 0=female, 1=male
