@@ -17,6 +17,16 @@ simulation:
   relevance_column: relevance
   granularity_minutes: 15   # schedule slot length (5, 15, or 60)
   car_speed_kmh: 50.0       # fallback speed when road routing is disabled/unsnapped
+  # EPR mobility model: p_explore = rho * S^-gamma (S = distinct locations visited so far).
+  rho: 0.6
+  gamma: 0.21
+  alpha: 0.2                # social vs. individual location-choice mix
+  dt_update_mob_sim_hours: 168.0
+  indipendency_window_hours: 0.5
+  # Gravity/OD destination-choice model: T_ij ~ O_i^origin * D_j^dest * distance_km^deterrence.
+  gravity_deterrence_exponent: -1.5
+  gravity_origin_exponent: 1.0
+  gravity_destination_exponent: 1.0
 
 road_network:
   enabled: true
@@ -41,7 +51,7 @@ diaries:
   representative_day: "2026-01-01"
   # Truncated rounded log-normal distribution of distinct daily locations,
   # including HOME.
-  location_count_mu: 1.0
+  location_count_mu: 0.85
   location_count_sigma: 0.5
   max_locations: 6
 
@@ -55,8 +65,12 @@ embedding:
   base_url: "http://localhost:8001"   # reuse an already-running vLLM embed server
   task_prefix: "clustering: "
   dimensions: 768
-  auto_launch: false
+  auto_launch: true
+  vllm_executable: /home/gustavo/vllm/.venv/bin/vllm
   vllm_port: 8001
+  # The persistent diary-generation vLLM server (port 8081) already holds ~90%
+  # of GPU memory, so the on-demand embed server must fit in the remainder.
+  vllm_extra_args: ["--gpu-memory-utilization", "0.08", "--enforce-eager", "--max-model-len", "512"]
   cache_dir: data/llm_diaries_gparis
   cache_path: data/llm_diaries_gparis/diary_embeddings.npz
 
@@ -66,14 +80,14 @@ schedule:
   # from Beta distributions to produce heterogeneous schedule preferences.
   temperature_beta_a: 2.0   # Beta shape a for per-agent temperature T
   temperature_beta_b: 5.0   # Beta shape b for per-agent temperature T
-  alpha_beta_a: 2.0         # Beta shape a for per-agent exploration alpha
+  alpha_beta_a: 3.0         # Beta shape a for per-agent exploration alpha
   alpha_beta_b: 5.0         # Beta shape b for per-agent exploration alpha
 
 activities:
   enabled: true
   kappa: 1.0
   temperature: 0.5
-  embed_activities: false
+  embed_activities: true
 
 profiles:
   enabled: true

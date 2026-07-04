@@ -69,7 +69,7 @@ yourself and reuse it (set `embedding.auto_launch: false` and point
 
 ```bash
 uv run --extra embeddings vllm serve nomic-ai/nomic-embed-text-v1.5 \
-  --task embed --trust-remote-code --port 8001
+  --runner pooling --trust-remote-code --port 8001
 ```
 
 The `embeddings` extra (vLLM) is required only for serving; without a GPU set

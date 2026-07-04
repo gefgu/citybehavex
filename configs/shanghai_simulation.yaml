@@ -21,6 +21,14 @@ simulation:
   car_speed_kmh: 35.0        # fallback speed when road routing is disabled/unsnapped
   social_graph_k: 20
   profile_graph_exact_threshold: 10000
+  rho: 0.6
+  gamma: 0.21
+  alpha: 0.2
+  dt_update_mob_sim_hours: 168.0
+  indipendency_window_hours: 0.5
+  gravity_deterrence_exponent: -2.0
+  gravity_origin_exponent: 1.0
+  gravity_destination_exponent: 1.0
 
 road_network:
   enabled: true
@@ -53,7 +61,9 @@ embedding:
   task_prefix: "clustering: "
   dimensions: 768
   auto_launch: true
+  vllm_executable: /home/gustavo/vllm/.venv/bin/vllm
   vllm_port: 8001
+  vllm_extra_args: ["--gpu-memory-utilization", "0.08", "--enforce-eager", "--max-model-len", "512"]
   cache_dir: data/llm_diaries_shanghai
   cache_path: data/llm_diaries_shanghai/diary_embeddings.npz
 

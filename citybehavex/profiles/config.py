@@ -14,6 +14,10 @@ class AgentProfilesConfig(BaseModel):
     profiles_path: Optional[str] = None
     output: str = "agent_profiles.parquet"
     llm_override: bool = False
+    home_anchors_path: Optional[str] = None
+    home_anchors_output: Optional[str] = None
+    home_anchor_relevance: float = Field(default=1.0, gt=0)
+    home_anchor_h3_resolution: int = Field(default=9, ge=0, le=15)
 
     age_beta_a: float = Field(default=2.0, gt=0)
     age_beta_b: float = Field(default=5.0, gt=0)
