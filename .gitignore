@@ -38,3 +38,13 @@ node_modules/
 data/.web_cache/
 
 data/mtus/
+
+# Large raw per-city datasets (GBs) -- fetched/generated locally, not committed
+data/shanghai/
+data/yjmob/
+
+# Timestamped simulation-run output artifacts
+data/*_trajectories_*_social_network.json
+
+# vLLM embedding-server runtime logs
+**/vllm_embed.log
