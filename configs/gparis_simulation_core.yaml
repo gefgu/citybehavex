@@ -24,7 +24,7 @@ simulation:
   dt_update_mob_sim_hours: 168.0
   indipendency_window_hours: 0.5
   # Gravity/OD destination-choice model: T_ij ~ O_i^origin * D_j^dest * distance_km^deterrence.
-  gravity_deterrence_exponent: -1.5
+  gravity_deterrence_exponent: -2.5
   gravity_origin_exponent: 1.0
   gravity_destination_exponent: 1.0
 
