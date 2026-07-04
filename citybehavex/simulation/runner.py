@@ -651,8 +651,6 @@ def maybe_build_profiles(
 def run_simulation(config: CityBehavExConfig) -> skmob2.TrajDataFrame:
     ts = datetime.now().strftime("%Y%m%dT%H%M%S")
     stamped_output = _stamp_path(config.simulation.output, ts)
-    stamped_html = _stamp_path(config.comparison.html, ts)
-    stamped_json = _stamp_path(config.comparison.json_output, ts) if config.comparison.json_output else None
 
     tessellation_df, relevance_column, home_tile_pool = load_or_build_tessellation(config)
     start_date, end_date = simulation_dates(config)
@@ -699,19 +697,5 @@ def run_simulation(config: CityBehavExConfig) -> skmob2.TrajDataFrame:
     )
 
     if config.comparison.path:
-        from citybehavex.reports import generate_comparison_report
-
-        generate_comparison_report(
-            traj=traj,
-            real_path=config.comparison.path,
-            observed_label=config.comparison.label,
-            output_path=stamped_html,
-            synth_activity_col=synth_activity_col,
-            synthetic_activities_path=stamped_output.replace(
-                ".parquet",
-                "_activities.parquet",
-            ),
-            json_output_path=stamped_json,
-            sections=config.comparison.sections,
-        )
+        typer.echo("Comparison data configured; view this run in the CityBehavEx web UI.")
     return traj

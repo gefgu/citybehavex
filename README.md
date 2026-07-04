@@ -42,22 +42,9 @@ Equivalently, run the package as a Python module:
 uv run python -m citybehavex simulate --config configs/gparis_simulation_core.yaml
 ```
 
-Generate the comparison report again from the existing data without rerunning
-the simulation:
-
-```bash
-uv run citybehavex report --config configs/gparis_simulation_core.yaml
-```
-
-Paths can also be provided explicitly:
-
-```bash
-uv run citybehavex report \
-  --synthetic data/gparis_simulation_core_trajectories.parquet \
-  --comparison data/gparis_visitation_df.parquet \
-  --comparison-label gparis \
-  --output data/gparis_simulation_core_comparison.html
-```
+Open the live web UI to analyze simulation runs and comparison data. The old
+standalone HTML report path is deprecated; chart payloads are built on demand by
+the web backend.
 
 ### Embedding model (ddCRP schedule selection)
 
@@ -77,10 +64,9 @@ The `embeddings` extra (vLLM) is required only for serving; without a GPU set
 
 ## Web app
 
-`web/` is an interactive replacement for the standalone comparison `.html`
-report: a FastAPI backend serves the comparison as JSON plot data and a
-React/Vite frontend renders it (see `web/README.md` for details). The backend
-reuses the same compute as `citybehavex report`, so the numbers match.
+`web/` is the supported comparison UI: a FastAPI backend serves comparison and
+synthetic-only chart payloads as JSON, and a React/Vite frontend renders them
+(see `web/README.md` for details).
 
 Run the two dev servers from the repository root. Use the venv's interpreter
 directly for the backend — `uv run` would try to rebuild the Rust extension:

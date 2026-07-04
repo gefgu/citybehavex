@@ -27,20 +27,20 @@ def get_charts(
     selected = experiment.run(run)
     if selected is None:
         raise HTTPException(status_code=404, detail=f"no runs found for experiment {exp_id!r}")
-    if experiment.observed_path is None or not experiment.observed_path.exists():
-        raise HTTPException(
-            status_code=422,
-            detail=f"experiment {exp_id!r} has no observed comparison parquet",
-        )
+    observed_path = (
+        experiment.observed_path
+        if experiment.observed_path is not None and experiment.observed_path.exists()
+        else None
+    )
 
     payload = get_or_build(
         exp_id,
         selected.run_id,
         selected.path,
-        experiment.observed_path,
+        observed_path,
         build=lambda: build_comparison_payload(
             str(selected.path),
-            str(experiment.observed_path),
+            str(observed_path) if observed_path is not None else None,
             experiment.label,
             synthetic_activities_path=str(selected.activities_path),
         ),

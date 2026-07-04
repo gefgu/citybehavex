@@ -101,9 +101,69 @@ def test_build_comparison_payload_groups_activity_and_micro_usage(monkeypatch, t
         synthetic_activities_path=str(activities),
     )
 
+    assert payload["mode"] == "comparison"
     assert payload["activity"] is not None
-    assert payload["activity"]["purpose"]["categories"] == ["HOME", "WORK", "OTHER"]
+    all_activity = payload["activity"]["groups"][0]
+    assert all_activity["filter_key"] == "all"
+    assert all_activity["purpose"]["categories"] == ["HOME", "WORK", "OTHER"]
     assert any("observed has no explicit purpose column" in w for w in payload["warnings"])
     assert payload["micro_activity_usage"] is not None
-    names = {series["name"] for series in payload["micro_activity_usage"]["series"]}
+    names = {
+        series["name"]
+        for group in payload["micro_activity_usage"]["groups"]
+        for series in group["block"]["series"]
+    }
     assert {"sleep", "paid_work"}.issubset(names)
+    assert {group["filter_key"] for group in payload["ecdf"]["groups"]} >= {
+        "all",
+        "weekday",
+        "weekend",
+        "morning",
+        "afternoon",
+        "evening",
+        "night",
+    }
+    assert any(row["filter_key"] == "all" for row in payload["metrics"]["wasserstein"])
+
+
+def test_build_comparison_payload_supports_synthetic_only(monkeypatch, tmp_path):
+    synthetic = tmp_path / "synthetic.parquet"
+    synthetic_df = pd.DataFrame(
+        {
+            "uid": ["u1", "u1", "u1"],
+            "datetime": pd.to_datetime(
+                ["2026-01-01 03:00", "2026-01-01 10:00", "2026-01-01 18:00"]
+            ),
+            "lat": [48.85, 48.86, 48.87],
+            "lng": [2.35, 2.36, 2.37],
+            "purpose": ["HOME", "WORK", "SHOP"],
+            "trip_duration_minutes": [10.0, 15.0, 20.0],
+            "dwell_minutes": [300.0, 120.0, 90.0],
+        }
+    )
+    synthetic_df.to_parquet(synthetic, index=False)
+
+    monkeypatch.setattr(
+        "web.backend.app.payload._mobility_law_visits",
+        lambda *args, **kwargs: pd.DataFrame(
+            {
+                "user_id": ["u1", "u1"],
+                "timestamp": pd.to_datetime(["2026-01-01 00:00", "2026-01-01 01:00"]),
+                "location_id": ["a", "b"],
+                "lat": [48.85, 48.86],
+                "lng": [2.35, 2.36],
+            }
+        ),
+    )
+
+    payload = build_comparison_payload(str(synthetic), None, "observed")
+
+    assert payload["mode"] == "synthetic_only"
+    assert "observed" not in payload["labels"]
+    assert payload["metrics"]["wasserstein"] == []
+    assert payload["metrics"]["jsd"] == []
+    assert payload["metrics"]["cpc"] == []
+    all_activity = payload["activity"]["groups"][0]
+    assert all_activity["transition_difference"]["matrix_mode"] == "raw"
+    assert all_activity["daily_activity_difference"]["matrix_mode"] == "raw"
+    assert len(all_activity["purpose"]["series"]) == 1
