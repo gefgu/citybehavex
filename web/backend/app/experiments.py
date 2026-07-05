@@ -125,6 +125,11 @@ class Experiment:
     label: str
     synthetic_output: Optional[Path]
     observed_path: Optional[Path]
+    time_use_path: Optional[Path]
+    time_use_label: str
+    time_use_country: Optional[str]
+    time_use_survey: Optional[int]
+    time_use_weight_col: str
     profiles_enabled: bool
     profiles_output: Optional[Path]
     profiles_path: Optional[Path]
@@ -142,6 +147,12 @@ class Experiment:
             "simulation_output": _display_path(self.synthetic_output),
             "observed_path": _display_path(self.observed_path),
             "observed_exists": bool(self.observed_path and self.observed_path.exists()),
+            "time_use_path": _display_path(self.time_use_path),
+            "time_use_exists": bool(self.time_use_path and self.time_use_path.exists()),
+            "time_use_label": self.time_use_label,
+            "time_use_country": self.time_use_country,
+            "time_use_survey": self.time_use_survey,
+            "time_use_weight_col": self.time_use_weight_col,
             "profiles_enabled": self.profiles_enabled,
             "profiles_output": _display_path(self.profiles_output),
             "profiles_path": _display_path(self.profiles_path),
@@ -172,6 +183,7 @@ def _load_experiment(config_path: Path) -> Experiment:
     cfg = load_config(str(config_path))
     synthetic_output = _resolve(cfg.simulation.output)
     observed_path = _resolve(cfg.comparison.path)
+    time_use_path = _resolve(cfg.comparison.time_use_path)
     profiles_output = _resolve(cfg.profiles.output)
     profiles_path = profiles_output if cfg.profiles.enabled else None
     road_distance_enabled = cfg.road_network.enabled and cfg.comparison.road_network_distance
@@ -194,6 +206,11 @@ def _load_experiment(config_path: Path) -> Experiment:
         label=cfg.comparison.label,
         synthetic_output=synthetic_output,
         observed_path=observed_path,
+        time_use_path=time_use_path,
+        time_use_label=cfg.comparison.time_use_label,
+        time_use_country=cfg.comparison.time_use_country,
+        time_use_survey=cfg.comparison.time_use_survey,
+        time_use_weight_col=cfg.comparison.time_use_weight_col,
         profiles_enabled=cfg.profiles.enabled,
         profiles_output=profiles_output,
         profiles_path=profiles_path,
@@ -251,6 +268,11 @@ def update_experiment(exp_id: str, updates: dict[str, Any]) -> Experiment:
         "simulation_output": (simulation, "output"),
         "label": (comparison, "label"),
         "observed_path": (comparison, "path"),
+        "time_use_path": (comparison, "time_use_path"),
+        "time_use_label": (comparison, "time_use_label"),
+        "time_use_country": (comparison, "time_use_country"),
+        "time_use_survey": (comparison, "time_use_survey"),
+        "time_use_weight_col": (comparison, "time_use_weight_col"),
         "profiles_enabled": (profiles, "enabled"),
         "profiles_output": (profiles, "output"),
     }

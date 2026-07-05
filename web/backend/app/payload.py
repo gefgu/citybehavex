@@ -39,6 +39,7 @@ from skmob_vis.motifs import (
     map_motif_distribution_to_literature_basis,
 )
 
+from citybehavex.activities import build_catalog
 from .reports_bridge import (
     CAR_SPEED_KMH,
     PROFILE_METRICS,
@@ -81,6 +82,33 @@ STVD_VOLUME_THRESHOLD = 3.0
 
 _MAX_ECDF_POINTS = 400
 _MAX_SCATTER_POINTS = 4000
+TIME_USE_CATEGORIES = [
+    "sleep",
+    "eatdrink",
+    "selfcare",
+    "paidwork",
+    "educatn",
+    "foodprep",
+    "cleanetc",
+    "maintain",
+    "shopserv",
+    "garden",
+    "petcare",
+    "eldcare",
+    "pkidcare",
+    "ikidcare",
+    "religion",
+    "volorgwk",
+    "commute",
+    "travel",
+    "sportex",
+    "tvradio",
+    "read",
+    "compint",
+    "goout",
+    "leisure",
+    "missing",
+]
 
 
 # --------------------------------------------------------------------------- #
@@ -172,6 +200,187 @@ def _filter_visits(visits: pd.DataFrame | None, meta: dict[str, Any]) -> pd.Data
     if visits is None:
         return None
     return _filter_df(visits, "start_timestamp", meta)
+
+
+def _read_time_use_table(path: Path, required_columns: list[str]) -> pd.DataFrame:
+    suffix = path.suffix.lower()
+    if suffix == ".dta":
+        return pd.read_stata(path, columns=required_columns)
+    if suffix == ".parquet":
+        return pd.read_parquet(path, columns=required_columns)
+    if suffix == ".csv":
+        return pd.read_csv(path, usecols=required_columns)
+    raise ValueError(f"unsupported time-use file extension: {path.suffix}")
+
+
+def _load_mtus_time_use(
+    path: Path,
+    *,
+    country: str | None,
+    survey: int | None,
+    weight_col: str,
+) -> pd.DataFrame:
+    optional_columns = ["country", "survey", "day", weight_col]
+    columns = list(dict.fromkeys([*optional_columns, *TIME_USE_CATEGORIES]))
+    df = _read_time_use_table(path, columns)
+    missing = sorted(set(TIME_USE_CATEGORIES) - set(df.columns))
+    if missing:
+        raise ValueError(f"time-use file missing columns: {', '.join(missing)}")
+    if weight_col not in df.columns:
+        raise ValueError(f"time-use file missing weight column: {weight_col}")
+    if "day" not in df.columns:
+        raise ValueError("time-use file missing day column")
+
+    if country is not None:
+        if "country" not in df.columns:
+            raise ValueError("time-use country filter configured but file has no country column")
+        df = df[df["country"].astype(str) == str(country)]
+    if survey is not None:
+        if "survey" not in df.columns:
+            raise ValueError("time-use survey filter configured but file has no survey column")
+        df = df[pd.to_numeric(df["survey"], errors="coerce") == int(survey)]
+
+    if df.empty:
+        raise ValueError("time-use file has no rows after filters")
+
+    df = df.copy()
+    df[weight_col] = pd.to_numeric(df[weight_col], errors="coerce").fillna(0.0).astype(float)
+    if df[weight_col].sum() <= 0:
+        raise ValueError(f"time-use weight column {weight_col!r} has no positive total weight")
+    for col in TIME_USE_CATEGORIES:
+        df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0.0).astype(float)
+    df["day_group"] = np.where(df["day"].astype(str).isin(["Saturday", "Sunday"]), "Weekend", "Weekday")
+    return df
+
+
+def _weighted_time_use_mean(df: pd.DataFrame, category: str, weight_col: str) -> float:
+    weights = df[weight_col].astype(float)
+    if weights.sum() <= 0:
+        return 0.0
+    return float(np.average(df[category].astype(float), weights=weights))
+
+
+def _time_use_observed_group(df: pd.DataFrame, meta: dict[str, Any], weight_col: str) -> dict[str, float]:
+    group = df if meta["key"] == "all" else df[df["day_group"].str.lower() == meta["key"]]
+    if group.empty:
+        return {category: 0.0 for category in TIME_USE_CATEGORIES}
+    return {
+        category: _weighted_time_use_mean(group, category, weight_col)
+        for category in TIME_USE_CATEGORIES
+    }
+
+
+def _split_activity_segments(activities: pd.DataFrame) -> pd.DataFrame:
+    required = ["uid", "activity", "arrival", "departure"]
+    missing = sorted(set(required) - set(activities.columns))
+    if missing:
+        raise ValueError(f"activities table missing columns: {', '.join(missing)}")
+
+    work = activities[required].copy()
+    work["arrival"] = pd.to_datetime(work["arrival"], errors="coerce")
+    work["departure"] = pd.to_datetime(work["departure"], errors="coerce")
+    work["activity"] = pd.to_numeric(work["activity"], errors="coerce")
+    work = work.dropna(subset=["uid", "activity", "arrival", "departure"])
+    work = work[work["departure"] > work["arrival"]]
+    if work.empty:
+        raise ValueError("activities table has no valid intervals")
+
+    labels = {activity.idx: activity.name for activity in build_catalog()}
+    rows: list[dict[str, Any]] = []
+    for row in work.itertuples(index=False):
+        activity_name = labels.get(int(row.activity))
+        if activity_name not in TIME_USE_CATEGORIES:
+            continue
+        current = pd.Timestamp(row.arrival)
+        end = pd.Timestamp(row.departure)
+        while current < end:
+            next_midnight = current.normalize() + pd.Timedelta(days=1)
+            segment_end = min(end, next_midnight)
+            rows.append(
+                {
+                    "uid": row.uid,
+                    "date": current.date(),
+                    "day_group": "Weekend" if current.dayofweek >= 5 else "Weekday",
+                    "category": activity_name,
+                    "minutes": (segment_end - current).total_seconds() / 60.0,
+                }
+            )
+            current = segment_end
+    if not rows:
+        raise ValueError("activities table has no mappable time-use segments")
+    return pd.DataFrame(rows)
+
+
+def _time_use_synthetic_group(segments: pd.DataFrame, meta: dict[str, Any]) -> dict[str, float]:
+    group = segments if meta["key"] == "all" else segments[segments["day_group"].str.lower() == meta["key"]]
+    agent_days = group[["uid", "date"]].drop_duplicates()
+    if agent_days.empty:
+        return {category: 0.0 for category in TIME_USE_CATEGORIES}
+    minutes = group.groupby("category")["minutes"].sum()
+    n_agent_days = float(len(agent_days))
+    return {
+        category: float(minutes.get(category, 0.0) / n_agent_days)
+        for category in TIME_USE_CATEGORIES
+    }
+
+
+def _build_time_use_comparison_block(
+    *,
+    time_use_path: str | None,
+    synthetic_activities_path: str | None,
+    observed_label: str,
+    country: str | None,
+    survey: int | None,
+    weight_col: str,
+) -> dict[str, Any] | None:
+    if time_use_path is None or synthetic_activities_path is None:
+        return None
+    observed_file = Path(time_use_path)
+    activities_file = Path(synthetic_activities_path)
+    if not observed_file.exists():
+        raise ValueError(f"time-use file not found: {observed_file}")
+    if not activities_file.exists():
+        raise ValueError(f"synthetic activities file not found: {activities_file}")
+
+    observed = _load_mtus_time_use(
+        observed_file,
+        country=country,
+        survey=survey,
+        weight_col=weight_col,
+    )
+    segments = _split_activity_segments(pd.read_parquet(activities_file))
+
+    groups = []
+    for meta in FILTERS:
+        observed_minutes = _time_use_observed_group(observed, meta, weight_col)
+        synthetic_minutes = _time_use_synthetic_group(segments, meta)
+        rows = []
+        for category in TIME_USE_CATEGORIES:
+            obs = observed_minutes[category]
+            syn = synthetic_minutes[category]
+            diff = syn - obs
+            rows.append(
+                {
+                    "category": category,
+                    "observed_minutes": round(obs, 6),
+                    "synthetic_minutes": round(syn, 6),
+                    "difference_minutes": round(diff, 6),
+                    "percent_difference": round(diff / obs * 100.0, 6) if obs else None,
+                    "share_of_day_difference_pct_points": round(diff / 1440.0 * 100.0, 6),
+                }
+            )
+        groups.append(
+            {
+                "filter_key": meta["key"],
+                "filter_label": meta["label"],
+                "block": {
+                    "categories": TIME_USE_CATEGORIES,
+                    "labels": [observed_label, "synthetic"],
+                    "rows": rows,
+                },
+            }
+        )
+    return {"groups": groups}
 
 
 def _traj_like(source: skmob2.TrajDataFrame, df: pd.DataFrame) -> skmob2.TrajDataFrame:
@@ -414,6 +623,11 @@ def build_comparison_payload(
     observed_path: Optional[str],
     observed_label: str,
     synthetic_activities_path: Optional[str] = None,
+    time_use_path: Optional[str] = None,
+    time_use_label: str = "time-use",
+    time_use_country: Optional[str] = None,
+    time_use_survey: Optional[int] = None,
+    time_use_weight_col: str = "propwt",
     road_nodes_path: Optional[str] = None,
     road_edges_path: Optional[str] = None,
     road_snap_max_distance_m: float = 750.0,
@@ -683,6 +897,18 @@ def build_comparison_payload(
 
     micro_activity_usage = guard("micro_activity_usage", _micro_activity_usage)
 
+    time_use_comparison = guard(
+        "time_use_comparison",
+        lambda: _build_time_use_comparison_block(
+            time_use_path=time_use_path,
+            synthetic_activities_path=synthetic_activities_path,
+            observed_label=time_use_label,
+            country=time_use_country,
+            survey=time_use_survey,
+            weight_col=time_use_weight_col,
+        ),
+    )
+
     # ---- mobility laws --------------------------------------------------- #
     def _mobility_laws_group(meta: dict[str, Any]):
         synth_df = _filter_df(traj.df, traj.datetime_col, meta)
@@ -808,6 +1034,7 @@ def build_comparison_payload(
         "mobility_laws": mobility_laws,
         "activity": activity,
         "micro_activity_usage": micro_activity_usage,
+        "time_use_comparison": time_use_comparison,
         "profiles": profiles,
         "motifs": motifs,
         "stvd": stvd,

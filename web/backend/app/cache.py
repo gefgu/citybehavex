@@ -14,7 +14,7 @@ from typing import Any, Callable
 
 from .config import CACHE_DIR
 
-PAYLOAD_CACHE_VERSION = "v4"
+PAYLOAD_CACHE_VERSION = "v5"
 MAX_CACHE_KEY_PREFIX = 120
 
 

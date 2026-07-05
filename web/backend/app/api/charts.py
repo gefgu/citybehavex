@@ -43,6 +43,11 @@ def get_charts(
         if experiment.road_edges_path is not None and experiment.road_edges_path.exists()
         else None
     )
+    time_use_path = (
+        experiment.time_use_path
+        if experiment.time_use_path is not None and experiment.time_use_path.exists()
+        else None
+    )
 
     payload = get_or_build(
         exp_id,
@@ -54,6 +59,11 @@ def get_charts(
             str(observed_path) if observed_path is not None else None,
             experiment.label,
             synthetic_activities_path=str(selected.activities_path),
+            time_use_path=str(time_use_path) if time_use_path is not None else None,
+            time_use_label=experiment.time_use_label,
+            time_use_country=experiment.time_use_country,
+            time_use_survey=experiment.time_use_survey,
+            time_use_weight_col=experiment.time_use_weight_col,
             road_nodes_path=str(road_nodes_path) if road_nodes_path is not None else None,
             road_edges_path=str(road_edges_path) if road_edges_path is not None else None,
             special_days=experiment.special_days,
@@ -61,7 +71,7 @@ def get_charts(
         refresh=refresh,
         extra_paths=tuple(
             p
-            for p in (selected.social_network_path, selected.activities_path, road_nodes_path, road_edges_path)
+            for p in (selected.social_network_path, selected.activities_path, time_use_path, road_nodes_path, road_edges_path)
             if p is not None
         ),
     )

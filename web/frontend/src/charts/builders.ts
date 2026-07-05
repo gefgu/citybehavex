@@ -8,6 +8,7 @@ import type {
   MotifsBlock,
   ProfilesBlock,
   SeriesPoints,
+  TimeUseComparisonBlock,
 } from "../api";
 import {
   axisCommon,
@@ -299,6 +300,91 @@ export function microActivityUsageOption(block: MicroActivityUsageBlock): EChart
       lineStyle: { color: palette[i % palette.length], width: 2 },
       itemStyle: { color: palette[i % palette.length] },
     })),
+  };
+}
+
+export function timeUseGroupedOption(block: TimeUseComparisonBlock): EChartsOption {
+  const observedLabel = block.labels[0] ?? "time-use";
+  const syntheticLabel = block.labels[1] ?? "synthetic";
+  return {
+    ...baseOption(),
+    grid: { left: 64, right: 24, top: 48, bottom: 120, containLabel: false },
+    tooltip: {
+      ...baseOption().tooltip,
+      trigger: "axis",
+      axisPointer: { type: "shadow" },
+      valueFormatter: (value: unknown) => `${Number(value).toFixed(1)} min/day`,
+    },
+    legend: { ...baseOption().legend, top: 8 },
+    xAxis: {
+      type: "category",
+      data: block.categories,
+      axisLabel: { color: COLORS.muted, interval: 0, rotate: 55, fontSize: 10 },
+      axisLine: { lineStyle: { color: COLORS.hairline } },
+    },
+    yAxis: { ...axisCommon("minutes/day"), min: 0 },
+    series: [
+      {
+        name: observedLabel,
+        type: "bar",
+        data: block.rows.map((row) => row.observed_minutes),
+        barMaxWidth: 18,
+        itemStyle: { color: ROLE_COLOR.observed },
+      },
+      {
+        name: syntheticLabel,
+        type: "bar",
+        data: block.rows.map((row) => row.synthetic_minutes),
+        barMaxWidth: 18,
+        itemStyle: { color: ROLE_COLOR.synthetic },
+      },
+    ],
+  };
+}
+
+export function timeUseDifferenceOption(block: TimeUseComparisonBlock): EChartsOption {
+  const maxAbs = Math.max(1, ...block.rows.map((row) => Math.abs(row.difference_minutes)));
+  return {
+    ...baseOption(),
+    grid: { left: 118, right: 32, top: 36, bottom: 48, containLabel: false },
+    tooltip: {
+      ...baseOption().tooltip,
+      trigger: "item",
+      formatter: (params: unknown) => {
+        const p = params as { dataIndex: number; value: number };
+        const row = block.rows[p.dataIndex];
+        const pct = row.percent_difference == null ? "n/a" : `${row.percent_difference.toFixed(1)}%`;
+        return [
+          row.category,
+          `Synthetic - ${block.labels[0] ?? "time-use"}: ${Number(p.value).toFixed(1)} min/day`,
+          `Observed: ${row.observed_minutes.toFixed(1)} min/day`,
+          `Synthetic: ${row.synthetic_minutes.toFixed(1)} min/day`,
+          `Difference: ${pct}`,
+        ].join("<br/>");
+      },
+    },
+    xAxis: { ...axisCommon("Synthetic - time-use minutes/day"), min: -maxAbs, max: maxAbs },
+    yAxis: {
+      type: "category",
+      data: block.categories,
+      inverse: true,
+      axisLabel: { color: COLORS.muted, interval: 0, fontSize: 10 },
+      axisLine: { lineStyle: { color: COLORS.hairline } },
+    },
+    series: [
+      {
+        name: "difference",
+        type: "bar",
+        data: block.rows.map((row) => row.difference_minutes),
+        barMaxWidth: 16,
+        itemStyle: {
+          color: (params: unknown) => {
+            const p = params as { value: number };
+            return Number(p.value) >= 0 ? COLORS.forest : COLORS.coral;
+          },
+        },
+      },
+    ],
   };
 }
 

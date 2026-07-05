@@ -602,7 +602,7 @@ def test_micro_activity_daily_usage_figure_uses_catalog_labels():
     activities = pd.DataFrame(
         {
             "uid": [1, 1],
-            "activity": [0, 4],
+            "activity": [0, 3],
             "arrival": pd.to_datetime(["2026-01-01 00:00", "2026-01-01 08:00"]),
             "departure": pd.to_datetime(["2026-01-01 01:00", "2026-01-01 09:00"]),
         }
@@ -612,7 +612,7 @@ def test_micro_activity_daily_usage_figure_uses_catalog_labels():
 
     trace_names = {trace.name for trace in fig.data}
     assert "sleep" in trace_names
-    assert "paid_work" in trace_names
+    assert "paidwork" in trace_names
 
 
 def test_micro_activity_section_skips_missing_sidecar(capsys, tmp_path):

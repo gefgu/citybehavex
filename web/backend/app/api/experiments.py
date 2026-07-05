@@ -31,6 +31,11 @@ class ExperimentUpdate(BaseModel):
     car_speed_kmh: float | None = None
     simulation_output: str | None = None
     observed_path: str | None = None
+    time_use_path: str | None = None
+    time_use_label: str | None = None
+    time_use_country: str | None = None
+    time_use_survey: int | None = None
+    time_use_weight_col: str | None = None
     profiles_enabled: bool | None = None
     profiles_output: str | None = None
 
