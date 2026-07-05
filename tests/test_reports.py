@@ -29,6 +29,8 @@ from citybehavex.reports import (
     load_trajectory,
     waiting_times_minutes,
 )
+from citybehavex.reports.network_validation import encounters_sidecar_path
+from citybehavex.simulation.core import social_network_sidecar_path
 
 
 def test_waiting_times_minutes_converts_skmob2_seconds():
@@ -691,11 +693,43 @@ def _build_report_fixture(tmp_path):
 
 def test_generate_comparison_report_writes_json_metrics(tmp_path):
     traj, real_path = _build_report_fixture(tmp_path)
+    synthetic_path = tmp_path / "synthetic.parquet"
+    traj.df.to_parquet(synthetic_path, index=False)
+    social_network_sidecar_path(synthetic_path).write_text(
+        json.dumps(
+            {
+                "kind": "initial_profile_similarity",
+                "node_count": 4,
+                "edge_count": 3,
+                "layout": "profile_svd",
+                "directed": True,
+                "social_graph_k": 2,
+                "nodes": [
+                    [0.0, 0.0, 8.0, 1],
+                    [1.0, 0.0, 8.0, 2],
+                    [0.0, 1.0, 8.0, 3],
+                    [1.0, 1.0, 8.0, 4],
+                ],
+                "edges": [[0, 1, 1.0], [1, 2, 1.0], [2, 3, 1.0]],
+                "degrees": [1, 2, 2, 1],
+            }
+        ),
+        encoding="utf-8",
+    )
+    pd.DataFrame(
+        {
+            "agent": [0, 0, 1, 2],
+            "contact": [1, 1, 2, 3],
+            "tile": [1, 1, 2, 3],
+            "ts": [1, 2, 1, 2],
+        }
+    ).to_parquet(encounters_sidecar_path(synthetic_path), index=False)
     html_path = tmp_path / "report.html"
     json_path = tmp_path / "metrics.json"
 
     generate_comparison_report(
         traj=traj,
+        synthetic_path=str(synthetic_path),
         real_path=real_path,
         observed_label="observed",
         output_path=str(html_path),
@@ -717,6 +751,13 @@ def test_generate_comparison_report_writes_json_metrics(tmp_path):
         "activity_transitions",
         "daily_activity_profile",
     }
+    assert payload["network_validation"]["comparison"] == "synthetic_vs_random"
+    assert set(payload["network_validation"]["wasserstein"]) == {
+        "clustering_coefficient",
+        "edge_persistence",
+        "topological_overlap",
+    }
+    assert payload["network_validation"]["distributions"]["synthetic"]["edge_persistence"]["count"] == 3
 
 
 def test_generate_comparison_report_uses_road_network_distance_when_provided(tmp_path):

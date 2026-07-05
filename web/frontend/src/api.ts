@@ -471,6 +471,25 @@ export interface SocialNetworkBlock {
   edges: [number, number, number?][];
   degrees?: number[];
 }
+export interface NetworkMetricSummary {
+  count: number;
+  mean: number | null;
+}
+export interface NetworkValidationBlock {
+  comparison: "synthetic_vs_random";
+  random_model: "degree_preserving_rnd";
+  wasserstein: {
+    clustering_coefficient: number | null;
+    edge_persistence: number | null;
+    topological_overlap: number | null;
+  };
+  distributions: {
+    synthetic: Record<string, NetworkMetricSummary>;
+    random: Record<string, NetworkMetricSummary>;
+  };
+  synthetic_network: SocialNetworkBlock;
+  random_network: SocialNetworkBlock;
+}
 export interface ChartPayload {
   mode: "comparison" | "synthetic_only";
   run_id: string;
@@ -489,5 +508,6 @@ export interface ChartPayload {
   motifs: { groups: FilteredSingleBlock<MotifsBlock>[] } | null;
   stvd: { groups: FilteredSingleBlock<StvdBlock>[] } | null;
   social_network: SocialNetworkBlock | null;
+  network_validation: NetworkValidationBlock | null;
   warnings: string[];
 }

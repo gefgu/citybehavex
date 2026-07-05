@@ -493,6 +493,11 @@ table.metrics td.unit { color: var(--muted); }
 }
 
 /* ---- social network ---- */
+.network-validation-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-lg);
+}
 .network-meta {
   display: flex;
   flex-wrap: wrap;
@@ -516,6 +521,11 @@ table.metrics td.unit { color: var(--muted); }
   font-size: 14px;
   padding: var(--space-lg);
   background: var(--surface-soft);
+}
+@media (max-width: 980px) {
+  .network-validation-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 /* ---- timeline view ---- */

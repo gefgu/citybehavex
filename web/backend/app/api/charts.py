@@ -71,7 +71,14 @@ def get_charts(
         refresh=refresh,
         extra_paths=tuple(
             p
-            for p in (selected.social_network_path, selected.activities_path, time_use_path, road_nodes_path, road_edges_path)
+            for p in (
+                selected.social_network_path,
+                getattr(selected, "encounters_path", None),
+                selected.activities_path,
+                time_use_path,
+                road_nodes_path,
+                road_edges_path,
+            )
             if p is not None
         ),
     )

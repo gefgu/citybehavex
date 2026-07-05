@@ -56,6 +56,10 @@ from citybehavex.metrics import (
     radius_of_gyration_km as road_radius_of_gyration_km,
 )
 from citybehavex.profiles import PROFILE_METRICS, compute_profiles
+from citybehavex.reports.network_validation import (
+    NETWORK_METRIC_LABELS,
+    build_network_validation,
+)
 
 _DATETIME_CANDIDATES = [
     "datetime", "start_timestamp", "timestamp", "check-in_time",
@@ -187,6 +191,98 @@ def _metrics_section_html(
       <table>{cpc_table_rows}</table>
     </div>
   </div>"""
+
+
+def _plot_network_block(block: dict, *, title: str) -> go.Figure:
+    nodes = block.get("nodes", [])
+    edges = block.get("edges", [])
+    x = [float(row[0]) for row in nodes if isinstance(row, list) and len(row) >= 2]
+    y = [float(row[1]) for row in nodes if isinstance(row, list) and len(row) >= 2]
+    degree = block.get("degrees") or [0] * len(x)
+
+    edge_x: list[float | None] = []
+    edge_y: list[float | None] = []
+    for row in edges:
+        if not isinstance(row, list) or len(row) < 2:
+            continue
+        source, target = int(row[0]), int(row[1])
+        if source >= len(nodes) or target >= len(nodes):
+            continue
+        edge_x.extend([float(nodes[source][0]), float(nodes[target][0]), None])
+        edge_y.extend([float(nodes[source][1]), float(nodes[target][1]), None])
+
+    fig = go.Figure()
+    fig.add_trace(
+        go.Scatter(
+            x=edge_x,
+            y=edge_y,
+            mode="lines",
+            line=dict(width=0.6, color="rgba(20,17,13,0.18)"),
+            hoverinfo="skip",
+            showlegend=False,
+        )
+    )
+    fig.add_trace(
+        go.Scatter(
+            x=x,
+            y=y,
+            mode="markers",
+            marker=dict(
+                size=[float(row[2]) if isinstance(row, list) and len(row) > 2 else 5 for row in nodes],
+                color=degree,
+                colorscale="Viridis",
+                showscale=True,
+                colorbar=dict(title="degree"),
+                line=dict(width=0),
+            ),
+            text=[f"agent {row[3]}<br>degree {degree[i] if i < len(degree) else 0}" for i, row in enumerate(nodes)],
+            hoverinfo="text",
+            showlegend=False,
+        )
+    )
+    fig.update_layout(
+        title=title,
+        template="plotly_white",
+        margin=dict(l=20, r=20, t=44, b=20),
+        xaxis=dict(visible=False),
+        yaxis=dict(visible=False, scaleanchor="x", scaleratio=1),
+        width=640,
+        height=480,
+    )
+    return fig
+
+
+def _network_validation_section_html(network_validation: Optional[dict]) -> str:
+    if not network_validation:
+        return ""
+    rows = []
+    for key, label in NETWORK_METRIC_LABELS.items():
+        value = network_validation.get("wasserstein", {}).get(key)
+        rows.append(
+            f"<tr><td>{label}</td><td>{value:.4f}</td><td></td></tr>"
+            if value is not None
+            else f"<tr><td>{label}</td><td>n/a</td><td></td></tr>"
+        )
+    random_network = network_validation.get("random_network")
+    random_plot = (
+        _plot_network_block(random_network, title="Degree-preserving random network").to_html(
+            full_html=False,
+            include_plotlyjs=True,
+        )
+        if isinstance(random_network, dict)
+        else ""
+    )
+    return f"""
+  <div class="section-header">
+    <span>Random network validation</span>
+  </div>
+  <div class="metrics">
+    <div>
+      <h2>Synthetic vs random Wasserstein</h2>
+      <table>{"".join(rows)}</table>
+    </div>
+  </div>
+  <div class="charts">{random_plot}</div>"""
 
 
 def _visits_for_comparison(
@@ -949,6 +1045,7 @@ def generate_comparison_report_from_paths(
     synth_activity_col = detect_column(traj.df, _ACTIVITY_CANDIDATES)
     generate_comparison_report(
         traj=traj,
+        synthetic_path=synthetic_path,
         real_path=real_path,
         observed_label=observed_label,
         output_path=output_path,
@@ -964,6 +1061,7 @@ def generate_comparison_report(
     real_path: str,
     observed_label: str,
     output_path: str,
+    synthetic_path: Optional[str] = None,
     synth_activity_col: Optional[str] = None,
     synthetic_activities_path: Optional[str] = None,
     json_output_path: Optional[str] = None,
@@ -1118,6 +1216,21 @@ def generate_comparison_report(
         real_trip = synth_trip = w_trip = None
     if w_trip is not None:
         metrics["wasserstein"]["trip_duration_min"] = w_trip
+
+    network_validation = None
+    if synthetic_path is not None:
+        try:
+            network_validation, network_warnings = build_network_validation(synthetic_path)
+            if network_validation is not None:
+                metrics["network_validation"] = {
+                    key: value
+                    for key, value in network_validation.items()
+                    if key not in {"synthetic_network", "random_network"}
+                }
+            for warning in network_warnings:
+                typer.echo(f"Warning: network validation: {warning}", err=True)
+        except Exception as exc:
+            typer.echo(f"Warning: network validation skipped: {exc}", err=True)
 
     js_rows: list[tuple[str, str, str]] = []
     synthetic_visits = None
@@ -1398,6 +1511,7 @@ def generate_comparison_report(
         w_rows.append(("Trip duration (car)", f"{w_trip:.4f}", "min"))
 
     metrics_html = _metrics_section_html(w_rows, js_rows, cpc_rows)
+    network_validation_section_html = _network_validation_section_html(network_validation)
     generated_at = _dt.now().strftime("%Y-%m-%d %H:%M")
     resource_bundle = get_resource_bundle(echarts=True, leaflet=True)
     full_html = f"""<!doctype html>
@@ -1438,7 +1552,7 @@ def generate_comparison_report(
     <p>Generated {generated_at}</p>
   </div>{metrics_html}
   <div class="section-header">Distribution comparisons</div>
-  <div class="charts">{ecdf_charts_html}</div>{mobility_laws_section_html}{activity_section_html}{micro_activity_section_html}{profiles_section_html}{motif_section_html}{stvd_section_html}
+  <div class="charts">{ecdf_charts_html}</div>{network_validation_section_html}{mobility_laws_section_html}{activity_section_html}{micro_activity_section_html}{profiles_section_html}{motif_section_html}{stvd_section_html}
 </body>
 </html>
 """
