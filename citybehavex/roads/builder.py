@@ -25,6 +25,14 @@ from .speeds import CAR_SPEED_FACTOR, DEFAULT_SPEED_KMH_BY_CLASS, DRIVABLE_CLASS
 
 _MPH_TO_KMH = 1.609344
 _EARTH_RADIUS_M = 6371000.0
+DEFAULT_RAIL_CLASSES = ["subway", "tram", "light_rail", "monorail", "standard_gauge"]
+DEFAULT_RAIL_SPEED_KMH_BY_CLASS = {
+    "subway": 35.0,
+    "tram": 22.0,
+    "light_rail": 30.0,
+    "monorail": 28.0,
+    "standard_gauge": 45.0,
+}
 
 
 def haversine_m(lat1: np.ndarray, lng1: np.ndarray, lat2: np.ndarray, lng2: np.ndarray) -> np.ndarray:
@@ -244,6 +252,152 @@ def build_road_graph(
     edges_df.to_parquet(edges_output, index=False)
     typer.echo(
         f"Saved road graph: {len(nodes_df):,} nodes, {len(edges_df):,} directed edges "
+        f"-> {nodes_output}, {edges_output}"
+    )
+    return nodes_df, edges_df
+
+
+def fetch_rail_network(
+    min_lon: float,
+    min_lat: float,
+    max_lon: float,
+    max_lat: float,
+    overture_release: str,
+    classes: list[str] | None = None,
+    speed_kmh_by_class: dict[str, float] | None = None,
+    default_speed_kmh: float = 35.0,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Fetch and build a simple bidirectional rail graph from Overture segments."""
+    import duckdb
+
+    rail_classes = classes or DEFAULT_RAIL_CLASSES
+    speed_by_class = speed_kmh_by_class or DEFAULT_RAIL_SPEED_KMH_BY_CLASS
+    class_list = ", ".join(f"'{c}'" for c in rail_classes)
+    typer.echo(f"Fetching Overture Maps {overture_release} rail segments ...")
+    df = duckdb.sql(f"""
+        INSTALL spatial;  LOAD spatial;
+        SET s3_region = 'us-west-2';
+
+        WITH segs AS (
+            SELECT
+                id AS segment_id,
+                class,
+                geometry,
+                UNNEST(connectors) AS conn
+            FROM read_parquet(
+                's3://overturemaps-us-west-2/release/{overture_release}/theme=transportation/type=segment/*',
+                filename=true, hive_partitioning=1
+            )
+            WHERE subtype = 'rail'
+              AND class IN ({class_list})
+              AND bbox.xmin BETWEEN {min_lon} AND {max_lon}
+              AND bbox.ymin BETWEEN {min_lat} AND {max_lat}
+        ),
+        ordered AS (
+            SELECT
+                segment_id, class, geometry,
+                conn.connector_id AS connector_id,
+                conn.at AS at,
+                ROW_NUMBER() OVER (PARTITION BY segment_id ORDER BY conn.at) AS rn
+            FROM segs
+        ),
+        pairs AS (
+            SELECT
+                o1.segment_id,
+                o1.class AS rail_class,
+                o1.connector_id AS from_connector,
+                o1.at AS from_at,
+                o2.connector_id AS to_connector,
+                o2.at AS to_at,
+                ST_Y(ST_LineInterpolatePoint(o1.geometry, o1.at)) AS from_lat,
+                ST_X(ST_LineInterpolatePoint(o1.geometry, o1.at)) AS from_lng,
+                ST_Y(ST_LineInterpolatePoint(o1.geometry, o2.at)) AS to_lat,
+                ST_X(ST_LineInterpolatePoint(o1.geometry, o2.at)) AS to_lng
+            FROM ordered o1
+            JOIN ordered o2 ON o1.segment_id = o2.segment_id AND o2.rn = o1.rn + 1
+        )
+        SELECT
+            rail_class, from_connector, from_at, to_connector, to_at,
+            from_lat, from_lng, to_lat, to_lng,
+            2 * 6371000 * ASIN(SQRT(
+                POWER(SIN(RADIANS((to_lat - from_lat) / 2)), 2) +
+                COS(RADIANS(from_lat)) * COS(RADIANS(to_lat)) *
+                POWER(SIN(RADIANS((to_lng - from_lng) / 2)), 2)
+            )) AS length_m
+        FROM pairs
+    """).df()
+
+    typer.echo(f"Fetched {len(df):,} rail segment pieces; deriving weights ...")
+    node_coords: dict[str, tuple[float, float]] = {}
+    records: list[tuple[str, str, float, float, int, str]] = []
+    for row in df.itertuples(index=False):
+        speed_kmh = float(speed_by_class.get(row.rail_class, default_speed_kmh))
+        if speed_kmh <= 0:
+            continue
+        length_m = float(row.length_m) if row.length_m and row.length_m > 0 else 0.1
+        speed_mps = speed_kmh / 3.6
+        weight_ds = max(1, round(length_m / speed_mps * 10))
+        node_coords[row.from_connector] = (row.from_lat, row.from_lng)
+        node_coords[row.to_connector] = (row.to_lat, row.to_lng)
+        records.append((row.from_connector, row.to_connector, length_m, speed_kmh, weight_ds, row.rail_class))
+        records.append((row.to_connector, row.from_connector, length_m, speed_kmh, weight_ds, row.rail_class))
+
+    connector_ids = sorted(node_coords)
+    connector_to_idx = {cid: i for i, cid in enumerate(connector_ids)}
+    nodes_df = pd.DataFrame(
+        {
+            "node_idx": np.arange(len(connector_ids), dtype=np.int64),
+            "connector_id": connector_ids,
+            "lat": [node_coords[c][0] for c in connector_ids],
+            "lng": [node_coords[c][1] for c in connector_ids],
+        }
+    )
+    edges_df = pd.DataFrame(
+        records,
+        columns=["from_connector", "to_connector", "length_m", "speed_kmh", "weight_ds", "class"],
+    )
+    if len(edges_df) == 0:
+        edges_df = pd.DataFrame(columns=["from_node", "to_node", "length_m", "speed_kmh", "weight_ds", "class"])
+    else:
+        edges_df["from_node"] = edges_df["from_connector"].map(connector_to_idx).astype(np.int64)
+        edges_df["to_node"] = edges_df["to_connector"].map(connector_to_idx).astype(np.int64)
+        edges_df = edges_df[["from_node", "to_node", "length_m", "speed_kmh", "weight_ds", "class"]]
+    return nodes_df, edges_df
+
+
+def build_rail_graph(
+    min_lon: float,
+    min_lat: float,
+    max_lon: float,
+    max_lat: float,
+    overture_release: str,
+    nodes_output: str,
+    edges_output: str,
+    classes: list[str] | None = None,
+    speed_kmh_by_class: dict[str, float] | None = None,
+    default_speed_kmh: float = 35.0,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Load a cached rail graph from disk, or fetch and cache it."""
+    if Path(nodes_output).exists() and Path(edges_output).exists():
+        typer.echo(f"Loading cached rail graph from {nodes_output} / {edges_output} ...")
+        return pd.read_parquet(nodes_output), pd.read_parquet(edges_output)
+
+    nodes_df, edges_df = fetch_rail_network(
+        min_lon,
+        min_lat,
+        max_lon,
+        max_lat,
+        overture_release,
+        classes,
+        speed_kmh_by_class,
+        default_speed_kmh,
+    )
+    Path(nodes_output).parent.mkdir(parents=True, exist_ok=True)
+    Path(edges_output).parent.mkdir(parents=True, exist_ok=True)
+    nodes_df.to_parquet(nodes_output, index=False)
+    edges_df.to_parquet(edges_output, index=False)
+    typer.echo(
+        f"Saved rail graph: {len(nodes_df):,} nodes, {len(edges_df):,} directed edges "
         f"-> {nodes_output}, {edges_output}"
     )
     return nodes_df, edges_df

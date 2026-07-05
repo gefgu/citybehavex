@@ -21,6 +21,7 @@ pub(crate) struct SimulationOutput {
     pub(crate) path_lat: Vec<f32>,
     pub(crate) path_lng: Vec<f32>,
     pub(crate) path_t: Vec<i32>,
+    pub(crate) path_mode: Vec<u8>,
     pub(crate) act_agent: Vec<u32>,
     pub(crate) act_stop_id: Vec<u32>,
     pub(crate) act_seq: Vec<u16>,
@@ -49,6 +50,7 @@ impl SimulationOutput {
             path_lat: Vec::new(),
             path_lng: Vec::new(),
             path_t: Vec::new(),
+            path_mode: Vec::new(),
             act_agent: Vec::new(),
             act_stop_id: Vec::new(),
             act_seq: Vec::new(),
@@ -162,6 +164,7 @@ pub(crate) struct RoadPathOutputBuffers {
     pub(crate) lat: Vec<f32>,
     pub(crate) lng: Vec<f32>,
     pub(crate) t: Vec<i32>,
+    pub(crate) mode: Vec<u8>,
 }
 
 impl RoadPathOutputBuffers {
@@ -181,6 +184,7 @@ impl RoadPathOutputBuffers {
         lats: &[f64],
         lngs: &[f64],
         times: &[i64],
+        mode: u8,
     ) {
         for (seq, ((&lat, &lng), &t)) in lats.iter().zip(lngs).zip(times).enumerate() {
             self.agent.push(agent);
@@ -189,6 +193,7 @@ impl RoadPathOutputBuffers {
             self.lat.push(lat as f32);
             self.lng.push(lng as f32);
             self.t.push(t as i32);
+            self.mode.push(mode);
         }
     }
 }
@@ -331,6 +336,7 @@ impl TripOutputBuffers {
             path_lat: paths.lat,
             path_lng: paths.lng,
             path_t: paths.t,
+            path_mode: paths.mode,
             act_agent: activities.agent,
             act_stop_id: activities.stop_id,
             act_seq: activities.seq,

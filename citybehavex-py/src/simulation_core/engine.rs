@@ -29,6 +29,10 @@ struct RoadRuntime<'a> {
 }
 
 const MACRO_DEPARTURE_BUFFER_S: i64 = 900;
+const MODE_CAR: u8 = 1;
+const MODE_WALK: u8 = 2;
+const MODE_BIKE: u8 = 3;
+const MODE_RAIL: u8 = 4;
 
 #[derive(Default)]
 struct FallbackCounts {
@@ -45,6 +49,7 @@ struct TripAppendContext {
     abstract_loc: i32,
     departure: i64,
     max_leg_waypoints: usize,
+    mode: u8,
 }
 
 /// Resolve when the current dwell/travel unit ends, given the previously
@@ -85,6 +90,84 @@ fn haversine_fallback_secs(
     }
 }
 
+fn haversine_secs_for_speed(
+    cur_loc: usize,
+    next_loc: usize,
+    lats: &[f64],
+    lngs: &[f64],
+    speed_kmh: f64,
+) -> i64 {
+    let d_km = haversine_km(lats[cur_loc], lngs[cur_loc], lats[next_loc], lngs[next_loc]);
+    let secs = (d_km / speed_kmh) * 3600.0;
+    if secs.is_finite() && secs > 0.0 {
+        secs.round() as i64
+    } else {
+        0
+    }
+}
+
+fn straight_line_leg(
+    cur_loc: usize,
+    next_loc: usize,
+    lats: &[f64],
+    lngs: &[f64],
+    speed_kmh: f64,
+) -> (i64, Vec<f64>, Vec<f64>, Vec<i64>) {
+    let dur_s = haversine_secs_for_speed(cur_loc, next_loc, lats, lngs, speed_kmh);
+    (
+        dur_s,
+        vec![lats[cur_loc], lats[next_loc]],
+        vec![lngs[cur_loc], lngs[next_loc]],
+        vec![0, dur_s * 10],
+    )
+}
+
+fn try_network_leg(
+    cur_loc: usize,
+    next_loc: usize,
+    network: &mut RoadRuntime<'_>,
+    fallback: &mut FallbackCounts,
+) -> Option<(i64, Vec<f64>, Vec<f64>, Vec<i64>)> {
+    let from_node = network
+        .inputs
+        .location_node
+        .get(cur_loc)
+        .copied()
+        .unwrap_or(-1);
+    let to_node = network
+        .inputs
+        .location_node
+        .get(next_loc)
+        .copied()
+        .unwrap_or(-1);
+    if from_node < 0 || to_node < 0 {
+        fallback.unsnapped += 1;
+        return None;
+    }
+    match network
+        .graph
+        .shortest_path(network.calc, from_node as usize, to_node as usize)
+    {
+        Some((_weight_ds, nodes)) => {
+            let lats: Vec<f64> = nodes.iter().map(|&n| network.inputs.node_lats[n]).collect();
+            let lngs: Vec<f64> = nodes.iter().map(|&n| network.inputs.node_lngs[n]).collect();
+            let mut cumulative: Vec<i64> = Vec::with_capacity(nodes.len());
+            let mut acc: i64 = 0;
+            cumulative.push(0);
+            for w in nodes.windows(2) {
+                acc += network.graph.edge_weight_ds(w[0], w[1]);
+                cumulative.push(acc);
+            }
+            let dur_s = (acc + 5) / 10;
+            Some((dur_s.max(0), lats, lngs, cumulative))
+        }
+        None => {
+            fallback.disconnected += 1;
+            None
+        }
+    }
+}
+
 /// Route from `cur_loc` to `next_loc` over the road graph, falling back to a
 /// straight-line haversine estimate when road routing is disabled or the
 /// endpoints are unsnapped/disconnected. Returns (trip duration, waypoint
@@ -98,53 +181,103 @@ fn route_leg(
     road: Option<&mut RoadRuntime<'_>>,
     fallback: &mut FallbackCounts,
 ) -> (i64, Vec<f64>, Vec<f64>, Vec<i64>) {
-    let mut routed = None;
     if let Some(road) = road {
-        let from_node = road
-            .inputs
-            .location_node
-            .get(cur_loc)
-            .copied()
-            .unwrap_or(-1);
-        let to_node = road
-            .inputs
-            .location_node
-            .get(next_loc)
-            .copied()
-            .unwrap_or(-1);
-        if from_node >= 0 && to_node >= 0 {
-            match road
-                .graph
-                .shortest_path(road.calc, from_node as usize, to_node as usize)
-            {
-                Some((_weight_ds, nodes)) => {
-                    let lats: Vec<f64> = nodes.iter().map(|&n| road.inputs.node_lats[n]).collect();
-                    let lngs: Vec<f64> = nodes.iter().map(|&n| road.inputs.node_lngs[n]).collect();
-                    let mut cumulative: Vec<i64> = Vec::with_capacity(nodes.len());
-                    let mut acc: i64 = 0;
-                    cumulative.push(0);
-                    for w in nodes.windows(2) {
-                        acc += road.graph.edge_weight_ds(w[0], w[1]);
-                        cumulative.push(acc);
-                    }
-                    let dur_s = (acc + 5) / 10;
-                    routed = Some((dur_s.max(0), lats, lngs, cumulative));
-                }
-                None => fallback.disconnected += 1,
-            }
-        } else {
-            fallback.unsnapped += 1;
+        if let Some(routed) = try_network_leg(cur_loc, next_loc, road, fallback) {
+            return routed;
         }
     }
-    routed.unwrap_or_else(|| {
-        let dur_s = haversine_fallback_secs(cur_loc, next_loc, lats, lngs, car_speed_kmh);
-        (
-            dur_s,
-            vec![lats[cur_loc], lats[next_loc]],
-            vec![lngs[cur_loc], lngs[next_loc]],
-            vec![0, dur_s * 10],
-        )
-    })
+    let dur_s = haversine_fallback_secs(cur_loc, next_loc, lats, lngs, car_speed_kmh);
+    (
+        dur_s,
+        vec![lats[cur_loc], lats[next_loc]],
+        vec![lngs[cur_loc], lngs[next_loc]],
+        vec![0, dur_s * 10],
+    )
+}
+
+fn route_mode_leg(
+    agent_idx: usize,
+    cur_loc: usize,
+    next_loc: usize,
+    inputs: &CoreInputs<'_>,
+    road: Option<&mut RoadRuntime<'_>>,
+    rail: Option<&mut RoadRuntime<'_>>,
+    road_fallback: &mut FallbackCounts,
+    rail_fallback: &mut FallbackCounts,
+) -> (u8, i64, Vec<f64>, Vec<f64>, Vec<i64>, usize) {
+    let d_km = haversine_km(
+        inputs.locations.lats[cur_loc],
+        inputs.locations.lngs[cur_loc],
+        inputs.locations.lats[next_loc],
+        inputs.locations.lngs[next_loc],
+    );
+    let walk_threshold = inputs
+        .transport
+        .walking_threshold_km
+        .get(agent_idx)
+        .copied()
+        .unwrap_or(0.0);
+    if d_km <= walk_threshold {
+        let (dur_s, lats, lngs, cum) = straight_line_leg(
+            cur_loc,
+            next_loc,
+            inputs.locations.lats,
+            inputs.locations.lngs,
+            inputs.params.walking_speed_kmh,
+        );
+        return (MODE_WALK, dur_s, lats, lngs, cum, 2);
+    }
+
+    let has_car = inputs.transport.has_car.get(agent_idx).copied().unwrap_or(true);
+    if has_car {
+        let (dur_s, lats, lngs, cum) = route_leg(
+            cur_loc,
+            next_loc,
+            inputs.locations.lats,
+            inputs.locations.lngs,
+            inputs.params.car_speed_kmh,
+            road,
+            road_fallback,
+        );
+        return (MODE_CAR, dur_s, lats, lngs, cum, inputs.road_network.max_leg_waypoints);
+    }
+
+    let has_bike = inputs.transport.has_bike.get(agent_idx).copied().unwrap_or(false);
+    let bike_threshold = inputs
+        .transport
+        .bike_threshold_km
+        .get(agent_idx)
+        .copied()
+        .unwrap_or(0.0);
+    if has_bike && d_km <= bike_threshold {
+        let (dur_s, lats, lngs, cum) = straight_line_leg(
+            cur_loc,
+            next_loc,
+            inputs.locations.lats,
+            inputs.locations.lngs,
+            inputs.params.bike_speed_kmh,
+        );
+        return (MODE_BIKE, dur_s, lats, lngs, cum, 2);
+    }
+
+    if let Some(rail) = rail {
+        if let Some((dur_s, lats, lngs, cum)) =
+            try_network_leg(cur_loc, next_loc, rail, rail_fallback)
+        {
+            return (MODE_RAIL, dur_s, lats, lngs, cum, inputs.rail_network.max_leg_waypoints);
+        }
+    }
+
+    let (dur_s, lats, lngs, cum) = route_leg(
+        cur_loc,
+        next_loc,
+        inputs.locations.lats,
+        inputs.locations.lngs,
+        inputs.params.car_speed_kmh,
+        road,
+        road_fallback,
+    );
+    (MODE_CAR, dur_s, lats, lngs, cum, inputs.road_network.max_leg_waypoints)
 }
 
 /// Resolve the new stop's departure/arrival, mark the agent's relocation
@@ -206,7 +339,7 @@ fn push_path_waypoints(
     let (sub_lats, sub_lngs, sub_times) =
         subsample_waypoints(wp_lats, wp_lngs, &times, ctx.max_leg_waypoints);
     let agent_id = ctx.agent_idx as u32 + 1;
-    paths.push_leg(agent_id, stop_id, &sub_lats, &sub_lngs, &sub_times);
+    paths.push_leg(agent_id, stop_id, &sub_lats, &sub_lngs, &sub_times, ctx.mode);
 }
 
 /// Close out the agent's current stop and open a new one at `ctx.next_loc`.
@@ -296,6 +429,12 @@ fn validate_params(params: &SimulationParams) -> Result<(), String> {
     if !(params.car_speed_kmh.is_finite() && params.car_speed_kmh > 0.0) {
         return Err("car_speed_kmh must be positive".to_string());
     }
+    if !(params.walking_speed_kmh.is_finite() && params.walking_speed_kmh > 0.0) {
+        return Err("walking_speed_kmh must be positive".to_string());
+    }
+    if !(params.bike_speed_kmh.is_finite() && params.bike_speed_kmh > 0.0) {
+        return Err("bike_speed_kmh must be positive".to_string());
+    }
     Ok(())
 }
 
@@ -316,6 +455,21 @@ fn validate_initial_locations(
             "work_tiles must have at least {} entries",
             n_agents
         ));
+    }
+    Ok(())
+}
+
+fn validate_transport(inputs: &CoreInputs<'_>, n_agents: usize) -> Result<(), String> {
+    let transport = &inputs.transport;
+    for (name, len) in [
+        ("has_car", transport.has_car.len()),
+        ("has_bike", transport.has_bike.len()),
+        ("walking_threshold_km", transport.walking_threshold_km.len()),
+        ("bike_threshold_km", transport.bike_threshold_km.len()),
+    ] {
+        if len < n_agents {
+            return Err(format!("{name} must have at least {n_agents} entries"));
+        }
     }
     Ok(())
 }
@@ -352,6 +506,7 @@ fn validate_inputs(inputs: &CoreInputs<'_>) -> Result<usize, String> {
     validate_diary_lengths(&inputs.diary, inputs.params.n_agents)?;
     validate_params(&inputs.params)?;
     validate_initial_locations(&inputs.initial_locations, inputs.params.n_agents)?;
+    validate_transport(inputs, inputs.params.n_agents)?;
     validate_per_agent_ranges(inputs, inputs.params.n_agents)?;
     Ok(n_locations)
 }
@@ -469,6 +624,19 @@ fn build_road_graph(road_network: &RoadNetworkInputs<'_>) -> Option<RoadGraph> {
             road_network.edge_from,
             road_network.edge_to,
             road_network.edge_weight_ds,
+        ))
+    } else {
+        None
+    }
+}
+
+fn build_rail_graph(rail_network: &RoadNetworkInputs<'_>) -> Option<RoadGraph> {
+    if rail_network.enabled() {
+        println!("Preparing rail-network contraction hierarchy ...");
+        Some(RoadGraph::build(
+            rail_network.edge_from,
+            rail_network.edge_to,
+            rail_network.edge_weight_ds,
         ))
     } else {
         None
@@ -653,8 +821,11 @@ fn commit_one_move(
     activities: &mut ActivityOutputBuffers,
     road_graph: Option<&RoadGraph>,
     road_calc: &mut Option<fast_paths::PathCalculator>,
+    rail_graph: Option<&RoadGraph>,
+    rail_calc: &mut Option<fast_paths::PathCalculator>,
     paths: &mut RoadPathOutputBuffers,
-    fallback: &mut FallbackCounts,
+    road_fallback: &mut FallbackCounts,
+    rail_fallback: &mut FallbackCounts,
     inputs: &CoreInputs<'_>,
     activities_on: bool,
     next_stop_id: &mut u32,
@@ -689,14 +860,23 @@ fn commit_one_move(
             }),
             _ => None,
         };
-        let (dur_s, wp_lats, wp_lngs, wp_cum_ds) = route_leg(
+        let mut rail_runtime = match (rail_graph, rail_calc.as_mut()) {
+            (Some(g), Some(c)) => Some(RoadRuntime {
+                graph: g,
+                calc: c,
+                inputs: &inputs.rail_network,
+            }),
+            _ => None,
+        };
+        let (mode, dur_s, wp_lats, wp_lngs, wp_cum_ds, max_leg_waypoints) = route_mode_leg(
+            a,
             cur_loc,
             loc,
-            inputs.locations.lats,
-            inputs.locations.lngs,
-            inputs.params.car_speed_kmh,
+            inputs,
             road_runtime.as_mut(),
-            fallback,
+            rail_runtime.as_mut(),
+            road_fallback,
+            rail_fallback,
         );
         let departure = if activities_on {
             let current_abs_loc = current_stop_abstract_loc(a, output);
@@ -720,7 +900,8 @@ fn commit_one_move(
                 next_loc: loc,
                 abstract_loc,
                 departure,
-                max_leg_waypoints: inputs.road_network.max_leg_waypoints,
+                max_leg_waypoints,
+                mode,
             },
             dur_s,
             &wp_lats,
@@ -780,8 +961,11 @@ fn commit_moves(
     activities: &mut ActivityOutputBuffers,
     road_graph: Option<&RoadGraph>,
     road_calc: &mut Option<fast_paths::PathCalculator>,
+    rail_graph: Option<&RoadGraph>,
+    rail_calc: &mut Option<fast_paths::PathCalculator>,
     paths: &mut RoadPathOutputBuffers,
-    fallback: &mut FallbackCounts,
+    road_fallback: &mut FallbackCounts,
+    rail_fallback: &mut FallbackCounts,
     inputs: &CoreInputs<'_>,
     activities_on: bool,
     next_stop_id: &mut u32,
@@ -798,8 +982,11 @@ fn commit_moves(
             activities,
             road_graph,
             road_calc,
+            rail_graph,
+            rail_calc,
             paths,
-            fallback,
+            road_fallback,
+            rail_fallback,
             inputs,
             activities_on,
             next_stop_id,
@@ -844,6 +1031,17 @@ fn report_road_fallbacks(road_network: &RoadNetworkInputs<'_>, fallback: &Fallba
     if road_network.enabled() {
         println!(
             "Road routing: {} fallbacks to straight-line (unsnapped={}, disconnected={})",
+            fallback.unsnapped + fallback.disconnected,
+            fallback.unsnapped,
+            fallback.disconnected
+        );
+    }
+}
+
+fn report_rail_fallbacks(rail_network: &RoadNetworkInputs<'_>, fallback: &FallbackCounts) {
+    if rail_network.enabled() {
+        println!(
+            "Rail routing: {} fallbacks to car (unsnapped={}, disconnected={})",
             fallback.unsnapped + fallback.disconnected,
             fallback.unsnapped,
             fallback.disconnected
@@ -904,8 +1102,11 @@ pub(crate) fn simulate(
 
     let road_graph = build_road_graph(&inputs.road_network);
     let mut road_calc = road_graph.as_ref().map(|g| g.new_calculator());
+    let rail_graph = build_rail_graph(&inputs.rail_network);
+    let mut rail_calc = rail_graph.as_ref().map(|g| g.new_calculator());
     let mut paths = RoadPathOutputBuffers::default();
-    let mut fallback = FallbackCounts::default();
+    let mut road_fallback = FallbackCounts::default();
+    let mut rail_fallback = FallbackCounts::default();
 
     let mut commit_buf: Vec<(i64, usize, usize, i32)> = Vec::new();
     let mut window_start = inputs.params.start_ts;
@@ -981,8 +1182,11 @@ pub(crate) fn simulate(
             &mut activities,
             road_graph.as_ref(),
             &mut road_calc,
+            rail_graph.as_ref(),
+            &mut rail_calc,
             &mut paths,
-            &mut fallback,
+            &mut road_fallback,
+            &mut rail_fallback,
             &inputs,
             activities_on,
             &mut next_stop_id,
@@ -1008,7 +1212,8 @@ pub(crate) fn simulate(
     if activities_on {
         finalize_open_activities(&mut activities, inputs.params.end_ts);
     }
-    report_road_fallbacks(&inputs.road_network, &fallback);
+    report_road_fallbacks(&inputs.road_network, &road_fallback);
+    report_rail_fallbacks(&inputs.rail_network, &rail_fallback);
     let (enc_agent, enc_contact, enc_tile, enc_ts) = flatten_encounters(&par_data);
 
     Ok(output.into_output(enc_agent, enc_contact, enc_tile, enc_ts, paths, activities))

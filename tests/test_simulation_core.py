@@ -148,6 +148,71 @@ def test_simulation_core_trip_durations_are_off_the_hourly_grid():
     assert any(int(a) % _SLOT != 0 for a in np.asarray(arr))
 
 
+def _run_mode_case(
+    *,
+    has_car: bool,
+    has_bike: bool,
+    walk_threshold_km: float,
+    bike_threshold_km: float,
+    rail: bool = False,
+):
+    kwargs = {}
+    if rail:
+        kwargs.update(
+            rail_edge_from=np.array([0], dtype=np.int64),
+            rail_edge_to=np.array([1], dtype=np.int64),
+            rail_edge_weight_ds=np.array([100], dtype=np.int64),
+            rail_node_lats=np.array([48.8566, 48.95], dtype=np.float64),
+            rail_node_lngs=np.array([2.3522, 2.55], dtype=np.float64),
+            location_rail_node=np.array([0, 1], dtype=np.int64),
+            max_rail_leg_waypoints=8,
+        )
+    trip, paths, _ = core.simulation_core_simulate_agents(
+        latitudes=np.array([48.8566, 48.95], dtype=float),
+        longitudes=np.array([2.3522, 2.55], dtype=float),
+        relevances=np.ones(2, dtype=float),
+        distances=np.empty(0, dtype=np.float64),
+        neighbor_starts=np.array([0, 0], dtype=np.int64),
+        neighbors=np.empty(0, dtype=np.int64),
+        diary_timestamps=np.array([0, 8 * 3600], dtype=np.int64),
+        diary_abs_locs=np.array([0, 1], dtype=np.int32),
+        diary_starts=np.array([0], dtype=np.int64),
+        diary_ends=np.array([2], dtype=np.int64),
+        rho=1.0,
+        gamma=0.0,
+        alpha=0.0,
+        start_ts=0,
+        end_ts=86400,
+        indipendency_window_s=1800,
+        dt_update_mob_sim_s=3600,
+        slot_seconds=_SLOT,
+        car_speed_kmh=_SPEED,
+        n_agents=1,
+        master_seed=42,
+        starting_locs=np.array([0], dtype=np.int64),
+        starting_locs_mode_relevance=False,
+        work_tiles=np.array([1], dtype=np.int64),
+        walking_speed_kmh=5.0,
+        bike_speed_kmh=15.0,
+        has_car=np.array([has_car], dtype=np.bool_),
+        has_bike=np.array([has_bike], dtype=np.bool_),
+        walking_threshold_km=np.array([walk_threshold_km], dtype=np.float64),
+        bike_threshold_km=np.array([bike_threshold_km], dtype=np.float64),
+        **kwargs,
+    )
+    assert len(trip[0]) == 2
+    return np.asarray(paths[7], dtype=np.uint8)
+
+
+def test_transport_mode_selection_uses_walk_car_bike_rail_and_fallback():
+    # Path mode codes: 1=car, 2=walk, 3=bike, 4=rail.
+    assert set(_run_mode_case(has_car=True, has_bike=False, walk_threshold_km=100.0, bike_threshold_km=0.0)) == {2}
+    assert set(_run_mode_case(has_car=True, has_bike=True, walk_threshold_km=0.0, bike_threshold_km=100.0)) == {1}
+    assert set(_run_mode_case(has_car=False, has_bike=True, walk_threshold_km=0.0, bike_threshold_km=100.0)) == {3}
+    assert set(_run_mode_case(has_car=False, has_bike=False, walk_threshold_km=0.0, bike_threshold_km=0.0, rail=True)) == {4}
+    assert set(_run_mode_case(has_car=False, has_bike=False, walk_threshold_km=0.0, bike_threshold_km=0.0)) == {1}
+
+
 def test_simulation_core_keeps_one_location_for_continuous_abstract_block():
     lats = [48.8566, 48.8580, 48.8610, 48.8640]
     lngs = [2.3522, 2.3540, 2.3580, 2.3620]

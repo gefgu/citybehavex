@@ -205,6 +205,7 @@ export interface TimelineSegment {
   d_lng: number;
   purpose: string;
   category?: string | null;
+  mode?: "stay" | "car" | "walk" | "bike" | "rail";
   // Present on "leg" segments from runs with road routing enabled — the
   // road-following path to animate along instead of a straight-line lerp.
   waypoints?: TimelineWaypoint[] | null;

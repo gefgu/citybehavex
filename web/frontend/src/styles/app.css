@@ -605,6 +605,27 @@ table.metrics td.unit { color: var(--muted); }
   border-radius: 50%;
   display: inline-block;
 }
+.timeline-legend-item .timeline-mode-swatch {
+  background: var(--ink);
+  border-radius: 0;
+}
+.timeline-legend-item .timeline-mode-stay {
+  border-radius: 50%;
+}
+.timeline-legend-item .timeline-mode-walk {
+  width: 0;
+  height: 0;
+  background: transparent;
+  border-left: 6px solid transparent;
+  border-right: 6px solid transparent;
+  border-bottom: 11px solid var(--ink);
+}
+.timeline-legend-item .timeline-mode-bike {
+  clip-path: polygon(50% 0%, 100% 38%, 82% 100%, 18% 100%, 0% 38%);
+}
+.timeline-legend-item .timeline-mode-rail {
+  transform: rotate(45deg) scale(0.85);
+}
 .timeline-sidebar {
   width: 340px;
   flex-shrink: 0;

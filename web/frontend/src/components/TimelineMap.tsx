@@ -36,12 +36,61 @@ interface Seg {
   d_lat: number;
   d_lng: number;
   purpose: string;
+  mode: "stay" | "car" | "walk" | "bike" | "rail";
   waypoints?: Waypoint[];
 }
 
-type AgentFeatureCollection = FeatureCollection<Point, { uid: number; purpose: string }>;
+type AgentFeatureCollection = FeatureCollection<Point, { uid: number; purpose: string; mode: string }>;
 
 const EMPTY_FC: AgentFeatureCollection = { type: "FeatureCollection", features: [] };
+const MODE_LABEL: Record<string, string> = {
+  stay: "Stay",
+  car: "Car",
+  walk: "Walk",
+  bike: "Bike",
+  rail: "Rail",
+};
+
+function makeModeIcon(mode: string): ImageData {
+  const size = 32;
+  const canvas = document.createElement("canvas");
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) throw new Error("2d canvas unavailable");
+  ctx.clearRect(0, 0, size, size);
+  ctx.fillStyle = "#000000";
+  ctx.strokeStyle = "#000000";
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  if (mode === "walk") {
+    ctx.moveTo(16, 5);
+    ctx.lineTo(28, 27);
+    ctx.lineTo(4, 27);
+    ctx.closePath();
+  } else if (mode === "bike") {
+    for (let i = 0; i < 5; i++) {
+      const a = -Math.PI / 2 + (i * Math.PI * 2) / 5;
+      const x = 16 + Math.cos(a) * 12;
+      const y = 16 + Math.sin(a) * 12;
+      if (i === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    }
+    ctx.closePath();
+  } else if (mode === "rail") {
+    ctx.moveTo(16, 4);
+    ctx.lineTo(28, 16);
+    ctx.lineTo(16, 28);
+    ctx.lineTo(4, 16);
+    ctx.closePath();
+  } else if (mode === "car") {
+    ctx.rect(5, 9, 22, 14);
+  } else {
+    ctx.arc(16, 16, 11, 0, Math.PI * 2);
+  }
+  ctx.fill();
+  return ctx.getImageData(0, 0, size, size);
+}
 
 // Sim timestamps are naive (no timezone, not tied to any real place) — parsed
 // and formatted as local wall-clock strings throughout, consistently in both
@@ -98,6 +147,7 @@ function mergeSegments(target: Map<number, Seg[]>, raw: TimelineSegment[]) {
       d_lat: s.d_lat,
       d_lng: s.d_lng,
       purpose: s.purpose,
+      mode: s.mode ?? (s.kind === "dwell" ? "stay" : "car"),
       waypoints: s.waypoints?.map((w) => ({ t: parseSimTime(w.t), lat: w.lat, lng: w.lng })),
     };
     const list = byUid.get(s.uid) ?? [];
@@ -238,16 +288,26 @@ export function TimelineMap({
     };
 
     const onLoad = () => {
+      for (const mode of Object.keys(MODE_LABEL)) {
+        if (!map.hasImage(`mode-${mode}`)) {
+          map.addImage(`mode-${mode}`, makeModeIcon(mode), { sdf: true, pixelRatio: 2 });
+        }
+      }
       map.addSource("agents", { type: "geojson", data: EMPTY_FC });
       map.addLayer({
-        id: "agents-circles",
-        type: "circle",
+        id: "agents-symbols",
+        type: "symbol",
         source: "agents",
+        layout: {
+          "icon-image": ["concat", "mode-", ["get", "mode"]],
+          "icon-size": 0.55,
+          "icon-allow-overlap": true,
+          "icon-ignore-placement": true,
+        },
         paint: {
-          "circle-radius": 4,
-          "circle-stroke-width": 1,
-          "circle-stroke-color": "#ffffff",
-          "circle-color": [
+          "icon-halo-color": "#ffffff",
+          "icon-halo-width": 1,
+          "icon-color": [
             "match",
             ["get", "purpose"],
             ...Object.entries(PURPOSE_COLOR).flatMap(([k, v]) => [k, v]),
@@ -255,15 +315,15 @@ export function TimelineMap({
           ] as unknown as string,
         },
       });
-      map.on("click", "agents-circles", (e) => {
+      map.on("click", "agents-symbols", (e) => {
         const f = e.features?.[0];
         const uid = f?.properties?.uid;
         if (uid !== undefined && uid !== null) onSelectAgent(Number(uid));
       });
-      map.on("mouseenter", "agents-circles", () => {
+      map.on("mouseenter", "agents-symbols", () => {
         map.getCanvas().style.cursor = "pointer";
       });
-      map.on("mouseleave", "agents-circles", () => {
+      map.on("mouseleave", "agents-symbols", () => {
         map.getCanvas().style.cursor = "";
       });
       map.on("moveend", onMoveEnd);
@@ -322,7 +382,7 @@ export function TimelineMap({
           features.push({
             type: "Feature",
             geometry: { type: "Point", coordinates: [lng, lat] },
-            properties: { uid, purpose: seg.purpose },
+            properties: { uid, purpose: seg.purpose, mode: seg.mode },
           });
         }
         const source = mapRef.current?.getSource("agents") as mapboxgl.GeoJSONSource | undefined;
@@ -429,6 +489,14 @@ export function TimelineMap({
               <span key={purpose} className="timeline-legend-item">
                 <i style={{ background: color }} />
                 {purpose}
+              </span>
+            ))}
+          </div>
+          <div className="timeline-legend">
+            {Object.entries(MODE_LABEL).map(([mode, label]) => (
+              <span key={mode} className="timeline-legend-item">
+                <i className={`timeline-mode-swatch timeline-mode-${mode}`} />
+                {label}
               </span>
             ))}
           </div>
