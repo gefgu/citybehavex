@@ -66,6 +66,7 @@ def get_charts(
             time_use_weight_col=experiment.time_use_weight_col,
             road_nodes_path=str(road_nodes_path) if road_nodes_path is not None else None,
             road_edges_path=str(road_edges_path) if road_edges_path is not None else None,
+            network_validation_config=getattr(experiment, "network_validation_config", None),
             special_days=experiment.special_days,
         ),
         refresh=refresh,

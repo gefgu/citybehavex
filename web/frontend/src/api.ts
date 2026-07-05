@@ -475,8 +475,8 @@ export interface NetworkMetricSummary {
   count: number;
   mean: number | null;
 }
-export interface NetworkValidationBlock {
-  comparison: "synthetic_vs_random";
+export interface NetworkValidationComparisonBlock {
+  comparison: "synthetic_vs_random" | "observed_vs_random";
   random_model: "degree_preserving_rnd";
   wasserstein: {
     clustering_coefficient: number | null;
@@ -484,11 +484,16 @@ export interface NetworkValidationBlock {
     topological_overlap: number | null;
   };
   distributions: {
-    synthetic: Record<string, NetworkMetricSummary>;
+    synthetic?: Record<string, NetworkMetricSummary>;
+    observed?: Record<string, NetworkMetricSummary>;
     random: Record<string, NetworkMetricSummary>;
   };
-  synthetic_network: SocialNetworkBlock;
+  source_network: SocialNetworkBlock;
   random_network: SocialNetworkBlock;
+}
+export interface NetworkValidationBlock {
+  synthetic_vs_random?: NetworkValidationComparisonBlock;
+  observed_vs_random?: NetworkValidationComparisonBlock;
 }
 export interface ChartPayload {
   mode: "comparison" | "synthetic_only";

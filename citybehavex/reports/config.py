@@ -1,10 +1,24 @@
 from __future__ import annotations
 
-from typing import Optional
+from typing import Literal, Optional
 
-from pydantic import BaseModel, ConfigDict, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from .comparison import ALL_REPORT_SECTIONS
+
+
+class NetworkValidationConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = False
+    observed_enabled: bool = False
+    synthetic_enabled: bool = True
+    time_window: Literal["day"] = "day"
+    location_mode: Literal["auto", "location_col", "h3"] = "auto"
+    location_col: Optional[str] = None
+    h3_resolution: int = 9
+    max_group_size: int = 200
+    random_seed: int = 42
 
 
 class ComparisonConfig(BaseModel):
@@ -30,6 +44,7 @@ class ComparisonConfig(BaseModel):
     # real datasets (tens/hundreds of millions of rows) may want this off to
     # keep the live web comparison responsive.
     road_network_distance: bool = True
+    network_validation: NetworkValidationConfig = Field(default_factory=NetworkValidationConfig)
 
     @field_validator("sections")
     @classmethod

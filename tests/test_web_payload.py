@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from types import SimpleNamespace
 
 import pandas as pd
 
@@ -90,13 +91,79 @@ def test_build_comparison_payload_includes_network_validation(monkeypatch, tmp_p
         ),
     )
 
-    payload = build_comparison_payload(str(synthetic), None, "observed")
+    payload = build_comparison_payload(
+        str(synthetic),
+        None,
+        "observed",
+        network_validation_config=SimpleNamespace(
+            enabled=True,
+            synthetic_enabled=True,
+            observed_enabled=False,
+            random_seed=7,
+        ),
+    )
 
     validation = payload["network_validation"]
     assert validation is not None
-    assert validation["comparison"] == "synthetic_vs_random"
-    assert validation["distributions"]["synthetic"]["edge_persistence"]["count"] == 2
-    assert validation["random_network"]["kind"] == "degree_preserving_rnd"
+    assert validation["synthetic_vs_random"]["comparison"] == "synthetic_vs_random"
+    assert validation["synthetic_vs_random"]["distributions"]["synthetic"]["edge_persistence"]["count"] == 2
+    assert validation["synthetic_vs_random"]["random_network"]["kind"] == "degree_preserving_rnd"
+
+
+def test_build_comparison_payload_includes_observed_network_validation(monkeypatch, tmp_path):
+    synthetic = tmp_path / "synthetic.parquet"
+    observed = tmp_path / "observed.parquet"
+    pd.DataFrame(
+        {
+            "uid": ["u1"],
+            "datetime": pd.to_datetime(["2026-01-01 00:00"]),
+            "lat": [48.85],
+            "lng": [2.35],
+            "purpose": ["HOME"],
+        }
+    ).to_parquet(synthetic, index=False)
+    pd.DataFrame(
+        {
+            "uid": ["a", "b", "a", "b"],
+            "datetime": pd.to_datetime(["2026-01-01 08:00", "2026-01-01 09:00", "2026-01-02 08:00", "2026-01-02 09:00"]),
+            "lat": [48.85, 48.85, 48.85, 48.85],
+            "lng": [2.35, 2.35, 2.35, 2.35],
+            "location_id": ["x", "x", "x", "x"],
+        }
+    ).to_parquet(observed, index=False)
+    monkeypatch.setattr(
+        "web.backend.app.payload._mobility_law_visits",
+        lambda *args, **kwargs: pd.DataFrame(
+            {
+                "user_id": ["u1"],
+                "timestamp": pd.to_datetime(["2026-01-01 00:00"]),
+                "location_id": ["a"],
+                "lat": [48.85],
+                "lng": [2.35],
+            }
+        ),
+    )
+
+    payload = build_comparison_payload(
+        str(synthetic),
+        str(observed),
+        "observed",
+        network_validation_config=SimpleNamespace(
+            enabled=True,
+            synthetic_enabled=False,
+            observed_enabled=True,
+            location_mode="location_col",
+            location_col="location_id",
+            max_group_size=200,
+            random_seed=7,
+        ),
+    )
+
+    validation = payload["network_validation"]
+    assert validation is not None
+    assert validation["observed_vs_random"]["comparison"] == "observed_vs_random"
+    assert validation["observed_vs_random"]["distributions"]["observed"]["edge_persistence"]["count"] == 1
+    assert validation["observed_vs_random"]["source_network"]["kind"] == "observed_daily_copresence"
 
 
 def test_build_comparison_payload_groups_activity_and_micro_usage(monkeypatch, tmp_path):

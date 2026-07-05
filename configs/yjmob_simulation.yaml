@@ -95,6 +95,13 @@ profiles:
 comparison:
   path: data/yjmob/yjmob_wgs84_simple.parquet
   label: yjmob100k
+  network_validation:
+    enabled: true
+    observed_enabled: true
+    synthetic_enabled: true
+    location_mode: h3
+    h3_resolution: 9
+    max_group_size: 200
   # WIP: road-network-based jump_lengths/radius_of_gyration is implemented
   # (citybehavex/metrics/road_distance.py) but disabled by default pending
   # further performance validation on large real datasets. Set true to use
