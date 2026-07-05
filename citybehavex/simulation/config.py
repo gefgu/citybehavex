@@ -27,8 +27,6 @@ class SimulationConfig(BaseModel):
     walking_threshold_sigma_ln: float = 0.45
     bike_threshold_mu_ln_km: float = 1.4
     bike_threshold_sigma_ln: float = 0.55
-    social_graph_k: int = 20
-    profile_graph_exact_threshold: int = 10_000
 
     # When true, road-path waypoints are flushed to the `_moving.parquet`
     # sidecar incrementally, once per simulated day, instead of being held in
@@ -55,7 +53,7 @@ class SimulationConfig(BaseModel):
     gravity_origin_exponent: float = 1.0
     gravity_destination_exponent: float = 1.0
 
-    @field_validator("agents", "days", "social_graph_k", "profile_graph_exact_threshold")
+    @field_validator("agents", "days")
     @classmethod
     def positive_int(cls, value: int) -> int:
         if value <= 0:

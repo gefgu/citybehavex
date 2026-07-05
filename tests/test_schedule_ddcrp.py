@@ -159,6 +159,7 @@ def test_build_diary_bank_no_embeddings():
     assert bank.embedded is False
     assert bank.embeddings is None
     assert bank.slot_locs.shape == (20, SLOTS)
+    assert bank.slot_block_ids.shape == (20, SLOTS)
 
 
 # --- build_ddcrp_diary -----------------------------------------------------
@@ -175,7 +176,7 @@ def test_hard_weekday_weekend_filter():
     weekday_set = set(np.flatnonzero(bank.day_type == "weekday").tolist())
     weekend_set = set(np.flatnonzero(bank.day_type == "weekend").tolist())
     day_types = _calendar_day_types(MONDAY, 7)
-    (_, _, _, _), chosen, _info = build_ddcrp_diary(
+    (_, _, _, _, _), chosen, _info = build_ddcrp_diary(
         bank, MONDAY, 7, day_types, n_agents=50, random_state=42, params=ScheduleConfig()
     )
     for d in range(7):
@@ -200,7 +201,7 @@ def test_hard_partition_with_special_day():
     weekday_set = set(np.flatnonzero(bank.day_type == "weekday").tolist())
     # Days 0-1 are a Monday/Tuesday (calendar weekdays) but forced to "emergency".
     day_types = ["emergency", "emergency", *_calendar_day_types(MONDAY, 7)[2:]]
-    (_, _, _, _), chosen, _info = build_ddcrp_diary(
+    (_, _, _, _, _), chosen, _info = build_ddcrp_diary(
         bank, MONDAY, 7, day_types, n_agents=20, random_state=1, params=ScheduleConfig()
     )
     assert set(chosen[:, 0].tolist()) <= emergency_set
@@ -212,8 +213,8 @@ def test_determinism():
     bank = _bank()
     params = ScheduleConfig()
     day_types = _calendar_day_types(MONDAY, 7)
-    (_, _, _, _), c1, _info1 = build_ddcrp_diary(bank, MONDAY, 7, day_types, 30, 7, params)
-    (_, _, _, _), c2, _info2 = build_ddcrp_diary(bank, MONDAY, 7, day_types, 30, 7, params)
+    (_, _, _, _, _), c1, _info1 = build_ddcrp_diary(bank, MONDAY, 7, day_types, 30, 7, params)
+    (_, _, _, _, _), c2, _info2 = build_ddcrp_diary(bank, MONDAY, 7, day_types, 30, 7, params)
     np.testing.assert_array_equal(c1, c2)
 
 
@@ -221,11 +222,12 @@ def test_diary_arrays_shapes_and_mask():
     bank = _bank()
     days, agents = 7, 12
     day_types = _calendar_day_types(MONDAY, days)
-    (ts, locs, starts, ends), chosen, _info = build_ddcrp_diary(
+    (ts, locs, starts, ends, block_ids), chosen, _info = build_ddcrp_diary(
         bank, MONDAY, days, day_types, agents, 1, ScheduleConfig()
     )
     expected = agents * days * SLOTS
     assert ts.shape == (expected,) and locs.shape == (expected,)
+    assert block_ids.shape == (expected,)
     assert starts.shape == (agents,) and ends.shape == (agents,)
     assert starts[0] == 0 and ends[-1] == expected
     assert np.all(locs >= 0)
@@ -254,6 +256,7 @@ def test_profile_similarity_biases_selection():
         day_type=bank.day_type,
         embeddings=diary_embs,
         slot_locs=bank.slot_locs,
+        slot_block_ids=bank.slot_block_ids,
         slots_per_day=bank.slots_per_day,
         granularity_minutes=bank.granularity_minutes,
         embedded=True,
@@ -289,6 +292,7 @@ def test_precomputed_alignment_scores_override_embedding_similarity():
         day_type=bank.day_type,
         embeddings=np.ones((len(bank.diaries), 3), dtype=np.float32),
         slot_locs=bank.slot_locs,
+        slot_block_ids=bank.slot_block_ids,
         slots_per_day=bank.slots_per_day,
         granularity_minutes=bank.granularity_minutes,
         embedded=True,
@@ -300,7 +304,7 @@ def test_precomputed_alignment_scores_override_embedding_similarity():
     alignment_scores[1, weekday[1]] = 1.0
 
     params = ScheduleConfig(temperature_beta_a=0.5, temperature_beta_b=10.0)
-    (_, _, _, _), chosen, info = build_ddcrp_diary(
+    (_, _, _, _, _), chosen, info = build_ddcrp_diary(
         bank,
         MONDAY,
         1,
@@ -336,7 +340,7 @@ def test_no_profile_embeddings_uses_popularity():
     bank = _bank(n_weekday=10, n_weekend=10)
     params = ScheduleConfig(alpha_beta_a=10.0, alpha_beta_b=1.0)  # high alpha → lots of exploration
     day_types = _calendar_day_types(MONDAY, 7)
-    (_, _, _, _), chosen, _info = build_ddcrp_diary(bank, MONDAY, 7, day_types, 200, 9, params)
+    (_, _, _, _, _), chosen, _info = build_ddcrp_diary(bank, MONDAY, 7, day_types, 200, 9, params)
     weekday_cols = [d for d in range(7) if day_types[d] == "weekday"]
     used = set(chosen[:, weekday_cols].ravel().tolist())
     assert len(used) >= 6  # most of the 10-diary weekday bank gets explored

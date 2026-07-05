@@ -31,6 +31,15 @@ impl DiaryState {
         }
     }
 
+    pub(crate) fn current_block_id(&self, diary_block_ids: &[i32]) -> i32 {
+        let idx = self.diary_start + self.diary_idx;
+        if idx < self.diary_end && idx < diary_block_ids.len() {
+            diary_block_ids[idx]
+        } else {
+            -1
+        }
+    }
+
     pub(crate) fn advance(&mut self, diary_timestamps: &[i64], end_ts: i64) -> i64 {
         self.diary_idx += 1;
         self.current_ts(diary_timestamps).unwrap_or(end_ts + 3600)
@@ -111,14 +120,16 @@ pub(crate) struct AgentParData {
     pub(crate) rng: Xoshiro256PlusPlus,
     pub(crate) diary: DiaryState,
     pub(crate) scratch: Scratch,
-    pub(crate) moves: Vec<(usize, i64, i32)>,
+    pub(crate) moves: Vec<(usize, i64, i32, i32)>,
     pub(crate) active_day: i64,
     pub(crate) active_abs_loc: i32,
+    pub(crate) active_block_id: i32,
     pub(crate) neighbor_indices: Vec<usize>,
     pub(crate) edge_sim: Vec<f64>,
     pub(crate) edge_upd: Vec<i64>,
     pub(crate) encounters: Vec<Encounter>,
     pub(crate) activity_counts: Vec<u32>,
+    pub(crate) last_activity: i32,
     pub(crate) pending_departure: i64,
     /// Ordinal of the next micro-activity sampled within the currently-open
     /// stop; reset to 0 whenever a real relocation opens a new stop.

@@ -19,8 +19,6 @@ simulation:
   relevance_column: relevance
   granularity_minutes: 60
   car_speed_kmh: 35.0        # fallback speed when road routing is disabled/unsnapped
-  social_graph_k: 20
-  profile_graph_exact_threshold: 10000
   rho: 0.6
   gamma: 0.21
   alpha: 0.2
@@ -29,6 +27,10 @@ simulation:
   gravity_deterrence_exponent: -2.0
   gravity_origin_exponent: 1.0
   gravity_destination_exponent: 1.0
+
+social:
+  social_graph_k: 20
+  profile_graph_exact_threshold: 10000
 
 road_network:
   enabled: true

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Literal, Optional
+
 from pydantic import BaseModel, ConfigDict, Field
 
 
@@ -10,6 +12,14 @@ class ActivitiesConfig(BaseModel):
     kappa: float = Field(default=1.0, gt=0)
     temperature: float = Field(default=0.5, gt=0)
     embed_activities: bool = False
+    alignment_backend: Literal["none", "rerank"] = "none"
+    alignment_base_url: Optional[str] = None
+    alignment_model: Optional[str] = None
+    alignment_timeout_seconds: float = Field(default=120.0, gt=0)
+    alignment_batch_size: int = Field(default=32, gt=0)
+    alignment_cache_path: Optional[str] = None
+    profile_cluster_similarity_threshold: float = Field(default=0.94, ge=-1.0, le=1.0)
+    history_weight: float = Field(default=1.0, ge=0.0)
 
     # Uniform tuning knobs over the MTUS catalog's per-activity log-normal
     # duration params (citybehavex.activities.catalog._CATALOG_RAW). `mu_ln`

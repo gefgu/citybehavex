@@ -10,8 +10,10 @@ use crate::simulation_core::inputs::{
     RoadNetworkInputs, SimulationParams, SocialGraphInputs, TransportInputs,
 };
 use crate::simulation_core::network_graph::{build_co_presence_edges, compute_graph_metrics};
-use crate::simulation_core::outputs::{ActivityOutputBuffers, RoadPathOutputBuffers, TripOutputBuffers};
-use crate::simulation_core::roads::{batch_road_distances, RoadGraph};
+use crate::simulation_core::outputs::{
+    ActivityOutputBuffers, RoadPathOutputBuffers, TripOutputBuffers,
+};
+use crate::simulation_core::roads::{RoadGraph, batch_road_distances};
 
 /// Batch lat/lng (degrees) -> H3 cell index conversion at a fixed resolution,
 /// in parallel. Returns `u64` cell indices (`INVALID_CELL` == `u64::MAX` for
@@ -77,7 +79,7 @@ fn opt_i64_as_usize_vec(v: &Option<PyReadonlyArray1<'_, i64>>) -> PyResult<Optio
     rho, gamma, alpha,
     start_ts, end_ts, indipendency_window_s, dt_update_mob_sim_s,
     slot_seconds, car_speed_kmh,
-    n_agents, master_seed=None, starting_locs=None,
+    n_agents, master_seed=None, diary_block_ids=None, starting_locs=None,
     starting_locs_mode_relevance=false,
     work_tiles=None,
     edge_profile_sim=None,
@@ -86,6 +88,9 @@ fn opt_i64_as_usize_vec(v: &Option<PyReadonlyArray1<'_, i64>>) -> PyResult<Optio
     profile_embs=None, emb_dim=0usize,
     act_kappa=1.0f64, act_temp=0.5f64,
     profile_act_sims=None,
+    activity_alignment_scores=None, activity_cluster_labels=None,
+    activity_alignment_clusters=0usize, activity_alignment_blocks=0usize,
+    activity_alignment_previous=0usize, activity_history_weight=1.0f64,
     road_edge_from=None, road_edge_to=None, road_edge_weight_ds=None,
     road_node_lats=None, road_node_lngs=None, location_road_node=None,
     max_leg_waypoints=16usize,
@@ -124,6 +129,7 @@ pub fn simulation_core_simulate_agents<'py>(
     car_speed_kmh: f64,
     n_agents: usize,
     master_seed: Option<u64>,
+    diary_block_ids: Option<PyReadonlyArray1<'py, i32>>,
     starting_locs: Option<PyReadonlyArray1<'py, i64>>,
     starting_locs_mode_relevance: bool,
     work_tiles: Option<PyReadonlyArray1<'py, i64>>,
@@ -138,6 +144,12 @@ pub fn simulation_core_simulate_agents<'py>(
     act_kappa: f64,
     act_temp: f64,
     profile_act_sims: Option<PyReadonlyArray1<'py, f64>>,
+    activity_alignment_scores: Option<PyReadonlyArray1<'py, f64>>,
+    activity_cluster_labels: Option<PyReadonlyArray1<'py, i64>>,
+    activity_alignment_clusters: usize,
+    activity_alignment_blocks: usize,
+    activity_alignment_previous: usize,
+    activity_history_weight: f64,
     road_edge_from: Option<PyReadonlyArray1<'py, i64>>,
     road_edge_to: Option<PyReadonlyArray1<'py, i64>>,
     road_edge_weight_ds: Option<PyReadonlyArray1<'py, i64>>,
@@ -203,6 +215,14 @@ pub fn simulation_core_simulate_agents<'py>(
     let dists = distances.as_slice()?;
     let dt_raw = diary_timestamps.as_slice()?;
     let da_raw = diary_abs_locs.as_slice()?;
+    let default_block_ids;
+    let db_raw = match &diary_block_ids {
+        Some(arr) => arr.as_slice()?,
+        None => {
+            default_block_ids = vec![0i32; da_raw.len()];
+            &default_block_ids
+        }
+    };
 
     let ns = i64_as_usize_vec(&neighbor_starts)?;
     let nb = i64_as_usize_vec(&neighbors)?;
@@ -225,6 +245,9 @@ pub fn simulation_core_simulate_agents<'py>(
     let act_dur_sigma_s = opt_slice(&act_dur_sigma)?;
     let profile_embs_s = opt_slice(&profile_embs)?;
     let profile_act_sims_s = opt_slice(&profile_act_sims)?;
+    let activity_alignment_scores_s = opt_slice(&activity_alignment_scores)?;
+    let activity_cluster_labels_v =
+        opt_i64_as_usize_vec(&activity_cluster_labels)?.unwrap_or_default();
 
     let purpose_act_starts_v = opt_i64_as_usize_vec(&purpose_act_starts)?.unwrap_or_default();
     let purpose_acts_v = opt_i64_as_usize_vec(&purpose_acts)?.unwrap_or_default();
@@ -322,7 +345,18 @@ pub fn simulation_core_simulate_agents<'py>(
             let stop_id = chunk.stop_id.into_pyarray(py);
             let abstract_loc = chunk.abstract_loc.into_pyarray(py);
             callback
-                .call1(py, (agent, loc_id, arrival, departure, duration, stop_id, abstract_loc))
+                .call1(
+                    py,
+                    (
+                        agent,
+                        loc_id,
+                        arrival,
+                        departure,
+                        duration,
+                        stop_id,
+                        abstract_loc,
+                    ),
+                )
                 .map(|_| ())
                 .map_err(|e| e.to_string())
         }
@@ -352,84 +386,97 @@ pub fn simulation_core_simulate_agents<'py>(
         .as_mut()
         .map(|f| f as &mut dyn FnMut(ActivityOutputBuffers) -> Result<(), String>);
 
-    let output = simulate(CoreInputs {
-        locations: LocationInputs {
-            lats,
-            lngs,
-            relevances: rels,
-            distances: dists,
+    let output = simulate(
+        CoreInputs {
+            locations: LocationInputs {
+                lats,
+                lngs,
+                relevances: rels,
+                distances: dists,
+            },
+            social_graph: SocialGraphInputs {
+                neighbor_starts: &ns,
+                neighbors: &nb,
+                edge_profile_sim: eps,
+            },
+            diary: DiaryInputs {
+                timestamps: dt_raw,
+                abstract_locations: da_raw,
+                block_ids: db_raw,
+                starts: &ds,
+                ends: &de,
+            },
+            params: SimulationParams {
+                rho,
+                gamma,
+                alpha,
+                gravity_deterrence_exponent,
+                gravity_origin_exponent,
+                gravity_destination_exponent,
+                start_ts,
+                end_ts,
+                indipendency_window_s,
+                dt_update_mob_sim_s,
+                slot_seconds,
+                car_speed_kmh,
+                walking_speed_kmh,
+                bike_speed_kmh,
+                n_agents,
+                master_seed,
+            },
+            initial_locations: InitialLocationInputs {
+                starting_locs: sl,
+                starting_locs_mode_relevance,
+                work_tiles: wt,
+            },
+            activities: ActivityInputs {
+                act_embs: act_embs_s,
+                act_dur_mu: act_dur_mu_s,
+                act_dur_sigma: act_dur_sigma_s,
+                purpose_act_starts: &purpose_act_starts_v,
+                purpose_acts: &purpose_acts_v,
+                profile_embs: profile_embs_s,
+                profile_act_sims: profile_act_sims_s,
+                contextual_scores: activity_alignment_scores_s,
+                cluster_labels: &activity_cluster_labels_v,
+                n_clusters: activity_alignment_clusters,
+                n_blocks: activity_alignment_blocks,
+                n_previous: activity_alignment_previous,
+                history_weight: activity_history_weight,
+                emb_dim,
+                kappa: act_kappa,
+                temperature: act_temp,
+            },
+            road_network: RoadNetworkInputs {
+                edge_from: &road_edge_from_v,
+                edge_to: &road_edge_to_v,
+                edge_weight_ds: &road_edge_weight_v,
+                node_lats: road_node_lats_s,
+                node_lngs: road_node_lngs_s,
+                location_node: location_road_node_s,
+                max_leg_waypoints,
+            },
+            rail_network: RoadNetworkInputs {
+                edge_from: &rail_edge_from_v,
+                edge_to: &rail_edge_to_v,
+                edge_weight_ds: &rail_edge_weight_v,
+                node_lats: rail_node_lats_s,
+                node_lngs: rail_node_lngs_s,
+                location_node: location_rail_node_s,
+                max_leg_waypoints: max_rail_leg_waypoints,
+            },
+            transport: TransportInputs {
+                has_car: has_car_s,
+                has_bike: has_bike_s,
+                walking_threshold_km: walking_threshold_s,
+                bike_threshold_km: bike_threshold_s,
+            },
         },
-        social_graph: SocialGraphInputs {
-            neighbor_starts: &ns,
-            neighbors: &nb,
-            edge_profile_sim: eps,
-        },
-        diary: DiaryInputs {
-            timestamps: dt_raw,
-            abstract_locations: da_raw,
-            starts: &ds,
-            ends: &de,
-        },
-        params: SimulationParams {
-            rho,
-            gamma,
-            alpha,
-            gravity_deterrence_exponent,
-            gravity_origin_exponent,
-            gravity_destination_exponent,
-            start_ts,
-            end_ts,
-            indipendency_window_s,
-            dt_update_mob_sim_s,
-            slot_seconds,
-            car_speed_kmh,
-            walking_speed_kmh,
-            bike_speed_kmh,
-            n_agents,
-            master_seed,
-        },
-        initial_locations: InitialLocationInputs {
-            starting_locs: sl,
-            starting_locs_mode_relevance,
-            work_tiles: wt,
-        },
-        activities: ActivityInputs {
-            act_embs: act_embs_s,
-            act_dur_mu: act_dur_mu_s,
-            act_dur_sigma: act_dur_sigma_s,
-            purpose_act_starts: &purpose_act_starts_v,
-            purpose_acts: &purpose_acts_v,
-            profile_embs: profile_embs_s,
-            profile_act_sims: profile_act_sims_s,
-            emb_dim,
-            kappa: act_kappa,
-            temperature: act_temp,
-        },
-        road_network: RoadNetworkInputs {
-            edge_from: &road_edge_from_v,
-            edge_to: &road_edge_to_v,
-            edge_weight_ds: &road_edge_weight_v,
-            node_lats: road_node_lats_s,
-            node_lngs: road_node_lngs_s,
-            location_node: location_road_node_s,
-            max_leg_waypoints,
-        },
-        rail_network: RoadNetworkInputs {
-            edge_from: &rail_edge_from_v,
-            edge_to: &rail_edge_to_v,
-            edge_weight_ds: &rail_edge_weight_v,
-            node_lats: rail_node_lats_s,
-            node_lngs: rail_node_lngs_s,
-            location_node: location_rail_node_s,
-            max_leg_waypoints: max_rail_leg_waypoints,
-        },
-        transport: TransportInputs {
-            has_car: has_car_s,
-            has_bike: has_bike_s,
-            walking_threshold_km: walking_threshold_s,
-            bike_threshold_km: bike_threshold_s,
-        },
-    }, on_day_flush_ref, on_encounter_day_flush_ref, on_trip_day_flush_ref, on_activity_day_flush_ref)
+        on_day_flush_ref,
+        on_encounter_day_flush_ref,
+        on_trip_day_flush_ref,
+        on_activity_day_flush_ref,
+    )
     .map_err(PyValueError::new_err)?;
 
     Ok((
@@ -527,7 +574,9 @@ pub fn graph_metrics_py<'py>(
     let from = edge_from.as_slice()?;
     let to = edge_to.as_slice()?;
     if from.len() != to.len() {
-        return Err(PyValueError::new_err("edge_from and edge_to must have the same length"));
+        return Err(PyValueError::new_err(
+            "edge_from and edge_to must have the same length",
+        ));
     }
     let metrics = compute_graph_metrics(node_count, from, to);
     Ok((

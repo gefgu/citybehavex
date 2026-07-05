@@ -14,7 +14,7 @@ def test_act_dur_scale_shifts_mean_duration_uniformly(scale: float) -> None:
     config.activities.enabled = True
     config.activities.act_dur_scale = scale
 
-    _, act_dur_mu, act_dur_sigma, _, _ = _build_activity_data(config)
+    _, act_dur_mu, act_dur_sigma, *_ = _build_activity_data(config)
 
     base_mu, base_sigma = activity_duration_arrays()
     assert np.allclose(np.exp(act_dur_mu), np.exp(base_mu) * scale)
@@ -26,7 +26,7 @@ def test_act_dur_sigma_scale_leaves_mu_untouched() -> None:
     config.activities.enabled = True
     config.activities.act_dur_sigma_scale = 1.5
 
-    _, act_dur_mu, act_dur_sigma, _, _ = _build_activity_data(config)
+    _, act_dur_mu, act_dur_sigma, *_ = _build_activity_data(config)
 
     base_mu, base_sigma = activity_duration_arrays()
     assert np.array_equal(act_dur_mu, base_mu)

@@ -201,7 +201,7 @@ def _load_experiment(config_path: Path) -> Experiment:
         "start_date": cfg.simulation.start_date,
         "granularity_minutes": cfg.simulation.granularity_minutes,
         "car_speed_kmh": cfg.simulation.car_speed_kmh,
-        "social_graph_k": cfg.simulation.social_graph_k,
+        "social_graph_k": cfg.social.social_graph_k,
         "rho": cfg.simulation.rho,
         "gamma": cfg.simulation.gamma,
         "alpha": cfg.simulation.alpha,

@@ -5,9 +5,11 @@ import pytest
 from citybehavex.config import apply_overrides, load_config
 from citybehavex.llm import LLMConfig
 from citybehavex.llm_diaries import DiariesConfig
+from citybehavex.activities.config import ActivitiesConfig
 from citybehavex.profiles.config import AgentProfilesConfig
 from citybehavex.schedules import ScheduleConfig
 from citybehavex.simulation import SimulationConfig
+from citybehavex.social.config import SocialNetworkConfig
 
 
 def test_load_config_expands_environment(monkeypatch, tmp_path):
@@ -48,10 +50,19 @@ def test_simulation_config_rejects_removed_social_graph_radius():
         SimulationConfig(social_graph_radius=0.5)
 
 
-def test_simulation_config_accepts_bounded_social_graph_settings():
-    config = SimulationConfig(social_graph_k=30, profile_graph_exact_threshold=5000)
+def test_social_network_config_accepts_bounded_social_graph_settings():
+    config = SocialNetworkConfig(social_graph_k=30, profile_graph_exact_threshold=5000)
     assert config.social_graph_k == 30
     assert config.profile_graph_exact_threshold == 5000
+
+
+def test_social_network_config_rejects_non_positive_settings():
+    with pytest.raises(ValueError):
+        SocialNetworkConfig(social_graph_k=0)
+    with pytest.raises(ValueError):
+        SocialNetworkConfig(degree_sigma_ln=0)
+    with pytest.raises(ValueError):
+        SocialNetworkConfig(home_h3_resolution=16)
 
 
 def test_llm_config_defaults_to_thirty_diaries():
@@ -72,6 +83,13 @@ def test_schedule_alignment_config_accepts_alignment_backend():
     )
     assert config.similarity_backend == "alignment_model"
     assert config.alignment_batch_size == 32
+
+
+def test_activity_alignment_config_defaults_to_disabled_rerank():
+    config = ActivitiesConfig()
+    assert config.alignment_backend == "none"
+    assert config.alignment_base_url is None
+    assert config.profile_cluster_similarity_threshold == 0.94
 
 
 def test_profiles_default_to_poi_building_location_inference():

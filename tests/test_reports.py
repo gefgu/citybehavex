@@ -780,6 +780,7 @@ def test_generate_comparison_report_writes_json_metrics(tmp_path):
     assert payload["network_validation"]["synthetic_vs_random"]["comparison"] == "synthetic_vs_random"
     assert payload["network_validation"]["observed_vs_random"]["comparison"] == "observed_vs_random"
     assert set(payload["network_validation"]["synthetic_vs_random"]["wasserstein"]) == {
+        "degree",
         "clustering_coefficient",
         "edge_persistence",
         "topological_overlap",

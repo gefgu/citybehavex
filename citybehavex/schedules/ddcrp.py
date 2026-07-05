@@ -41,7 +41,9 @@ from citybehavex.embedding.config import EmbeddingConfig
 from citybehavex.llm_diaries import Diary, DiaryBatch
 from citybehavex.schedules.config import ScheduleConfig
 
-DiaryArrays = tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]
+DiaryArrays = tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray] | tuple[
+    np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray
+]
 
 # Fixed purpose→code map. HOME always stays 0 (Rust invariant).
 # WORK = 1 is reserved so Rust can pin WORK episodes to a persistent work tile.
@@ -73,6 +75,27 @@ def diary_to_abs_locs(diary: Diary, slots_per_day: int, granularity_minutes: int
     return locs
 
 
+def diary_to_block_ids(
+    diary: Diary,
+    slots_per_day: int,
+    granularity_minutes: int,
+    *,
+    block_offset: int,
+) -> np.ndarray:
+    """Per-slot global diary episode/block id for one diary."""
+    block_ids = np.zeros(slots_per_day, dtype=np.int32)
+    episodes = diary.episodes
+    ep_i = 0
+    for slot in range(slots_per_day):
+        minute = slot * granularity_minutes
+        while ep_i < len(episodes) and episodes[ep_i].end_minutes <= minute:
+            ep_i += 1
+        if ep_i >= len(episodes):
+            break
+        block_ids[slot] = block_offset + ep_i
+    return block_ids
+
+
 @dataclass
 class DiaryBank:
     """Combined diary bank (one bucket per day type) with embeddings and slot masks."""
@@ -81,6 +104,7 @@ class DiaryBank:
     day_type: np.ndarray            # str[K] -- e.g. "weekday"/"weekend"/"emergency"
     embeddings: np.ndarray | None   # float32[K, dim] or None (fallback: identity)
     slot_locs: np.ndarray           # int32[K, slots_per_day]
+    slot_block_ids: np.ndarray      # int32[K, slots_per_day]
     slots_per_day: int
     granularity_minutes: int
     embedded: bool
@@ -111,12 +135,25 @@ def build_diary_bank(
     slot_locs = np.stack(
         [diary_to_abs_locs(d, slots_per_day, granularity_minutes) for d in diaries]
     ).astype(np.int32)
+    block_offsets = np.cumsum([0, *[len(d.episodes) for d in diaries[:-1]]])
+    slot_block_ids = np.stack(
+        [
+            diary_to_block_ids(
+                d,
+                slots_per_day,
+                granularity_minutes,
+                block_offset=int(block_offsets[i]),
+            )
+            for i, d in enumerate(diaries)
+        ]
+    ).astype(np.int32)
 
     return DiaryBank(
         diaries=diaries,
         day_type=np.asarray(day_type, dtype=object),
         embeddings=embeddings,
         slot_locs=slot_locs,
+        slot_block_ids=slot_block_ids,
         slots_per_day=slots_per_day,
         granularity_minutes=granularity_minutes,
         embedded=embedded,
@@ -207,7 +244,7 @@ def build_ddcrp_diary(
 
     slots = days * slots_per_day
 
-    def _process_agent(agent: int) -> tuple[np.ndarray, np.ndarray, np.ndarray, float, float]:
+    def _process_agent(agent: int) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, float, float]:
         rng = np.random.default_rng(np.random.SeedSequence([int(random_state), agent]))
         T_a = float(rng.beta(params.temperature_beta_a, params.temperature_beta_b))
         T_a = max(T_a, 1e-6)
@@ -218,6 +255,7 @@ def build_ddcrp_diary(
         agent_sims = agent_diary_sim[agent]
 
         agent_locs = np.empty(slots, dtype=np.int32)
+        agent_block_ids = np.empty(slots, dtype=np.int32)
         agent_ts = np.empty(slots, dtype=np.int64)
         agent_chosen = np.empty(days, dtype=np.int64)
 
@@ -238,9 +276,10 @@ def build_ddcrp_diary(
             usage_counts[pick] += 1.0
             base = d * slots_per_day
             agent_locs[base : base + slots_per_day] = bank.slot_locs[pick]
+            agent_block_ids[base : base + slots_per_day] = bank.slot_block_ids[pick]
             agent_ts[base : base + slots_per_day] = day_ts[d] + slot_offsets
 
-        return agent_locs, agent_ts, agent_chosen, T_a, alpha_a
+        return agent_locs, agent_block_ids, agent_ts, agent_chosen, T_a, alpha_a
 
     if _JOBLIB_AVAILABLE and n_agents > 4:
         results = Parallel(n_jobs=-1, backend="loky")(
@@ -251,19 +290,27 @@ def build_ddcrp_diary(
 
     diary_timestamps = np.empty(n_agents * slots, dtype=np.int64)
     diary_abs_locs = np.empty(n_agents * slots, dtype=np.int32)
+    diary_block_ids = np.empty(n_agents * slots, dtype=np.int32)
     d_starts = np.arange(n_agents, dtype=np.int64) * slots
     d_ends = d_starts + slots
     T_per_agent = np.empty(n_agents, dtype=np.float64)
     alpha_per_agent = np.empty(n_agents, dtype=np.float64)
-    for agent, (agent_locs, agent_ts, agent_chosen, T_a, alpha_a) in enumerate(results):
+    for agent, (agent_locs, agent_block_ids, agent_ts, agent_chosen, T_a, alpha_a) in enumerate(results):
         off = agent * slots
         diary_abs_locs[off : off + slots] = agent_locs
+        diary_block_ids[off : off + slots] = agent_block_ids
         diary_timestamps[off : off + slots] = agent_ts
         chosen[agent] = agent_chosen
         T_per_agent[agent] = T_a
         alpha_per_agent[agent] = alpha_a
 
-    diary_arrays: DiaryArrays = (diary_timestamps, diary_abs_locs, d_starts, d_ends)
+    diary_arrays: DiaryArrays = (
+        diary_timestamps,
+        diary_abs_locs,
+        d_starts,
+        d_ends,
+        diary_block_ids,
+    )
     info = DdcrpAgentInfo(
         T_per_agent=T_per_agent,
         alpha_per_agent=alpha_per_agent,

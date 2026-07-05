@@ -17,6 +17,7 @@ import citybehavex._core as _cbx_core
 from citybehavex.math import sample_weighted_indices
 from citybehavex.schedules import DiaryArrays
 from citybehavex.simulation.social_graph import (
+    build_colocation_social_graph,
     build_knn_fallback_social_graph,
     build_profile_social_graph,
 )
@@ -288,6 +289,14 @@ def simulate_agents(
     alpha: float = 0.2,
     social_graph_k: int = 20,
     profile_graph_exact_threshold: int = 10_000,
+    home_h3_resolution: int = 7,
+    work_h3_resolution: int = 7,
+    degree_mu_ln: float = 2.1776,
+    degree_sigma_ln: float = 0.5,
+    max_degree: int = 200,
+    similarity_temperature: float = 0.3,
+    max_candidate_pool: int = 2000,
+    max_ring_expansion: int = 2,
     dt_update_mob_sim_hours: float = 24 * 7,
     indipendency_window_hours: float = 0.5,
     gravity_deterrence_exponent: float = -2.0,
@@ -305,6 +314,9 @@ def simulate_agents(
     purpose_acts: np.ndarray | None = None,
     act_kappa: float = 1.0,
     act_temp: float = 0.5,
+    activity_alignment_scores: np.ndarray | None = None,
+    activity_cluster_labels: np.ndarray | None = None,
+    activity_history_weight: float = 1.0,
     road_edge_from: np.ndarray | None = None,
     road_edge_to: np.ndarray | None = None,
     road_edge_weight_ds: np.ndarray | None = None,
@@ -355,9 +367,46 @@ def simulate_agents(
     else:
         relevances = np.ones(len(tessellation_df), dtype=float)
 
-    diary_timestamps, diary_abs_locs, diary_starts, diary_ends = diary_arrays
+    if len(diary_arrays) == 5:
+        diary_timestamps, diary_abs_locs, diary_starts, diary_ends, diary_block_ids = diary_arrays
+    else:
+        diary_timestamps, diary_abs_locs, diary_starts, diary_ends = diary_arrays
+        diary_block_ids = np.zeros_like(diary_abs_locs, dtype=np.int32)
 
-    if profile_embeddings is not None:
+    sl = (
+        np.ascontiguousarray(starting_locs, dtype=np.int64)
+        if starting_locs is not None
+        else None
+    )
+    # WORK is pinned to a single tile per agent for the whole simulation (the
+    # Rust core requires it), so when the caller hasn't supplied one (e.g. no
+    # agent profiles were generated), sample it here the same way
+    # `citybehavex.profiles.agents` does: relevance-weighted (commercial bias).
+    wt = (
+        np.ascontiguousarray(work_tiles, dtype=np.int64)
+        if work_tiles is not None
+        else np.ascontiguousarray(
+            sample_weighted_indices(relevances, n_agents, np.random.default_rng(random_state)),
+            dtype=np.int64,
+        )
+    )
+
+    if profile_embeddings is not None and sl is not None:
+        home_cells = _cbx_core.batch_latlng_to_cells(lats[sl], lngs[sl], home_h3_resolution)
+        work_cells = _cbx_core.batch_latlng_to_cells(lats[wt], lngs[wt], work_h3_resolution)
+        neighbor_starts, neighbors, edge_weights = build_colocation_social_graph(
+            profile_embeddings,
+            home_cells,
+            work_cells,
+            degree_mu_ln=degree_mu_ln,
+            degree_sigma_ln=degree_sigma_ln,
+            max_degree=max_degree,
+            temperature=similarity_temperature,
+            max_candidate_pool=max_candidate_pool,
+            max_ring_expansion=max_ring_expansion,
+            random_state=random_state,
+        )
+    elif profile_embeddings is not None:
         neighbor_starts, neighbors, edge_weights = build_profile_social_graph(
             profile_embeddings,
             k=social_graph_k,
@@ -386,23 +435,6 @@ def simulate_agents(
             profile_types=social_node_profiles,
         )
 
-    sl = (
-        np.ascontiguousarray(starting_locs, dtype=np.int64)
-        if starting_locs is not None
-        else None
-    )
-    # WORK is pinned to a single tile per agent for the whole simulation (the
-    # Rust core requires it), so when the caller hasn't supplied one (e.g. no
-    # agent profiles were generated), sample it here the same way
-    # `citybehavex.profiles.agents` does: relevance-weighted (commercial bias).
-    wt = (
-        np.ascontiguousarray(work_tiles, dtype=np.int64)
-        if work_tiles is not None
-        else np.ascontiguousarray(
-            sample_weighted_indices(relevances, n_agents, np.random.default_rng(random_state)),
-            dtype=np.int64,
-        )
-    )
     eps = edge_weights if len(edge_weights) == len(neighbors) else None
 
     road_enabled = (
@@ -496,6 +528,24 @@ def simulate_agents(
                 (profile_embeddings.astype(np.float64) @ act_embs.astype(np.float64).T).flatten(),
                 dtype=np.float64,
             )
+    activity_alignment_flat = None
+    n_activity_clusters = 0
+    n_activity_blocks = 0
+    n_activity_prev = 0
+    activity_cluster_labels_arr = None
+    if activity_alignment_scores is not None:
+        activity_alignment_scores = np.asarray(activity_alignment_scores, dtype=np.float64)
+        if activity_alignment_scores.ndim != 4:
+            raise ValueError("activity_alignment_scores must have shape [clusters, blocks, previous, activities]")
+        n_activity_clusters = int(activity_alignment_scores.shape[0])
+        n_activity_blocks = int(activity_alignment_scores.shape[1])
+        n_activity_prev = int(activity_alignment_scores.shape[2])
+        activity_alignment_flat = np.ascontiguousarray(activity_alignment_scores.flatten(), dtype=np.float64)
+        if activity_cluster_labels is None:
+            raise ValueError("activity_cluster_labels is required when activity_alignment_scores is provided")
+        activity_cluster_labels_arr = np.ascontiguousarray(activity_cluster_labels, dtype=np.int64)
+        if len(activity_cluster_labels_arr) != n_agents:
+            raise ValueError("activity_cluster_labels must have one label per agent")
 
     rust_on_day_flush = None
     if on_day_flush is not None:
@@ -561,6 +611,7 @@ def simulate_agents(
         float(car_speed_kmh),
         int(n_agents),
         int(random_state),
+        np.ascontiguousarray(diary_block_ids, dtype=np.int32),
         sl,
         bool(rsl),
         wt,
@@ -575,6 +626,12 @@ def simulate_agents(
         float(act_kappa),
         float(act_temp),
         profile_act_sims_flat,
+        activity_alignment_flat,
+        activity_cluster_labels_arr,
+        int(n_activity_clusters),
+        int(n_activity_blocks),
+        int(n_activity_prev),
+        float(activity_history_weight),
         r_edge_from,
         r_edge_to,
         r_edge_weight,
