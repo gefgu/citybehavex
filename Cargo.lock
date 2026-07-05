@@ -74,6 +74,7 @@ name = "citybehavex-py"
 version = "0.1.0"
 dependencies = [
  "fast_paths",
+ "h3o 0.10.0",
  "numpy",
  "pyo3",
  "rand",
@@ -292,6 +293,20 @@ dependencies = [
  "float_eq",
  "h3o-bit",
  "libm",
+]
+
+[[package]]
+name = "h3o"
+version = "0.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f033ee4f3b98f6842df9ce5111ff2dd36fd9be9804b9c0afd43e69e3891a6fbf"
+dependencies = [
+ "ahash",
+ "either",
+ "float_eq",
+ "h3o-bit",
+ "libm",
+ "ordered-float",
 ]
 
 [[package]]
@@ -701,6 +716,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "efa535d5117d3661134dbf1719b6f0ffe06f2375843b13935db186cd094105eb"
 
 [[package]]
+name = "ordered-float"
+version = "5.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b7d950ca161dc355eaf28f82b11345ed76c6e1f6eb1f4f4479e0323b9e2fbd0e"
+dependencies = [
+ "num-traits",
+]
+
+[[package]]
 name = "parking_lot"
 version = "0.12.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1006,7 +1030,7 @@ name = "skmob2-core"
 version = "0.1.0"
 dependencies = [
  "geo",
- "h3o",
+ "h3o 0.9.5",
  "linfa",
  "linfa-clustering",
  "linfa-nn",

@@ -20,3 +20,4 @@ rayon = "1"
 # once per run, then each trip's shortest path is a fast bidirectional search
 # instead of a fresh Dijkstra.
 fast_paths = "1"
+h3o = "0.10.0"

@@ -181,7 +181,14 @@ def test_motif_visits_use_h3_locations_and_binary_purposes():
     )
     motif_visits = _motif_visits(visits)
 
-    assert motif_visits["location_id"].str.startswith("8a").all()
+    # location_id for lat/lng-derived rows is the H3 cell as a UInt64 (not
+    # h3-py's hex-string form) -- callers only group/compare it, and this
+    # avoids a per-row Python h3 call at real dataset scale (see _h3_cells).
+    expected_cells = [
+        h3.str_to_int(h3.latlng_to_cell(lat, lng, 10))
+        for lat, lng in zip(source["lat"], source["lng"])
+    ]
+    assert motif_visits["location_id"].tolist() == expected_cells
     assert motif_visits["purpose"].tolist() == ["HOME", "VISIT"]
 
 
@@ -424,10 +431,19 @@ def test_mobility_law_visits_use_existing_locations_or_h3_fallback():
         lng_col="lng",
     )
 
+    # Same UInt64-not-hex-string convention as _visits_for_comparison (see
+    # _h3_cells): existing["location_id"] stays str-typed (it's built from
+    # the string tile_id column with a per-row H3 fallback stringified to
+    # match), while the no-location_col path is UInt64 throughout.
+    expected_row1_cell = str(h3.str_to_int(h3.latlng_to_cell(source["lat"].iloc[1], source["lng"].iloc[1], 10)))
+    expected_cells = [
+        h3.str_to_int(h3.latlng_to_cell(lat, lng, 10))
+        for lat, lng in zip(source["lat"], source["lng"])
+    ]
     assert existing["location_id"].iloc[0] == "home"
-    assert existing["location_id"].iloc[1].startswith("8a")
+    assert existing["location_id"].iloc[1] == expected_row1_cell
     assert existing["purpose"].tolist() == ["HOME", "WORK"]
-    assert fallback["location_id"].str.startswith("8a").all()
+    assert fallback["location_id"].tolist() == expected_cells
 
 
 def test_daily_location_lognormal_dataset_counts_distinct_locations():

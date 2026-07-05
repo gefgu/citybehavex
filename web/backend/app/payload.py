@@ -632,7 +632,6 @@ def build_comparison_payload(
     road_nodes_path: Optional[str] = None,
     road_edges_path: Optional[str] = None,
     road_snap_max_distance_m: float = 750.0,
-    network_validation_config: Optional[object] = None,
     special_days: Optional[list[dict[str, str]]] = None,
 ) -> dict[str, Any]:
     warnings: list[str] = []
@@ -1026,29 +1025,12 @@ def build_comparison_payload(
                 })
 
     # ---- social network --------------------------------------------------- #
+    # network_validation is served by its own endpoint/cache entry now (see
+    # build_network_validation_payload below and the /network-validation
+    # route in web/backend/app/api/charts.py) so its build time -- still the
+    # largest single section for shanghai/yjmob even after the Rust port --
+    # doesn't block first paint of the rest of the charts.
     social_network = guard("social_network", lambda: _load_social_network_sidecar(synthetic_path))
-    nv_cfg = network_validation_config
-    nv_enabled = bool(getattr(nv_cfg, "enabled", False)) if nv_cfg is not None else False
-    network_validation = guard(
-        "network_validation",
-        lambda: build_network_validation(
-            synthetic_path,
-            observed_df=real_df,
-            observed_uid_col=real_traj.uid_col if real_traj is not None else None,
-            observed_datetime_col=real_traj.datetime_col if real_traj is not None else None,
-            enabled=nv_enabled,
-            synthetic_enabled=bool(getattr(nv_cfg, "synthetic_enabled", True)),
-            observed_enabled=bool(getattr(nv_cfg, "observed_enabled", False)),
-            location_mode=str(getattr(nv_cfg, "location_mode", "auto")),
-            location_col=getattr(nv_cfg, "location_col", None),
-            h3_resolution=int(getattr(nv_cfg, "h3_resolution", 9)),
-            max_group_size=int(getattr(nv_cfg, "max_group_size", 200)),
-            seed=int(getattr(nv_cfg, "random_seed", 42)),
-        ),
-    )
-    if isinstance(network_validation, tuple):
-        network_validation, network_warnings = network_validation
-        warnings.extend(f"network_validation: {warning}" for warning in network_warnings)
 
     return {
         "mode": mode,
@@ -1063,8 +1045,55 @@ def build_comparison_payload(
         "motifs": motifs,
         "stvd": stvd,
         "social_network": social_network,
-        "network_validation": network_validation,
         "warnings": warnings,
+    }
+
+
+def build_network_validation_payload(
+    synthetic_path: str,
+    observed_path: Optional[str],
+    network_validation_config: Optional[object],
+) -> dict[str, Any]:
+    """The ``network_validation`` section on its own, split out of
+    ``build_comparison_payload`` so the frontend can fetch/render it
+    independently (see the ``/network-validation`` route in
+    ``web/backend/app/api/charts.py``) instead of blocking first paint of
+    the rest of the charts on this section's build time -- even after the
+    Rust-accelerated graph computation, this section's cache-miss cost is
+    still the largest single piece of the comparison payload for the denser
+    observed-network cities (shanghai/yjmob).
+
+    Only reads/loads what ``build_network_validation`` itself needs (the raw
+    observed parquet, uid/datetime auto-detected the same way
+    ``_observed_validation_block`` already does internally) rather than the
+    full trajectory-loading/column-detection machinery
+    ``build_comparison_payload`` runs for every other section.
+    """
+    real_df = pd.read_parquet(observed_path) if observed_path and Path(observed_path).exists() else None
+
+    nv_cfg = network_validation_config
+    nv_enabled = bool(getattr(nv_cfg, "enabled", False)) if nv_cfg is not None else False
+    try:
+        network_validation, network_warnings = build_network_validation(
+            synthetic_path,
+            observed_df=real_df,
+            observed_uid_col=None,
+            observed_datetime_col=None,
+            enabled=nv_enabled,
+            synthetic_enabled=bool(getattr(nv_cfg, "synthetic_enabled", True)),
+            observed_enabled=bool(getattr(nv_cfg, "observed_enabled", False)),
+            location_mode=str(getattr(nv_cfg, "location_mode", "auto")),
+            location_col=getattr(nv_cfg, "location_col", None),
+            h3_resolution=int(getattr(nv_cfg, "h3_resolution", 9)),
+            max_group_size=int(getattr(nv_cfg, "max_group_size", 200)),
+            seed=int(getattr(nv_cfg, "random_seed", 42)),
+        )
+    except Exception as exc:  # noqa: BLE001 - degrade gracefully, matching build_comparison_payload's guard()
+        return {"network_validation": None, "warnings": [f"network_validation: {exc}"]}
+
+    return {
+        "network_validation": network_validation,
+        "warnings": [f"network_validation: {warning}" for warning in network_warnings],
     }
 
 

@@ -10,6 +10,7 @@ from typing import Optional
 import h3
 import numpy as np
 import pandas as pd
+from citybehavex import _core as _cbx_core
 import plotly.graph_objects as go
 import skmob2
 import typer
@@ -306,6 +307,27 @@ def _network_validation_section_html(network_validation: Optional[dict]) -> str:
     return "".join(sections)
 
 
+_H3_INVALID_CELL = np.uint64(2**64 - 1)
+
+
+def _h3_cells(lat: pd.Series, lng: pd.Series, resolution: int) -> pd.api.extensions.ExtensionArray:
+    """Vectorized lat/lng -> H3 cell index, via the Rust extension instead of
+    a per-row ``h3.latlng_to_cell`` Python loop -- the difference is
+    meaningful at real dataset scale (~100x measured on 100M+ rows). Returns
+    a nullable ``UInt64`` array (not the hex-string form ``h3.latlng_to_cell``
+    returns) since callers only group/compare locations, never display them;
+    invalid/non-finite coordinates map to ``pd.NA``.
+    """
+    lat_arr = pd.to_numeric(lat, errors="coerce").to_numpy(dtype="float64", na_value=np.nan)
+    lng_arr = pd.to_numeric(lng, errors="coerce").to_numpy(dtype="float64", na_value=np.nan)
+    cells = _cbx_core.batch_latlng_to_cells(lat_arr, lng_arr, resolution)
+    result = pd.array(cells, dtype="UInt64")
+    invalid = cells == _H3_INVALID_CELL
+    if invalid.any():
+        result[invalid] = pd.NA
+    return result
+
+
 def _visits_for_comparison(
     df: pd.DataFrame,
     *,
@@ -332,10 +354,7 @@ def _visits_for_comparison(
     else:
         lat_name = lat_col or detect_column(df, _LAT_CANDIDATES) or "lat"
         lng_name = lng_col or detect_column(df, _LNG_CANDIDATES) or "lng"
-        visits["location_id"] = [
-            h3.latlng_to_cell(lat, lng, location_resolution)
-            for lat, lng in zip(df[lat_name], df[lng_name])
-        ]
+        visits["location_id"] = _h3_cells(df[lat_name], df[lng_name], location_resolution)
 
     if end_col:
         visits["end_timestamp"] = pd.to_datetime(df[end_col])
@@ -362,42 +381,55 @@ def _collapse_explicit_purposes(visits: pd.DataFrame) -> pd.DataFrame:
     return grouped
 
 
-def _most_frequent_location(
-    rows: pd.DataFrame,
-    *,
-    exclude: Optional[object] = None,
-) -> Optional[object]:
-    if rows.empty:
-        return None
-    locations = rows["location_id"]
-    if exclude is not None:
-        locations = locations[locations.ne(exclude)]
-    if locations.empty:
-        return None
-    return locations.value_counts(sort=True).index[0]
+def _modal_location_per_user(candidates: pd.DataFrame) -> pd.Series:
+    """Per-``uid`` most-frequent ``location_id`` among ``candidates`` rows.
+
+    Ties (equal visit counts) are broken by ascending ``location_id`` for a
+    deterministic result, matching the ``ORDER BY cnt DESC, fine_cell``
+    convention already used by the equivalent DuckDB heuristic in
+    ``web/backend/app/home_work_data.py`` (``_observed_density_heuristic``).
+    Returns a Series indexed by ``uid``; users with no candidate rows are
+    absent from the result (callers should treat a missing ``uid`` as "no
+    home/work location found", not as a match against ``NaN``).
+    """
+    if candidates.empty:
+        return pd.Series(dtype=object)
+    counts = (
+        candidates.groupby(["uid", "location_id"], sort=False)
+        .size()
+        .rename("_count")
+        .reset_index()
+    )
+    counts = counts.sort_values(
+        ["uid", "_count", "location_id"], ascending=[True, False, True]
+    )
+    return counts.drop_duplicates("uid", keep="first").set_index("uid")["location_id"]
 
 
 def _derive_purpose_groups_from_heuristic(visits: pd.DataFrame) -> pd.DataFrame:
+    """Assign HOME/WORK/OTHER per row from time-of-day + repeated-location
+    anchors, vectorized across all users at once (no per-user Python loop):
+    HOME is a user's most-visited location during hour 2-5, WORK is their
+    most-visited location (other than HOME) during hour 10 or 14-16.
+    """
     derived = visits.copy()
-    derived["purpose"] = "OTHER"
-    derived["_hour"] = derived["start_timestamp"].dt.hour
+    hour = derived["start_timestamp"].dt.hour
 
-    for uid, user_rows in derived.groupby("uid", sort=False):
-        home_rows = user_rows[user_rows["_hour"].between(2, 5)]
-        home_location = _most_frequent_location(home_rows)
+    home_loc = _modal_location_per_user(derived.loc[hour.between(2, 5)])
 
-        work_rows = user_rows[
-            user_rows["_hour"].eq(10) | user_rows["_hour"].between(14, 16)
-        ]
-        work_location = _most_frequent_location(work_rows, exclude=home_location)
+    work_candidates = derived.loc[hour.eq(10) | hour.between(14, 16)].copy()
+    work_home = work_candidates["uid"].map(home_loc)
+    work_candidates = work_candidates[
+        work_home.isna() | work_candidates["location_id"].ne(work_home)
+    ]
+    work_loc = _modal_location_per_user(work_candidates)
 
-        idx = user_rows.index
-        if home_location is not None:
-            derived.loc[idx[user_rows["location_id"].eq(home_location)], "purpose"] = "HOME"
-        if work_location is not None:
-            derived.loc[idx[user_rows["location_id"].eq(work_location)], "purpose"] = "WORK"
-
-    return derived.drop(columns=["_hour"])
+    derived_home = derived["uid"].map(home_loc)
+    derived_work = derived["uid"].map(work_loc)
+    is_home = derived_home.notna() & derived["location_id"].eq(derived_home)
+    is_work = derived_work.notna() & derived["location_id"].eq(derived_work)
+    derived["purpose"] = np.where(is_home, "HOME", np.where(is_work, "WORK", "OTHER"))
+    return derived
 
 
 def _prepare_activity_visits(
@@ -517,14 +549,12 @@ def _compute_stvd_layers(
 
     layers: dict[int, dict] = {}
     for res in resolutions:
-        syn["_cell"] = [
-            h3.latlng_to_cell(lat, lng, res)
-            for lat, lng in zip(syn[traj.lat_col], syn[traj.lng_col])
-        ]
-        real["_cell"] = [
-            h3.latlng_to_cell(lat, lng, res)
-            for lat, lng in zip(real[real_traj.lat_col], real[real_traj.lng_col])
-        ]
+        # Per-row H3 binning via the Rust extension (see ``_h3_cells``) --
+        # only the small number of *unique* cells below pay the h3-py string
+        # round-trip (for ``cell_to_boundary``/the "area" property), not
+        # every row.
+        syn["_cell"] = _h3_cells(syn[traj.lat_col], syn[traj.lng_col], res)
+        real["_cell"] = _h3_cells(real[real_traj.lat_col], real[real_traj.lng_col], res)
 
         all_hours = list(range(24))
         syn_hourly = (
@@ -550,7 +580,8 @@ def _compute_stvd_layers(
             peak_shift_hours = float(min(raw_shift, 12 - raw_shift if raw_shift <= 12 else raw_shift))
             peak_shift_hours = min(peak_shift_hours, 12.0)
 
-            boundary = h3.cell_to_boundary(cell)
+            cell_hex = format(int(cell), "x")
+            boundary = h3.cell_to_boundary(cell_hex)
             ring = [[lng, lat] for lat, lng in boundary]
             ring.append(ring[0])
 
@@ -558,7 +589,7 @@ def _compute_stvd_layers(
                 "type": "Feature",
                 "geometry": {"type": "Polygon", "coordinates": [ring]},
                 "properties": {
-                    "area": cell,
+                    "area": cell_hex,
                     "volume_diff_pct": round(volume_diff_pct, 4),
                     "peak_shift_hours": round(peak_shift_hours, 4),
                 },
@@ -808,20 +839,18 @@ def _mobility_law_visits(
             "lng": source[lng_col],
         }
     )
-    fallback_locations = pd.Series(
-        [
-            h3.latlng_to_cell(lat, lng, location_resolution)
-            for lat, lng in zip(visits["lat"], visits["lng"])
-        ],
-        index=visits.index,
-    )
     if location_col:
-        visits["location_id"] = source[location_col].where(
-            source[location_col].notna(),
-            fallback_locations,
-        ).astype(str)
+        location_id = source[location_col].astype(str)
+        missing = source[location_col].isna()
+        # Only pay for H3 conversion on rows that actually need the
+        # fallback -- e.g. shanghai/yjmob always have a populated location
+        # column here, so this is skipped entirely for them.
+        if missing.any():
+            fallback = _h3_cells(visits.loc[missing, "lat"], visits.loc[missing, "lng"], location_resolution)
+            location_id = location_id.where(~missing, pd.Series(fallback, index=visits.index[missing]).astype(str))
+        visits["location_id"] = location_id
     else:
-        visits["location_id"] = fallback_locations
+        visits["location_id"] = _h3_cells(visits["lat"], visits["lng"], location_resolution)
     if activity_col:
         visits["purpose"] = source[activity_col].to_numpy()
     return visits.reset_index(drop=True)

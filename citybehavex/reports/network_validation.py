@@ -1,17 +1,37 @@
 from __future__ import annotations
 
 import json
-from itertools import combinations
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-import h3
 import numpy as np
 import pandas as pd
 from scipy.stats import wasserstein_distance
 
+from citybehavex import _core as _cbx_core
 from citybehavex.simulation.core import social_network_sidecar_path
+
+_H3_INVALID_CELL = np.uint64(2**64 - 1)
+
+
+def _h3_cells(lat: pd.Series, lng: pd.Series, resolution: int) -> pd.api.extensions.ExtensionArray:
+    """Vectorized lat/lng -> H3 cell index (nullable ``UInt64``), via the Rust
+    extension instead of a per-row ``h3.latlng_to_cell`` Python loop -- see
+    the twin helper in ``citybehavex.reports.comparison`` (duplicated rather
+    than imported to avoid a circular import between the two report
+    modules). Only used as a groupby/comparison key here, never displayed,
+    so the numeric form is fine.
+    """
+    lat_arr = pd.to_numeric(lat, errors="coerce").to_numpy(dtype="float64", na_value=np.nan)
+    lng_arr = pd.to_numeric(lng, errors="coerce").to_numpy(dtype="float64", na_value=np.nan)
+    cells = _cbx_core.batch_latlng_to_cells(lat_arr, lng_arr, resolution)
+    result = pd.array(cells, dtype="UInt64")
+    invalid = cells == _H3_INVALID_CELL
+    if invalid.any():
+        result[invalid] = pd.NA
+    return result
+
 
 NETWORK_METRIC_LABELS = {
     "clustering_coefficient": "Clustering coefficient",
@@ -28,9 +48,34 @@ _LOCATION_CANDIDATES = ["location_id", "tile_id", "venueId", "venue_id", "area",
 
 @dataclass(frozen=True)
 class NetworkGraph:
+    """Undirected graph as a plain edge list (``u < v``, sorted, deduped),
+    not per-node adjacency ``set``s -- for the observed co-presence graph
+    (tens of millions of edges for shanghai/yjmob), materializing a Python
+    `set`/`set`-of-`set`s costs seconds of object construction and gigabytes
+    of memory on its own, on top of the O(sum of degree^2) metric loops that
+    used to run against it. ``clustering_coefficients``/``topological_overlap``
+    consume these arrays directly via the Rust extension; ``.edges`` is a
+    convenience for small graphs (tests, the synthetic path) and should not
+    be used in a hot path over the observed graph.
+    """
+
     node_count: int
-    edges: set[tuple[int, int]]
-    adjacency: list[set[int]]
+    edge_from: np.ndarray  # uint32[E], edge_from < edge_to elementwise
+    edge_to: np.ndarray  # uint32[E]
+
+    @property
+    def edge_count(self) -> int:
+        return int(self.edge_from.shape[0])
+
+    @property
+    def edges(self) -> set[tuple[int, int]]:
+        return set(zip(self.edge_from.tolist(), self.edge_to.tolist()))
+
+    def degrees(self) -> np.ndarray:
+        return np.bincount(
+            np.concatenate([self.edge_from, self.edge_to]),
+            minlength=self.node_count,
+        ) if self.edge_from.size else np.zeros(self.node_count, dtype=np.int64)
 
 
 def encounters_sidecar_path(output_path: str | Path) -> Path:
@@ -47,7 +92,8 @@ def _detect_column(df: pd.DataFrame, candidates: list[str]) -> str | None:
 
 
 def _empty_graph(node_count: int) -> NetworkGraph:
-    return NetworkGraph(node_count=node_count, edges=set(), adjacency=[set() for _ in range(node_count)])
+    empty = np.empty(0, dtype=np.uint32)
+    return NetworkGraph(node_count=node_count, edge_from=empty, edge_to=empty)
 
 
 def _normal_edge(a: Any, b: Any, node_count: int) -> tuple[int, int] | None:
@@ -61,16 +107,23 @@ def _normal_edge(a: Any, b: Any, node_count: int) -> tuple[int, int] | None:
 
 
 def graph_from_edges(node_count: int, edges: set[tuple[int, int]]) -> NetworkGraph:
-    graph = _empty_graph(node_count)
+    """Build a graph from a small/moderate edge collection (synthetic-scale
+    social + encounter graphs, and test fixtures) -- normalizes/dedupes via
+    a Python ``set`` since that's cheap at this scale. The observed
+    co-presence graph is built directly from Rust arrays instead
+    (``_observed_edges_and_persistence``), bypassing this entirely.
+    """
+    normalized: set[tuple[int, int]] = set()
     for u, v in edges:
         edge = _normal_edge(u, v, node_count)
-        if edge is None:
-            continue
-        a, b = edge
-        graph.edges.add(edge)
-        graph.adjacency[a].add(b)
-        graph.adjacency[b].add(a)
-    return graph
+        if edge is not None:
+            normalized.add(edge)
+    if not normalized:
+        return _empty_graph(node_count)
+    ordered = sorted(normalized)
+    edge_from = np.ascontiguousarray([u for u, _ in ordered], dtype=np.uint32)
+    edge_to = np.ascontiguousarray([v for _, v in ordered], dtype=np.uint32)
+    return NetworkGraph(node_count=node_count, edge_from=edge_from, edge_to=edge_to)
 
 
 def _load_social_sidecar(path: Path) -> dict[str, Any]:
@@ -134,31 +187,26 @@ def _encounter_edges_and_persistence(
     return edges, persistence, time_steps
 
 
+def _graph_metrics(graph: NetworkGraph) -> tuple[np.ndarray, np.ndarray]:
+    """Per-node clustering coefficient and per-edge topological overlap
+    (Jaccard similarity of endpoint neighborhoods), computed once by the
+    Rust extension and shared by both public accessors below (and by
+    ``_metric_bundle``, which needs both) -- see
+    ``citybehavex-py/src/simulation_core/network_graph.rs`` for why this
+    used to be a pure-Python `O(sum of degree^2)` cost (measured: ~51
+    minutes extrapolated for shanghai's dense observed co-presence graph).
+    """
+    return _cbx_core.graph_metrics(graph.node_count, graph.edge_from, graph.edge_to)
+
+
 def clustering_coefficients(graph: NetworkGraph) -> np.ndarray:
-    values = np.zeros(graph.node_count, dtype=float)
-    for node, neighbors in enumerate(graph.adjacency):
-        degree = len(neighbors)
-        if degree < 2:
-            continue
-        links = 0
-        ordered = list(neighbors)
-        for idx, u in enumerate(ordered[:-1]):
-            u_neighbors = graph.adjacency[u]
-            for v in ordered[idx + 1 :]:
-                if v in u_neighbors:
-                    links += 1
-        values[node] = (2.0 * links) / (degree * (degree - 1))
-    return values
+    clustering, _overlap = _graph_metrics(graph)
+    return clustering
 
 
 def topological_overlap(graph: NetworkGraph) -> np.ndarray:
-    values: list[float] = []
-    for u, v in sorted(graph.edges):
-        left = graph.adjacency[u]
-        right = graph.adjacency[v]
-        union = left | right
-        values.append(float(len(left & right) / len(union)) if union else 0.0)
-    return np.asarray(values, dtype=float)
+    _clustering, overlap = _graph_metrics(graph)
+    return overlap
 
 
 def _distribution_summary(values: np.ndarray) -> dict[str, float | int | None]:
@@ -191,48 +239,63 @@ def degree_preserving_random_graph(
         return _empty_graph(n)
 
     rng = np.random.default_rng(seed)
-    edges: set[tuple[int, int]] = set()
+    # Collected as arrays of (i, j) pairs per outer iteration rather than
+    # inserted into a Python set one at a time -- each i produces at most
+    # n-1-i pairs and, since j always comes from i+1.., no (i, j) pair can
+    # recur across iterations, so no dedup is needed, only a final sort.
+    from_chunks: list[np.ndarray] = []
+    to_chunks: list[np.ndarray] = []
     for i in range(n - 1):
         if deg[i] <= 0:
             continue
         probs = np.clip((deg[i] * deg[i + 1 :]) / total_degree, 0.0, 1.0)
         if probs.size == 0:
             continue
-        draws = rng.random(probs.size) < probs
-        for offset in np.flatnonzero(draws):
-            edges.add((i, i + 1 + int(offset)))
-    return graph_from_edges(n, edges)
+        offsets = np.flatnonzero(rng.random(probs.size) < probs)
+        if offsets.size == 0:
+            continue
+        from_chunks.append(np.full(offsets.size, i, dtype=np.uint32))
+        to_chunks.append((i + 1 + offsets).astype(np.uint32))
+
+    if not from_chunks:
+        return _empty_graph(n)
+    edge_from = np.concatenate(from_chunks)
+    edge_to = np.concatenate(to_chunks)
+    order = np.lexsort((edge_to, edge_from))
+    return NetworkGraph(node_count=n, edge_from=edge_from[order], edge_to=edge_to[order])
 
 
 def _random_persistence(
-    edges: set[tuple[int, int]],
+    graph: NetworkGraph,
     degrees: np.ndarray,
     *,
     time_steps: int,
     seed: int,
 ) -> np.ndarray:
-    if time_steps <= 0 or not edges:
+    if time_steps <= 0 or graph.edge_count == 0:
         return np.asarray([], dtype=float)
-    total_degree = float(np.asarray(degrees, dtype=float).sum())
+    deg = np.asarray(degrees, dtype=float)
+    total_degree = float(deg.sum())
     if total_degree <= 0:
         return np.asarray([], dtype=float)
     rng = np.random.default_rng(seed)
-    values = []
-    for u, v in edges:
-        p = float(np.clip((degrees[u] * degrees[v]) / total_degree, 0.0, 1.0))
-        values.append(float(rng.binomial(time_steps, p) / time_steps))
-    return np.asarray(values, dtype=float)
+    probs = np.clip((deg[graph.edge_from] * deg[graph.edge_to]) / total_degree, 0.0, 1.0)
+    return rng.binomial(time_steps, probs) / time_steps
 
 
 def _metric_bundle(
     graph: NetworkGraph,
     persistence: np.ndarray,
 ) -> dict[str, np.ndarray]:
+    clustering, overlap = _graph_metrics(graph)
     return {
-        "clustering_coefficient": clustering_coefficients(graph),
+        "clustering_coefficient": clustering,
         "edge_persistence": persistence,
-        "topological_overlap": topological_overlap(graph),
+        "topological_overlap": overlap,
     }
+
+
+_MAX_VISUALIZED_EDGES = 20_000
 
 
 def _network_block_from_graph(
@@ -245,8 +308,8 @@ def _network_block_from_graph(
     source_sidecar = source_sidecar or {}
     source_nodes = source_sidecar.get("nodes", [])
     nodes: list[list[Any]] = []
-    degrees = [len(graph.adjacency[i]) for i in range(graph.node_count)]
-    max_degree = max(degrees) if degrees else 0
+    degrees = graph.degrees()
+    max_degree = int(degrees.max()) if degrees.size else 0
     rng = np.random.default_rng(seed)
     fallback_coords = (
         np.round((rng.random((graph.node_count, 2), dtype=np.float64) - 0.5) * 1000.0, 1)
@@ -262,16 +325,33 @@ def _network_block_from_graph(
         else:
             size = round(float(3.0 + 13.0 * np.sqrt(degrees[i] / max_degree)), 1) if max_degree > 0 else 3.0
             nodes.append([float(fallback_coords[i, 0]), float(fallback_coords[i, 1]), size, i + 1])
+
+    # A force-directed graph render (and the JSON payload carrying it) isn't
+    # viable at the observed co-presence graph's real scale (tens of
+    # millions of edges for shanghai/yjmob) -- cap what's actually sent for
+    # visualization while keeping edge_count/degrees/metrics reflecting the
+    # true full graph. Sampled rather than truncated to the first N so the
+    # visualization isn't biased toward whatever ordering the edges happen
+    # to be in.
+    edge_count = graph.edge_count
+    if edge_count > _MAX_VISUALIZED_EDGES:
+        sample_idx = rng.choice(edge_count, size=_MAX_VISUALIZED_EDGES, replace=False)
+        sample_idx.sort()
+        edge_from, edge_to = graph.edge_from[sample_idx], graph.edge_to[sample_idx]
+    else:
+        edge_from, edge_to = graph.edge_from, graph.edge_to
+
     return {
         "kind": kind,
         "node_count": graph.node_count,
-        "edge_count": len(graph.edges),
+        "edge_count": edge_count,
         "layout": source_sidecar.get("layout", "source_layout"),
         "directed": False,
         "social_graph_k": source_sidecar.get("social_graph_k", 0),
         "nodes": nodes,
-        "edges": [[u, v, 1.0] for u, v in sorted(graph.edges)],
-        "degrees": degrees,
+        "edges": [[int(u), int(v), 1.0] for u, v in zip(edge_from.tolist(), edge_to.tolist())],
+        "edges_sampled": edge_count > _MAX_VISUALIZED_EDGES,
+        "degrees": degrees.tolist(),
     }
 
 
@@ -287,10 +367,10 @@ def _validation_block(
     source_sidecar: dict[str, Any] | None = None,
 ) -> tuple[dict[str, Any], list[str]]:
     warnings: list[str] = []
-    degrees = np.asarray([len(n) for n in source_graph.adjacency], dtype=float)
+    degrees = source_graph.degrees().astype(float)
     random_graph = degree_preserving_random_graph(degrees, seed=random_seed)
     random_persistence = _random_persistence(
-        random_graph.edges,
+        random_graph,
         degrees,
         time_steps=time_steps,
         seed=random_seed + 1,
@@ -404,11 +484,8 @@ def _resolve_observed_location(
     lat = pd.to_numeric(df[lat_col], errors="coerce")
     lng = pd.to_numeric(df[lng_col], errors="coerce")
     valid = lat.between(-90, 90) & lng.between(-180, 180)
-    cells = pd.Series(pd.NA, index=df.index, dtype="object")
-    cells.loc[valid] = [
-        h3.latlng_to_cell(float(a), float(b), int(h3_resolution))
-        for a, b in zip(lat.loc[valid], lng.loc[valid])
-    ]
+    cells = pd.Series(pd.array([pd.NA] * len(df), dtype="UInt64"), index=df.index)
+    cells.loc[valid] = _h3_cells(lat.loc[valid], lng.loc[valid], int(h3_resolution))
     return cells, f"h3_{h3_resolution}"
 
 
@@ -448,37 +525,33 @@ def _observed_edges_and_persistence(
     uid_codes, uid_values = pd.factorize(work["uid"], sort=True)
     work = work.assign(node=uid_codes.astype(np.int64))
     node_count = int(len(uid_values))
-    time_steps = int(work["day"].nunique())
+    day_codes, day_values = pd.factorize(work["day"], sort=True)
+    work = work.assign(day_code=day_codes.astype(np.int64))
+    time_steps = int(len(day_values))
+    location_codes, _location_values = pd.factorize(work["location"], sort=False)
+    work = work.assign(location_code=location_codes.astype(np.int64))
 
-    pair_days: dict[tuple[int, int], set[pd.Timestamp]] = {}
-    skipped_groups = 0
-    skipped_rows = 0
-    grouped = work.drop_duplicates(["day", "location", "node"]).groupby(["day", "location"], sort=False)["node"]
-    for (day, _location), nodes in grouped:
-        unique_nodes = np.asarray(nodes, dtype=np.int64)
-        group_size = int(len(unique_nodes))
-        if group_size < 2:
-            continue
-        if group_size > max_group_size:
-            skipped_groups += 1
-            skipped_rows += group_size
-            continue
-        for u, v in combinations(unique_nodes.tolist(), 2):
-            edge = (u, v) if u < v else (v, u)
-            pair_days.setdefault(edge, set()).add(day)
-
-    edges = set(pair_days)
-    persistence = np.asarray(
-        [len(days) / time_steps for days in pair_days.values()],
-        dtype=float,
+    dedup = work.drop_duplicates(["day_code", "location_code", "node"])
+    # Pair generation + per-edge day-persistence via the Rust extension --
+    # was an itertools.combinations loop into a dict[edge, set[day]]
+    # (measured: 150s on shanghai's ~65M raw pair-instances, plus the
+    # O(sum of degree^2) metric computation that followed from it).
+    edge_from, edge_to, persistence, skipped_groups, skipped_rows = _cbx_core.build_co_presence_edges(
+        dedup["day_code"].to_numpy(dtype=np.int64),
+        dedup["location_code"].to_numpy(dtype=np.int64),
+        dedup["node"].to_numpy(dtype=np.int64),
+        max_group_size,
+        time_steps,
     )
+    graph = NetworkGraph(node_count=node_count, edge_from=edge_from, edge_to=edge_to)
+
     warnings: list[str] = []
     if skipped_groups:
         warnings.append(
             f"observed network skipped {skipped_groups} {location_source}/day groups "
             f"({skipped_rows} user-presences) larger than max_group_size={max_group_size}"
         )
-    return graph_from_edges(node_count, edges), persistence, time_steps, warnings
+    return graph, persistence, time_steps, warnings
 
 
 def _observed_validation_block(
