@@ -12,6 +12,11 @@ class ComparisonConfig(BaseModel):
 
     path: Optional[str] = None
     label: str = "observed"
+    time_use_path: Optional[str] = None
+    time_use_label: str = "time-use"
+    time_use_country: Optional[str] = None
+    time_use_survey: Optional[int] = None
+    time_use_weight_col: str = "propwt"
     # Deprecated standalone metrics export; None = skip it.
     json_output: Optional[str] = None
     # Which report sections to compute; None (default) = run all of them.

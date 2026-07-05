@@ -8,6 +8,7 @@ import citybehavex._core as core
 from citybehavex.activities import (
     N_ACTIVITIES,
     activity_duration_arrays,
+    build_catalog,
     build_eligibility_csr,
 )
 from citybehavex.config.root import CityBehavExConfig
@@ -1029,6 +1030,41 @@ def test_activities_catalog_coverage():
     for p in range(3):
         n_eligible = int(purpose_act_starts[p + 1] - purpose_act_starts[p])
         assert n_eligible > 0, f"Purpose {p} has no eligible activities"
+
+
+def test_activities_catalog_uses_25_mtus_categories():
+    catalog = build_catalog()
+
+    assert N_ACTIVITIES == 25
+    assert [activity.name for activity in catalog] == [
+        "sleep",
+        "eatdrink",
+        "selfcare",
+        "paidwork",
+        "educatn",
+        "foodprep",
+        "cleanetc",
+        "maintain",
+        "shopserv",
+        "garden",
+        "petcare",
+        "eldcare",
+        "pkidcare",
+        "ikidcare",
+        "religion",
+        "volorgwk",
+        "commute",
+        "travel",
+        "sportex",
+        "tvradio",
+        "read",
+        "compint",
+        "goout",
+        "leisure",
+        "missing",
+    ]
+    assert catalog[-1].name == "missing"
+    assert catalog[-1].eligible_purposes == []
 
 
 def _run_multi_agent_multi_day(*, on_day_flush=None):

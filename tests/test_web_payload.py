@@ -6,6 +6,7 @@ import pandas as pd
 
 from citybehavex.simulation.core import social_network_sidecar_path
 from web.backend.app.payload import (
+    TIME_USE_CATEGORIES,
     _filter_df,
     _load_social_network_sidecar,
     _special_day_filters,
@@ -70,7 +71,7 @@ def test_build_comparison_payload_groups_activity_and_micro_usage(monkeypatch, t
     activities_df = pd.DataFrame(
         {
             "uid": [1, 1],
-            "activity": [0, 4],
+            "activity": [0, 3],
             "arrival": pd.to_datetime(["2026-01-01 00:00", "2026-01-01 08:00"]),
             "departure": pd.to_datetime(["2026-01-01 01:00", "2026-01-01 09:00"]),
         }
@@ -118,7 +119,7 @@ def test_build_comparison_payload_groups_activity_and_micro_usage(monkeypatch, t
         for group in payload["micro_activity_usage"]["groups"]
         for series in group["block"]["series"]
     }
-    assert {"sleep", "paid_work"}.issubset(names)
+    assert {"sleep", "paidwork"}.issubset(names)
     assert {group["filter_key"] for group in payload["ecdf"]["groups"]} >= {
         "all",
         "weekday",
@@ -129,6 +130,81 @@ def test_build_comparison_payload_groups_activity_and_micro_usage(monkeypatch, t
         "night",
     }
     assert any(row["filter_key"] == "all" for row in payload["metrics"]["wasserstein"])
+
+
+def test_build_comparison_payload_includes_time_use_comparison(monkeypatch, tmp_path):
+    synthetic = tmp_path / "synthetic.parquet"
+    activities = tmp_path / "synthetic_activities.parquet"
+    time_use = tmp_path / "time_use.parquet"
+
+    pd.DataFrame(
+        {
+            "uid": ["u1"],
+            "datetime": pd.to_datetime(["2026-01-01 00:00"]),
+            "lat": [48.85],
+            "lng": [2.35],
+            "purpose": ["HOME"],
+        }
+    ).to_parquet(synthetic, index=False)
+    pd.DataFrame(
+        {
+            "uid": [1, 1],
+            "activity": [0, 3],
+            "arrival": pd.to_datetime(["2026-01-05 00:00", "2026-01-05 08:00"]),
+            "departure": pd.to_datetime(["2026-01-05 08:00", "2026-01-05 10:00"]),
+        }
+    ).to_parquet(activities, index=False)
+    rows = []
+    for day, weight, sleep, paidwork in [
+        ("Monday", 1.0, 480.0, 120.0),
+        ("Saturday", 3.0, 600.0, 60.0),
+    ]:
+        row = {
+            "country": "France",
+            "survey": 2009,
+            "day": day,
+            "propwt": weight,
+            **{category: 0.0 for category in TIME_USE_CATEGORIES},
+        }
+        row["sleep"] = sleep
+        row["paidwork"] = paidwork
+        rows.append(row)
+    pd.DataFrame(rows).to_parquet(time_use, index=False)
+
+    monkeypatch.setattr(
+        "web.backend.app.payload._mobility_law_visits",
+        lambda *args, **kwargs: pd.DataFrame(
+            {
+                "user_id": ["u1"],
+                "timestamp": pd.to_datetime(["2026-01-01 00:00"]),
+                "location_id": ["a"],
+                "lat": [48.85],
+                "lng": [2.35],
+            }
+        ),
+    )
+
+    payload = build_comparison_payload(
+        str(synthetic),
+        None,
+        "observed",
+        synthetic_activities_path=str(activities),
+        time_use_path=str(time_use),
+        time_use_label="MTUS France 2009",
+        time_use_country="France",
+        time_use_survey=2009,
+    )
+
+    assert payload["time_use_comparison"] is not None
+    groups = {group["filter_key"]: group for group in payload["time_use_comparison"]["groups"]}
+    assert set(groups) == {"all", "weekday", "weekend"}
+    all_block = groups["all"]["block"]
+    assert all_block["categories"] == TIME_USE_CATEGORIES
+    assert all_block["labels"] == ["MTUS France 2009", "synthetic"]
+    sleep = next(row for row in all_block["rows"] if row["category"] == "sleep")
+    assert sleep["observed_minutes"] == 570.0
+    assert sleep["synthetic_minutes"] == 480.0
+    assert sleep["difference_minutes"] == -90.0
 
 
 def test_build_comparison_payload_supports_synthetic_only(monkeypatch, tmp_path):

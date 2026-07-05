@@ -73,6 +73,36 @@ def test_patch_experiment_persists_core_fields(monkeypatch, tmp_path):
     assert saved["profiles"]["enabled"] is False
 
 
+def test_experiment_exposes_optional_time_use_config(monkeypatch, tmp_path):
+    client = _client_for_tmp_configs(monkeypatch, tmp_path)
+    exp_id, _output = _write_config(tmp_path / "configs", tmp_path / "data")
+    time_use = tmp_path / "data" / "mtus.parquet"
+    time_use.write_text("placeholder", encoding="utf-8")
+    config_path = tmp_path / "configs" / f"{exp_id}.yaml"
+    raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    raw["comparison"].update(
+        {
+            "time_use_path": str(time_use),
+            "time_use_label": "MTUS France 2009",
+            "time_use_country": "France",
+            "time_use_survey": 2009,
+            "time_use_weight_col": "propwt",
+        }
+    )
+    config_path.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
+
+    response = client.get(f"/api/experiments/{exp_id}")
+
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["time_use_path"] == str(time_use)
+    assert data["time_use_exists"] is True
+    assert data["time_use_label"] == "MTUS France 2009"
+    assert data["time_use_country"] == "France"
+    assert data["time_use_survey"] == 2009
+    assert data["time_use_weight_col"] == "propwt"
+
+
 def test_patch_experiment_rejects_invalid_edit_without_writing(monkeypatch, tmp_path):
     client = _client_for_tmp_configs(monkeypatch, tmp_path)
     exp_id, _output = _write_config(tmp_path / "configs", tmp_path / "data")
@@ -150,6 +180,11 @@ def test_charts_endpoint_allows_missing_observed_path(monkeypatch, tmp_path):
         run=lambda run_id=None: selected,
         road_nodes_path=None,
         road_edges_path=None,
+        time_use_path=None,
+        time_use_label="time-use",
+        time_use_country=None,
+        time_use_survey=None,
+        time_use_weight_col="propwt",
         special_days=[],
     )
     monkeypatch.setattr(charts_mod, "get_experiment", lambda exp_id: experiment)
@@ -159,11 +194,17 @@ def test_charts_endpoint_allows_missing_observed_path(monkeypatch, tmp_path):
         observed_path,
         observed_label,
         synthetic_activities_path=None,
+        time_use_path=None,
+        time_use_label="time-use",
+        time_use_country=None,
+        time_use_survey=None,
+        time_use_weight_col="propwt",
         road_nodes_path=None,
         road_edges_path=None,
         special_days=None,
     ):
         assert observed_path is None
+        assert time_use_path is None
         return {
             "mode": "synthetic_only",
             "labels": {"synthetic": "synthetic"},
@@ -172,6 +213,7 @@ def test_charts_endpoint_allows_missing_observed_path(monkeypatch, tmp_path):
             "mobility_laws": None,
             "activity": None,
             "micro_activity_usage": None,
+            "time_use_comparison": None,
             "profiles": None,
             "motifs": None,
             "stvd": None,

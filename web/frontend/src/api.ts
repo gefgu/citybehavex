@@ -45,6 +45,12 @@ export interface Experiment {
   simulation_output: string | null;
   observed_path: string | null;
   observed_exists: boolean;
+  time_use_path: string | null;
+  time_use_exists: boolean;
+  time_use_label: string;
+  time_use_country: string | null;
+  time_use_survey: number | null;
+  time_use_weight_col: string;
   profiles_enabled: boolean;
   profiles_output: string | null;
   profiles_path: string | null;
@@ -62,6 +68,11 @@ export interface ExperimentUpdate {
   car_speed_kmh?: number;
   simulation_output?: string;
   observed_path?: string | null;
+  time_use_path?: string | null;
+  time_use_label?: string;
+  time_use_country?: string | null;
+  time_use_survey?: number | null;
+  time_use_weight_col?: string;
   profiles_enabled?: boolean;
   profiles_output?: string;
 }
@@ -402,6 +413,19 @@ export interface MicroActivityUsageBlock {
   x: string[];
   series: { activity_id: number; name: string; values: number[] }[];
 }
+export interface TimeUseComparisonRow {
+  category: string;
+  observed_minutes: number;
+  synthetic_minutes: number;
+  difference_minutes: number;
+  percent_difference: number | null;
+  share_of_day_difference_pct_points: number;
+}
+export interface TimeUseComparisonBlock {
+  categories: string[];
+  labels: string[];
+  rows: TimeUseComparisonRow[];
+}
 export interface ProfilesBlock {
   scatter: { name: string; points: { x: number; y: number; profile: string }[] }[];
   profile_order: string[];
@@ -460,6 +484,7 @@ export interface ChartPayload {
   mobility_laws: { groups: FilteredBlockMap<LawBlock>[] } | null;
   activity: { groups: FilteredActivityBlock[] } | null;
   micro_activity_usage: { groups: FilteredSingleBlock<MicroActivityUsageBlock>[] } | null;
+  time_use_comparison: { groups: FilteredSingleBlock<TimeUseComparisonBlock>[] } | null;
   profiles: ProfilesBlock | null;
   motifs: { groups: FilteredSingleBlock<MotifsBlock>[] } | null;
   stvd: { groups: FilteredSingleBlock<StvdBlock>[] } | null;

@@ -17,6 +17,8 @@ import {
   profileBoxOption,
   profileScatterOption,
   purposeOption,
+  timeUseDifferenceOption,
+  timeUseGroupedOption,
   transitionOption,
 } from "../charts/builders";
 
@@ -191,6 +193,7 @@ export function Charts() {
     payload.mobility_laws?.groups ??
     payload.activity?.groups ??
     payload.micro_activity_usage?.groups ??
+    payload.time_use_comparison?.groups ??
     payload.motifs?.groups ??
     payload.stvd?.groups ??
     null;
@@ -222,6 +225,9 @@ export function Charts() {
   const microActivityGroup =
     payload.micro_activity_usage?.groups.find((group) => group.filter_key === dayFilter) ??
     payload.micro_activity_usage?.groups[0];
+  const timeUseGroup =
+    payload.time_use_comparison?.groups.find((group) => group.filter_key === dayFilter) ??
+    payload.time_use_comparison?.groups[0];
   const motifGroup =
     payload.motifs?.groups.find((group) => group.filter_key === dayFilter) ??
     payload.motifs?.groups[0];
@@ -365,6 +371,34 @@ export function Charts() {
             option={microActivityUsageOption(microActivityGroup.block)}
             wide
           />
+        </>
+      )}
+
+      {timeUseGroup && (
+        <>
+          <SectionHeading
+            controls={
+              <SegmentedControl
+                label="Time-use day type filter"
+                onChange={setSyncedDayFilter}
+                options={dayFilters}
+                value={dayFilter}
+              />
+            }
+            title="Time-use comparison"
+          />
+          <div className="chart-grid">
+            <ChartCard
+              title="Mean daily minutes"
+              option={timeUseGroupedOption(timeUseGroup.block)}
+              wide
+            />
+            <ChartCard
+              title="Synthetic difference from time-use"
+              option={timeUseDifferenceOption(timeUseGroup.block)}
+              wide
+            />
+          </div>
         </>
       )}
 

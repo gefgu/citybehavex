@@ -16,26 +16,36 @@ import numpy as np
 # Fixed purpose codes (matches _PURPOSE_CODE in schedule_ddcrp.py and WORK_CODE in Rust)
 N_PURPOSES = 3
 
-# MTUS-derived activities: (name, description, mu_ln, sigma_ln, eligible_purpose_codes)
+# MTUS HAF top-level activities: (name, description, mu_ln, sigma_ln, eligible_purpose_codes)
 # mu_ln / sigma_ln are parameters of LogNormal in ln(hours):
 #   duration_hours = exp(mu_ln + sigma_ln * z),  z ~ N(0,1)
 #   duration_seconds passed to Rust = duration_hours * 3600
 _CATALOG_RAW: list[tuple[str, str, float, float, list[int]]] = [
-    ("sleep",         "Sleeping or resting at home",                   2.08, 0.30, [0]),
-    ("personal_care", "Personal hygiene and grooming",                 -0.69, 0.50, [0, 2]),
-    ("home_chores",   "Cooking, cleaning, household tasks",             0.00, 0.60, [0]),
-    ("childcare",     "Looking after children at home",                 0.41, 0.70, [0]),
-    ("paid_work",     "Working at the office or job site",              2.08, 0.30, [1]),
-    ("work_break",    "Short coffee or lunch break during work",       -0.69, 0.40, [1, 2]),
-    ("study",         "Studying, attending class, or doing homework",   1.10, 0.50, [2]),
-    ("shopping",      "Grocery or retail shopping",                    -0.29, 0.50, [2]),
-    ("errands",       "Administrative tasks, pick-ups, bank errands",  -0.69, 0.50, [2]),
-    ("recreation",    "Outdoor activities, parks, sightseeing",         0.69, 0.60, [2]),
-    ("social_visit",  "Meeting friends or family socially",             0.92, 0.60, [2, 0]),
-    ("sport",         "Sports, exercise, gym session",                  0.41, 0.40, [2]),
-    ("entertainment", "Cinema, theatre, concert, restaurant",           0.92, 0.50, [2]),
-    ("healthcare",    "Doctor visit, treatment, pharmacy",              0.00, 0.50, [2]),
-    ("voluntary",     "Volunteering or community activities",           0.69, 0.60, [2]),
+    ("sleep",    "Sleeping or resting at home",                                  2.08, 0.30, [0]),
+    ("eatdrink", "Eating, drinking, coffee, lunch, and meal breaks",             -0.35, 0.45, [0, 1, 2]),
+    ("selfcare", "Personal hygiene, grooming, and private care",                 -0.69, 0.50, [0, 2]),
+    ("paidwork", "Working at the office or job site",                            2.08, 0.30, [1]),
+    ("educatn",  "Studying, attending class, or doing homework",                  1.10, 0.50, [2]),
+    ("foodprep", "Cooking and food preparation",                                  0.00, 0.60, [0]),
+    ("cleanetc", "Cleaning, laundry, and other domestic work",                    0.00, 0.60, [0]),
+    ("maintain", "Household maintenance, repairs, and administrative upkeep",     0.00, 0.60, [0]),
+    ("shopserv", "Shopping and personal services",                               -0.29, 0.50, [2]),
+    ("garden",   "Gardening and outdoor household work",                          0.41, 0.60, [0]),
+    ("petcare",  "Caring for pets and domestic animals",                         -0.69, 0.50, [0]),
+    ("eldcare",  "Caring for adults or older household members",                  0.41, 0.70, [0, 2]),
+    ("pkidcare", "Physical childcare and supervision",                            0.41, 0.70, [0, 2]),
+    ("ikidcare", "Interactive childcare, play, and homework help",                0.41, 0.70, [0, 2]),
+    ("religion", "Religious practice, ceremonies, and worship",                   0.69, 0.60, [2]),
+    ("volorgwk", "Volunteering, civic, and organizational work",                  0.69, 0.60, [2]),
+    ("commute",  "Commuting to and from work or education",                      -0.29, 0.50, [1, 2]),
+    ("travel",   "Travel for personal, household, and leisure activities",        -0.29, 0.50, [2]),
+    ("sportex",  "Sports, exercise, and gym sessions",                            0.41, 0.40, [2]),
+    ("tvradio",  "Watching TV, listening to radio, and passive media",            0.92, 0.60, [0, 2]),
+    ("read",     "Reading books, news, and magazines",                            0.41, 0.50, [0, 2]),
+    ("compint",  "Computer, internet, gaming, and online leisure",                0.41, 0.50, [0, 2]),
+    ("goout",    "Going out to restaurants, cinema, theatre, or events",          0.92, 0.50, [2]),
+    ("leisure",  "Social, recreational, and other leisure activities",            0.92, 0.60, [0, 2]),
+    ("missing",  "Unclassified or missing diary time; shown in comparisons only", 0.00, 0.50, []),
 ]
 
 N_ACTIVITIES = len(_CATALOG_RAW)
