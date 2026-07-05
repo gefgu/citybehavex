@@ -16,7 +16,15 @@ import skmob2
 import typer
 from skmob2.models import DensityEPR
 
-from citybehavex.activities import activity_descriptions, activity_duration_arrays, build_eligibility_csr
+from citybehavex.activities import (
+    ProfileClusters,
+    activity_descriptions,
+    activity_duration_arrays,
+    build_eligibility_csr,
+    cluster_profile_embeddings,
+    expand_cluster_scores,
+    score_activity_alignment,
+)
 from citybehavex.config import CityBehavExConfig
 from citybehavex.embedding import embed_profiles, embed_texts
 from citybehavex.llm_diaries import DiaryBatch, LLMStats, allocate_location_counts, fetch_diary_batch
@@ -752,7 +760,7 @@ def _build_schedule(
     diary_batches: dict[str, DiaryBatch],
     start_date: pd.Timestamp,
     profiles: Optional[list[AgentProfile]] = None,
-) -> tuple[DiaryBank, tuple, np.ndarray, Optional[np.ndarray], DdcrpAgentInfo]:
+) -> tuple[DiaryBank, tuple, np.ndarray, Optional[np.ndarray], DdcrpAgentInfo, Optional[ProfileClusters]]:
     """Build the diary bank and run profile-driven CRP schedule selection.
 
     Returns (bank, diary_arrays, chosen, profile_embeddings, crp_info).
@@ -772,13 +780,24 @@ def _build_schedule(
 
     profile_embeddings = None
     narratives = None
+    profile_clusters = None
     if profiles is not None:
         narratives = [profile_to_narrative(p) for p in profiles]
         profile_embeddings = embed_profiles(narratives, config.embedding)
         if profile_embeddings is not None:
             typer.echo(f"Profile embeddings: {profile_embeddings.shape}")
+            profile_clusters = cluster_profile_embeddings(
+                narratives,
+                profile_embeddings,
+                config.activities.profile_cluster_similarity_threshold,
+            )
+            typer.echo(
+                f"Profile alignment clusters: {len(profile_clusters.narratives)} "
+                f"for {len(narratives)} profiles"
+            )
         else:
             typer.echo("Profile embeddings unavailable — falling back to popularity CRP")
+            profile_clusters = cluster_profile_embeddings(narratives, None, 1.0)
 
     agent_diary_sim = None
     if (
@@ -786,7 +805,12 @@ def _build_schedule(
         and narratives is not None
         and config.schedule.similarity_backend == "alignment_model"
     ):
-        agent_diary_sim = score_alignment_matrix(narratives, bank.diaries, config.schedule)
+        scoring_narratives = profile_clusters.narratives if profile_clusters is not None else narratives
+        scored = score_alignment_matrix(scoring_narratives, bank.diaries, config.schedule)
+        if scored is not None and profile_clusters is not None:
+            agent_diary_sim = expand_cluster_scores(scored, profile_clusters.labels)
+        else:
+            agent_diary_sim = scored
         if agent_diary_sim is not None:
             typer.echo(f"Macro-schedule alignment scores: {agent_diary_sim.shape}")
         else:
@@ -807,7 +831,7 @@ def _build_schedule(
         profile_embeddings=profile_embeddings,
         agent_diary_sim=agent_diary_sim,
     )
-    return bank, diary_arrays, chosen, profile_embeddings, crp_info
+    return bank, diary_arrays, chosen, profile_embeddings, crp_info, profile_clusters
 
 
 def _save_crp_artifact(
@@ -845,10 +869,21 @@ def _save_crp_artifact(
 
 def _build_activity_data(
     config: CityBehavExConfig,
-) -> tuple[Optional[np.ndarray], Optional[np.ndarray], Optional[np.ndarray], Optional[np.ndarray], Optional[np.ndarray]]:
-    """Return (act_embs, act_dur_mu, act_dur_sigma, purpose_act_starts, purpose_acts) when enabled."""
+    bank: Optional[DiaryBank] = None,
+    profile_clusters: Optional[ProfileClusters] = None,
+    output_path: Optional[str] = None,
+) -> tuple[
+    Optional[np.ndarray],
+    Optional[np.ndarray],
+    Optional[np.ndarray],
+    Optional[np.ndarray],
+    Optional[np.ndarray],
+    Optional[np.ndarray],
+    Optional[np.ndarray],
+]:
+    """Return activity arrays, plus optional contextual alignment tensor."""
     if not config.activities.enabled:
-        return None, None, None, None, None
+        return None, None, None, None, None, None, None
     act_dur_mu, act_dur_sigma = activity_duration_arrays()
     if config.activities.act_dur_scale != 1.0:
         act_dur_mu = act_dur_mu + np.log(config.activities.act_dur_scale)
@@ -863,8 +898,38 @@ def _build_activity_data(
             typer.echo(f"Activity embeddings: {act_embs.shape}")
         else:
             typer.echo("Activity embeddings unavailable — using count-only CRP")
+    activity_alignment_scores = None
+    activity_cluster_labels = None
+    if (
+        config.activities.alignment_backend == "rerank"
+        and bank is not None
+        and profile_clusters is not None
+    ):
+        aligned = score_activity_alignment(
+            profile_clusters.narratives,
+            bank.diaries,
+            config.activities,
+        )
+        if aligned is not None:
+            activity_alignment_scores, _blocks, metadata = aligned
+            activity_cluster_labels = profile_clusters.labels
+            typer.echo(f"Micro-activity alignment scores: {activity_alignment_scores.shape}")
+            if output_path is not None:
+                alignment_path = output_path.replace(".parquet", "_activity_alignment.parquet")
+                metadata.to_parquet(alignment_path, index=False)
+                typer.echo(f"Saved micro-activity alignment scores -> {alignment_path}")
+        else:
+            typer.echo("Micro-activity alignment scorer unavailable — falling back to activity embeddings")
     typer.echo(f"Activities enabled: {len(act_dur_mu)} activities, kappa={config.activities.kappa}, T={config.activities.temperature}")
-    return act_embs, act_dur_mu, act_dur_sigma, purpose_act_starts, purpose_acts
+    return (
+        act_embs,
+        act_dur_mu,
+        act_dur_sigma,
+        purpose_act_starts,
+        purpose_acts,
+        activity_alignment_scores,
+        activity_cluster_labels,
+    )
 
 
 def _stamp_path(path: str, ts: str) -> str:
@@ -907,6 +972,8 @@ def _run_simulation_core(
     timing: CoreTiming,
     profiles: Optional[list[AgentProfile]] = None,
     profile_embeddings: Optional[np.ndarray] = None,
+    bank: Optional[DiaryBank] = None,
+    profile_clusters: Optional[ProfileClusters] = None,
     output_path: Optional[str] = None,
 ) -> tuple[skmob2.TrajDataFrame, Optional[str], bool]:
     granularity = config.simulation.granularity_minutes
@@ -925,7 +992,15 @@ def _run_simulation_core(
         if profiles is not None
         else None
     )
-    act_embs, act_dur_mu, act_dur_sigma, purpose_act_starts, purpose_acts = _build_activity_data(config)
+    (
+        act_embs,
+        act_dur_mu,
+        act_dur_sigma,
+        purpose_act_starts,
+        purpose_acts,
+        activity_alignment_scores,
+        activity_cluster_labels,
+    ) = _build_activity_data(config, bank=bank, profile_clusters=profile_clusters, output_path=output_path)
 
     road_kwargs: dict = {}
     rn = config.road_network
@@ -1042,8 +1117,16 @@ def _run_simulation_core(
         bike_threshold_sigma_ln=config.simulation.bike_threshold_sigma_ln,
         n_agents=config.simulation.agents,
         random_state=config.simulation.random_state,
-        social_graph_k=config.simulation.social_graph_k,
-        profile_graph_exact_threshold=config.simulation.profile_graph_exact_threshold,
+        social_graph_k=config.social.social_graph_k,
+        profile_graph_exact_threshold=config.social.profile_graph_exact_threshold,
+        home_h3_resolution=config.social.home_h3_resolution,
+        work_h3_resolution=config.social.work_h3_resolution,
+        degree_mu_ln=config.social.degree_mu_ln,
+        degree_sigma_ln=config.social.degree_sigma_ln,
+        max_degree=config.social.max_degree,
+        similarity_temperature=config.social.similarity_temperature,
+        max_candidate_pool=config.social.max_candidate_pool,
+        max_ring_expansion=config.social.max_ring_expansion,
         rho=config.simulation.rho,
         gamma=config.simulation.gamma,
         alpha=config.simulation.alpha,
@@ -1063,6 +1146,9 @@ def _run_simulation_core(
         purpose_acts=purpose_acts,
         act_kappa=config.activities.kappa,
         act_temp=config.activities.temperature,
+        activity_alignment_scores=activity_alignment_scores,
+        activity_cluster_labels=activity_cluster_labels,
+        activity_history_weight=config.activities.history_weight,
         return_social_graph=True,
         social_node_profiles=profile_types,
         has_car=has_car,
@@ -1185,7 +1271,7 @@ def run_simulation(config: CityBehavExConfig) -> skmob2.TrajDataFrame:
             f"LLM diary phase: {llm_seconds:.2f}s, {llm_stats.calls:,} chat completion calls"
             f"{cache_text}"
         )
-        bank, diary_arrays, chosen, profile_embeddings, crp_info = _build_schedule(
+        bank, diary_arrays, chosen, profile_embeddings, crp_info, profile_clusters = _build_schedule(
             config, diary_batches, start_date, profiles=profiles
         )
         crp_path = stamped_output.replace(".parquet", "_crp.parquet")
@@ -1204,6 +1290,8 @@ def run_simulation(config: CityBehavExConfig) -> skmob2.TrajDataFrame:
             core_timing,
             profiles=profiles,
             profile_embeddings=profile_embeddings,
+            bank=bank,
+            profile_clusters=profile_clusters,
             output_path=stamped_output,
         )
         typer.echo(f"Rust simulation phase: {core_timing.seconds:.2f}s")

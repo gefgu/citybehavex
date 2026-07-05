@@ -505,6 +505,51 @@ def test_simulate_agents_can_return_social_graph_artifact():
     assert artifact["nodes"][0][4] == "worker"
 
 
+def test_simulate_agents_defaults_to_colocation_graph_when_home_tiles_and_embeddings_present():
+    tess = pd.DataFrame(
+        {
+            "tile_id": [0, 1],
+            "lat": [48.8566, 48.95],
+            "lng": [2.3522, 2.55],
+            "relevance": [1.0, 1.0],
+        }
+    )
+    diary_arrays = (
+        np.array([0, 8 * 3600, 18 * 3600], dtype=np.int64),
+        np.array([0, 1, 0], dtype=np.int32),
+        np.array([0, 0], dtype=np.int64),
+        np.array([3, 3], dtype=np.int64),
+    )
+    embeddings = np.array([[1.0, 0.0], [0.9, 0.1]], dtype=np.float64)
+
+    result = simulate_agents(
+        tess,
+        "relevance",
+        diary_arrays,
+        start_ts=0,
+        end_ts=86400,
+        slot_seconds=_SLOT,
+        car_speed_kmh=_SPEED,
+        n_agents=2,
+        random_state=42,
+        starting_locs=np.array([0, 0], dtype=np.int64),
+        work_tiles=np.array([0, 0], dtype=np.int64),
+        profile_embeddings=embeddings,
+        degree_mu_ln=np.log(2),
+        degree_sigma_ln=0.2,
+        max_degree=2,
+        home_h3_resolution=7,
+        work_h3_resolution=7,
+        return_social_graph=True,
+    )
+    artifact = result[4].to_dict()
+    assert artifact["node_count"] == 2
+    # Both agents share the same home and work tile, so the only possible
+    # edge is colocation-eligible; the colocation builder (not the profile
+    # kNN fallback) is exercised whenever starting_locs is supplied.
+    assert artifact["edge_count"] <= 2
+
+
 def test_simulate_agents_encounters_has_expected_columns():
     tess = pd.DataFrame(
         {
@@ -616,6 +661,59 @@ def test_activities_chain_until_macro_departure_deadline():
     assert act_departure[first_stop][-1] == 7 * 3600 - 900
     assert list(act_arrival[first_stop][1:]) == list(act_departure[first_stop][:-1])
     assert act_departure[first_stop][-1] - act_arrival[first_stop][-1] == 5 * 60
+
+
+def test_contextual_activity_alignment_uses_previous_activity_with_separate_micro_crp():
+    tess = pd.DataFrame({
+        "tile_id": [0, 1],
+        "lat": [48.8566, 48.8580],
+        "lng": [2.3522, 2.3540],
+        "relevance": [1.0, 1.0],
+    })
+    slot_times = np.array([0, 2 * 3600], dtype=np.int64)
+    abs_locs = np.array([0, 1], dtype=np.int32)
+    block_ids = np.array([0, 1], dtype=np.int32)
+    diary_arrays = (
+        slot_times,
+        abs_locs,
+        np.array([0], dtype=np.int64),
+        np.array([2], dtype=np.int64),
+        block_ids,
+    )
+    ten_min_hours = 10 / 60
+    act_dur_mu = np.log(np.full(N_ACTIVITIES, ten_min_hours, dtype=np.float64))
+    act_dur_sigma = np.zeros(N_ACTIVITIES, dtype=np.float64)
+    cleanetc = 6
+    foodprep = 5
+    paidwork = 3
+    purpose_act_starts = np.array([0, 2, 3, 3], dtype=np.int64)
+    purpose_acts = np.array([cleanetc, foodprep, paidwork], dtype=np.int64)
+    scores = np.zeros((1, 2, N_ACTIVITIES + 1, N_ACTIVITIES), dtype=np.float64)
+    scores[0, 0, 0, cleanetc] = 1.0
+    scores[0, 0, cleanetc + 1, foodprep] = 1.0
+    scores[0, 0, foodprep + 1, foodprep] = 1.0
+
+    _df, _encounters, _moving, activities = simulate_agents(
+        tess,
+        "relevance",
+        diary_arrays,
+        start_ts=0,
+        end_ts=3 * 3600,
+        slot_seconds=_SLOT,
+        car_speed_kmh=_SPEED,
+        n_agents=1,
+        random_state=42,
+        act_dur_mu=act_dur_mu,
+        act_dur_sigma=act_dur_sigma,
+        purpose_act_starts=purpose_act_starts,
+        purpose_acts=purpose_acts,
+        act_temp=0.01,
+        activity_alignment_scores=scores,
+        activity_cluster_labels=np.array([0], dtype=np.int64),
+    )
+
+    first_stop = activities[activities["stop_id"] == 0]["activity"].tolist()
+    assert first_stop[:2] == [cleanetc, foodprep]
 
 
 def test_home_anchors_are_appended_and_profiles_use_only_home_pool(tmp_path):

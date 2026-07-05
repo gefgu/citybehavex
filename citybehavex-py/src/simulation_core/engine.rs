@@ -228,7 +228,12 @@ fn route_mode_leg(
         return (MODE_WALK, dur_s, lats, lngs, cum, 2);
     }
 
-    let has_car = inputs.transport.has_car.get(agent_idx).copied().unwrap_or(true);
+    let has_car = inputs
+        .transport
+        .has_car
+        .get(agent_idx)
+        .copied()
+        .unwrap_or(true);
     if has_car {
         let (dur_s, lats, lngs, cum) = route_leg(
             cur_loc,
@@ -239,10 +244,22 @@ fn route_mode_leg(
             road,
             road_fallback,
         );
-        return (MODE_CAR, dur_s, lats, lngs, cum, inputs.road_network.max_leg_waypoints);
+        return (
+            MODE_CAR,
+            dur_s,
+            lats,
+            lngs,
+            cum,
+            inputs.road_network.max_leg_waypoints,
+        );
     }
 
-    let has_bike = inputs.transport.has_bike.get(agent_idx).copied().unwrap_or(false);
+    let has_bike = inputs
+        .transport
+        .has_bike
+        .get(agent_idx)
+        .copied()
+        .unwrap_or(false);
     let bike_threshold = inputs
         .transport
         .bike_threshold_km
@@ -264,7 +281,14 @@ fn route_mode_leg(
         if let Some((dur_s, lats, lngs, cum)) =
             try_network_leg(cur_loc, next_loc, rail, rail_fallback)
         {
-            return (MODE_RAIL, dur_s, lats, lngs, cum, inputs.rail_network.max_leg_waypoints);
+            return (
+                MODE_RAIL,
+                dur_s,
+                lats,
+                lngs,
+                cum,
+                inputs.rail_network.max_leg_waypoints,
+            );
         }
     }
 
@@ -277,7 +301,14 @@ fn route_mode_leg(
         road,
         road_fallback,
     );
-    (MODE_CAR, dur_s, lats, lngs, cum, inputs.road_network.max_leg_waypoints)
+    (
+        MODE_CAR,
+        dur_s,
+        lats,
+        lngs,
+        cum,
+        inputs.road_network.max_leg_waypoints,
+    )
 }
 
 /// Resolve the new stop's departure/arrival, mark the agent's relocation
@@ -339,7 +370,9 @@ fn push_path_waypoints(
     let (sub_lats, sub_lngs, sub_times) =
         subsample_waypoints(wp_lats, wp_lngs, &times, ctx.max_leg_waypoints);
     let agent_id = ctx.agent_idx as u32 + 1;
-    paths.push_leg(agent_id, stop_id, &sub_lats, &sub_lngs, &sub_times, ctx.mode);
+    paths.push_leg(
+        agent_id, stop_id, &sub_lats, &sub_lngs, &sub_times, ctx.mode,
+    );
 }
 
 /// Close out the agent's current stop and open a new one at `ctx.next_loc`.
@@ -484,6 +517,9 @@ fn validate_per_agent_ranges(inputs: &CoreInputs<'_>, n_agents: usize) -> Result
         if inputs.diary.ends[agent] > inputs.diary.abstract_locations.len() {
             return Err("diary ranges must be within diary_abs_locs".to_string());
         }
+        if inputs.diary.ends[agent] > inputs.diary.block_ids.len() {
+            return Err("diary ranges must be within diary_block_ids".to_string());
+        }
         if inputs.social_graph.neighbor_starts[agent]
             > inputs.social_graph.neighbor_starts[agent + 1]
             || inputs.social_graph.neighbor_starts[agent + 1] > inputs.social_graph.neighbors.len()
@@ -559,11 +595,13 @@ fn new_agent_par_data(inputs: &CoreInputs<'_>, master_seed: u64) -> Vec<AgentPar
                 moves: Vec::with_capacity(32),
                 active_day: 0,
                 active_abs_loc: 0,
+                active_block_id: 0,
                 neighbor_indices: inputs.social_graph.neighbors[edge_start..edge_end].to_vec(),
                 edge_sim: initial_edge_sim,
                 edge_upd: init_ts_edges[edge_start..edge_end].to_vec(),
                 encounters: Vec::new(),
                 activity_counts: vec![0u32; inputs.activities.act_dur_mu.len()],
+                last_activity: -1,
                 pending_departure: 0,
                 activity_seq: 0,
             }
@@ -607,6 +645,7 @@ fn sample_initial_activities(
     for i in 0..par_data.len() {
         start_activity_sample(
             i,
+            0,
             0,
             inputs.params.start_ts,
             output,
@@ -692,8 +731,9 @@ fn resolve_agent_moves(
                     encounters: &mut data.encounters,
                 }),
             };
+            let block_id = data.diary.current_block_id(inputs.diary.block_ids);
             data.active_abs_loc = abstract_loc;
-            data.moves.push((loc, ts, abstract_loc));
+            data.moves.push((loc, ts, abstract_loc, block_id));
         }
         data.diary
             .advance(inputs.diary.timestamps, inputs.params.end_ts);
@@ -718,16 +758,16 @@ fn resolve_moves_for_window(
 /// `(ts, agent)`, ready for sequential commit.
 fn collect_sorted_moves(
     par_data: &mut [AgentParData],
-    commit_buf: &mut Vec<(i64, usize, usize, i32)>,
+    commit_buf: &mut Vec<(i64, usize, usize, i32, i32)>,
 ) {
     commit_buf.clear();
     for (a, data) in par_data.iter_mut().enumerate() {
-        for &(loc, ts, abs_loc) in &data.moves {
-            commit_buf.push((ts, a, loc, abs_loc));
+        for &(loc, ts, abs_loc, block_id) in &data.moves {
+            commit_buf.push((ts, a, loc, abs_loc, block_id));
         }
         data.moves.clear();
     }
-    commit_buf.sort_unstable_by_key(|&(ts, a, _, _)| (ts, a));
+    commit_buf.sort_unstable_by_key(|&(ts, a, _, _, _)| (ts, a));
 }
 
 fn current_stop_abstract_loc(a: usize, output: &TripOutputBuffers) -> i32 {
@@ -739,6 +779,7 @@ fn current_stop_abstract_loc(a: usize, output: &TripOutputBuffers) -> i32 {
 fn start_activity_sample(
     a: usize,
     abstract_loc: i32,
+    block_id: i32,
     arrival: i64,
     output: &TripOutputBuffers,
     par_data: &mut [AgentParData],
@@ -750,6 +791,7 @@ fn start_activity_sample(
     par_data[a].activity_seq += 1;
     let AgentParData {
         ref mut activity_counts,
+        ref mut last_activity,
         ref mut rng,
         ref mut pending_departure,
         ref mut scratch,
@@ -758,11 +800,14 @@ fn start_activity_sample(
     let (act_idx, dur) = sample_activity_and_duration(
         a,
         abstract_loc,
+        block_id,
+        *last_activity,
         activity_counts,
         rng,
         activities_in,
         scratch,
     );
+    *last_activity = act_idx as i32;
     let new_idx = activities.push(a, current_stop_id, seq, arrival);
     activities.activity[new_idx] = act_idx as u16;
     *pending_departure = arrival + dur;
@@ -774,6 +819,7 @@ fn start_activity_sample(
 fn fill_activities_until(
     a: usize,
     abstract_loc: i32,
+    block_id: i32,
     until: i64,
     output: &TripOutputBuffers,
     par_data: &mut [AgentParData],
@@ -796,6 +842,7 @@ fn fill_activities_until(
         start_activity_sample(
             a,
             abstract_loc,
+            block_id,
             next_arrival,
             output,
             par_data,
@@ -815,6 +862,7 @@ fn commit_one_move(
     a: usize,
     loc: usize,
     abstract_loc: i32,
+    block_id: i32,
     agents: &mut [AgentState],
     par_data: &mut [AgentParData],
     output: &mut TripOutputBuffers,
@@ -884,6 +932,7 @@ fn commit_one_move(
             fill_activities_until(
                 a,
                 current_abs_loc,
+                par_data[a].active_block_id,
                 latest_departure,
                 output,
                 par_data,
@@ -914,9 +963,11 @@ fn commit_one_move(
         );
         par_data[a].activity_seq = 0;
         if activities_on {
+            par_data[a].active_block_id = block_id;
             start_activity_sample(
                 a,
                 abstract_loc,
+                block_id,
                 arrival,
                 output,
                 par_data,
@@ -932,15 +983,18 @@ fn commit_one_move(
         fill_activities_until(
             a,
             current_abs_loc,
+            par_data[a].active_block_id,
             ts.max(prev_arrival),
             output,
             par_data,
             &inputs.activities,
             activities,
         );
+        par_data[a].active_block_id = block_id;
         start_activity_sample(
             a,
             abstract_loc,
+            block_id,
             ts.max(prev_arrival),
             output,
             par_data,
@@ -954,7 +1008,7 @@ fn commit_one_move(
 /// (routing/output buffers are not safe to update in parallel).
 #[allow(clippy::too_many_arguments)]
 fn commit_moves(
-    commit_buf: &[(i64, usize, usize, i32)],
+    commit_buf: &[(i64, usize, usize, i32, i32)],
     agents: &mut [AgentState],
     par_data: &mut [AgentParData],
     output: &mut TripOutputBuffers,
@@ -970,12 +1024,13 @@ fn commit_moves(
     activities_on: bool,
     next_stop_id: &mut u32,
 ) {
-    for &(ts, a, loc, abstract_loc) in commit_buf {
+    for &(ts, a, loc, abstract_loc, block_id) in commit_buf {
         commit_one_move(
             ts,
             a,
             loc,
             abstract_loc,
+            block_id,
             agents,
             par_data,
             output,
@@ -1108,7 +1163,7 @@ pub(crate) fn simulate(
     let mut road_fallback = FallbackCounts::default();
     let mut rail_fallback = FallbackCounts::default();
 
-    let mut commit_buf: Vec<(i64, usize, usize, i32)> = Vec::new();
+    let mut commit_buf: Vec<(i64, usize, usize, i32, i32)> = Vec::new();
     let mut window_start = inputs.params.start_ts;
 
     // Tracking simulation days and duration

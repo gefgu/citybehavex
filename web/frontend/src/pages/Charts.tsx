@@ -60,6 +60,7 @@ const ECDF_TITLES: Record<string, string> = {
 };
 
 const NETWORK_VALIDATION_TITLES: Record<string, string> = {
+  degree: "Degree",
   clustering_coefficient: "Clustering coefficient",
   edge_persistence: "Edge persistence",
   topological_overlap: "Topological overlap",

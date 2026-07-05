@@ -70,10 +70,18 @@ def test_build_network_validation_computes_distribution_wasserstein(tmp_path):
     assert block["distributions"]["synthetic"]["edge_persistence"]["count"] == 2
     assert block["distributions"]["synthetic"]["edge_persistence"]["mean"] == 0.75
     assert set(block["wasserstein"]) == {
+        "degree",
         "clustering_coefficient",
         "edge_persistence",
         "topological_overlap",
     }
+    degree_summary = block["distributions"]["synthetic"]["degree"]
+    assert degree_summary["count"] == 3
+    np.testing.assert_allclose(degree_summary["mean"], (1 + 2 + 1) / 3)
+    assert degree_summary["median"] is not None
+    assert degree_summary["std"] is not None
+    assert degree_summary["p10"] is not None
+    assert degree_summary["p90"] is not None
 
 
 def test_build_network_validation_marks_persistence_unavailable_without_encounters(tmp_path):

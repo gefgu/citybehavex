@@ -11,6 +11,7 @@ from citybehavex.reports.config import ComparisonConfig
 from citybehavex.roads.config import RailNetworkConfig, RoadNetworkConfig
 from citybehavex.schedules.config import ScheduleConfig
 from citybehavex.simulation.config import SimulationConfig
+from citybehavex.social.config import SocialNetworkConfig
 from citybehavex.tessellation.config import TessellationConfig
 
 
@@ -27,4 +28,5 @@ class CityBehavExConfig(BaseModel):
     schedule: ScheduleConfig = Field(default_factory=ScheduleConfig)
     profiles: AgentProfilesConfig = Field(default_factory=AgentProfilesConfig)
     activities: ActivitiesConfig = Field(default_factory=ActivitiesConfig)
+    social: SocialNetworkConfig = Field(default_factory=SocialNetworkConfig)
     comparison: ComparisonConfig = Field(default_factory=ComparisonConfig)

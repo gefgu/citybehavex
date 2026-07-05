@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import math
 
+import h3
 import numpy as np
 from sklearn.cluster import MiniBatchKMeans
 from sklearn.neighbors import NearestNeighbors
@@ -211,4 +212,136 @@ def _cluster_sample_profile_graph(
         else:
             sims = embeddings[i] @ embeddings[peers].T
             weights.append(np.clip(sims, -1.0, 1.0).astype(np.float64, copy=False))
+    return _rows_to_csr(rows, weights, n)
+
+
+def _group_by_cell(cells: np.ndarray) -> dict[int, np.ndarray]:
+    """Group agent indices by H3 cell id in O(n log n), no Python loop."""
+    if cells.size == 0:
+        return {}
+    order = np.argsort(cells, kind="stable")
+    sorted_cells = cells[order]
+    boundaries = np.flatnonzero(np.diff(sorted_cells)) + 1
+    groups = np.split(order, boundaries)
+    starts = np.concatenate(([0], boundaries))
+    return {int(sorted_cells[start]): group.astype(np.int64) for start, group in zip(starts, groups)}
+
+
+_EMPTY_POOL = np.empty(0, dtype=np.int64)
+
+
+def _pool_from_groups(cells: list[int], groups: dict[int, np.ndarray], exclude: int) -> np.ndarray:
+    parts = [groups[c] for c in cells if c in groups]
+    if not parts:
+        return _EMPTY_POOL
+    pool = np.unique(np.concatenate(parts))
+    return pool[pool != exclude]
+
+
+def _colocation_pool(
+    agent: int,
+    home_cell: int,
+    work_cell: int,
+    home_groups: dict[int, np.ndarray],
+    work_groups: dict[int, np.ndarray],
+    max_ring_expansion: int,
+) -> np.ndarray:
+    pool = np.union1d(
+        _pool_from_groups([home_cell], home_groups, agent),
+        _pool_from_groups([work_cell], work_groups, agent),
+    )
+    if pool.size > 0 or max_ring_expansion <= 0:
+        return pool
+    home_str = h3.int_to_str(int(home_cell))
+    work_str = h3.int_to_str(int(work_cell))
+    for ring in range(1, max_ring_expansion + 1):
+        ring_cells = [
+            h3.str_to_int(c) for c in {*h3.grid_disk(home_str, ring), *h3.grid_disk(work_str, ring)}
+        ]
+        home_ring_pool = _pool_from_groups(ring_cells, home_groups, agent)
+        work_ring_pool = _pool_from_groups(ring_cells, work_groups, agent)
+        pool = np.union1d(home_ring_pool, work_ring_pool)
+        if pool.size > 0:
+            return pool
+    return pool
+
+
+def build_colocation_social_graph(
+    profile_embeddings: np.ndarray,
+    home_cells: np.ndarray,
+    work_cells: np.ndarray,
+    degree_mu_ln: float,
+    degree_sigma_ln: float,
+    max_degree: int,
+    temperature: float,
+    max_candidate_pool: int,
+    max_ring_expansion: int,
+    random_state: int = 42,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Build a friendship graph from home/work H3-cell colocation.
+
+    Each agent's target degree is an independent draw from
+    ``lognormal(degree_mu_ln, degree_sigma_ln)`` (clipped to
+    ``[0, max_degree]``). Friends are then sampled -- without replacement,
+    weighted by ``exp(cosine_similarity / temperature)`` -- from the pool of
+    agents who share the agent's home or work H3 cell. If that pool is
+    empty, it's expanded through H3 rings around home and work (up to
+    ``max_ring_expansion``); if still empty, the agent gets zero edges (see
+    ``citybehavex-py`` social.rs for the runtime "casual encounter"
+    mechanism that can still connect such agents during simulation).
+
+    Returns:
+        ``(neighbor_starts, neighbors, edge_weights)`` in the same CSR
+        format as ``build_profile_social_graph``.
+    """
+    n = len(profile_embeddings)
+    if temperature <= 0:
+        raise ValueError("temperature must be positive")
+    if max_degree <= 0:
+        raise ValueError("max_degree must be positive")
+    if n == 0:
+        return _empty_graph(n)
+
+    embeddings = np.ascontiguousarray(profile_embeddings, dtype=np.float64)
+    home_cells = np.asarray(home_cells, dtype=np.uint64)
+    work_cells = np.asarray(work_cells, dtype=np.uint64)
+    home_groups = _group_by_cell(home_cells)
+    work_groups = _group_by_cell(work_cells)
+
+    rng = np.random.default_rng(random_state)
+    degrees = np.clip(
+        np.round(rng.lognormal(degree_mu_ln, degree_sigma_ln, size=n)),
+        0,
+        max_degree,
+    ).astype(np.int64)
+
+    rows: list[np.ndarray] = []
+    weights: list[np.ndarray] = []
+    for i in range(n):
+        degree_i = int(degrees[i])
+        pool = (
+            _colocation_pool(i, int(home_cells[i]), int(work_cells[i]), home_groups, work_groups, max_ring_expansion)
+            if degree_i > 0
+            else _EMPTY_POOL
+        )
+        if pool.size == 0:
+            rows.append(_EMPTY_POOL)
+            weights.append(np.empty(0, dtype=np.float64))
+            continue
+
+        sub_seed, sample_seed = np.random.SeedSequence([int(random_state), i]).spawn(2)
+        if pool.size > max_candidate_pool:
+            pool = np.random.default_rng(sub_seed).choice(pool, size=max_candidate_pool, replace=False)
+
+        sims = np.clip(embeddings[i] @ embeddings[pool].T, -1.0, 1.0)
+        logits = (sims - sims.max()) / temperature
+        w = np.exp(logits)
+        probs = w / w.sum()
+
+        k = min(degree_i, pool.size)
+        chosen = np.random.default_rng(sample_seed).choice(pool.size, size=k, replace=False, p=probs)
+        order = np.argsort(pool[chosen])
+        rows.append(pool[chosen][order].astype(np.int64, copy=False))
+        weights.append(sims[chosen][order].astype(np.float64, copy=False))
+
     return _rows_to_csr(rows, weights, n)

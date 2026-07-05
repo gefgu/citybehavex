@@ -42,6 +42,7 @@ pub(crate) struct SocialGraphInputs<'a> {
 pub(crate) struct DiaryInputs<'a> {
     pub(crate) timestamps: &'a [i64],
     pub(crate) abstract_locations: &'a [i32],
+    pub(crate) block_ids: &'a [i32],
     pub(crate) starts: &'a [usize],
     pub(crate) ends: &'a [usize],
 }
@@ -86,6 +87,12 @@ pub(crate) struct ActivityInputs<'a> {
     pub(crate) purpose_acts: &'a [usize],
     pub(crate) profile_embs: &'a [f64],
     pub(crate) profile_act_sims: &'a [f64],
+    pub(crate) contextual_scores: &'a [f64],
+    pub(crate) cluster_labels: &'a [usize],
+    pub(crate) n_clusters: usize,
+    pub(crate) n_blocks: usize,
+    pub(crate) n_previous: usize,
+    pub(crate) history_weight: f64,
     pub(crate) emb_dim: usize,
     pub(crate) kappa: f64,
     pub(crate) temperature: f64,

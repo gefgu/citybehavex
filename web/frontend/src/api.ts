@@ -519,11 +519,16 @@ export interface SocialNetworkBlock {
 export interface NetworkMetricSummary {
   count: number;
   mean: number | null;
+  median: number | null;
+  std: number | null;
+  p10: number | null;
+  p90: number | null;
 }
 export interface NetworkValidationComparisonBlock {
   comparison: "synthetic_vs_random" | "observed_vs_random";
   random_model: "degree_preserving_rnd";
   wasserstein: {
+    degree: number | null;
     clustering_coefficient: number | null;
     edge_persistence: number | null;
     topological_overlap: number | null;

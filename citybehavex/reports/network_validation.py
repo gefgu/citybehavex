@@ -34,6 +34,7 @@ def _h3_cells(lat: pd.Series, lng: pd.Series, resolution: int) -> pd.api.extensi
 
 
 NETWORK_METRIC_LABELS = {
+    "degree": "Degree",
     "clustering_coefficient": "Clustering coefficient",
     "edge_persistence": "Edge persistence",
     "topological_overlap": "Topological overlap",
@@ -213,8 +214,15 @@ def _distribution_summary(values: np.ndarray) -> dict[str, float | int | None]:
     arr = np.asarray(values, dtype=float)
     arr = arr[np.isfinite(arr)]
     if arr.size == 0:
-        return {"count": 0, "mean": None}
-    return {"count": int(arr.size), "mean": float(arr.mean())}
+        return {"count": 0, "mean": None, "median": None, "std": None, "p10": None, "p90": None}
+    return {
+        "count": int(arr.size),
+        "mean": float(arr.mean()),
+        "median": float(np.median(arr)),
+        "std": float(arr.std()),
+        "p10": float(np.percentile(arr, 10)),
+        "p90": float(np.percentile(arr, 90)),
+    }
 
 
 def _safe_wasserstein(left: np.ndarray, right: np.ndarray) -> float | None:
@@ -289,6 +297,7 @@ def _metric_bundle(
 ) -> dict[str, np.ndarray]:
     clustering, overlap = _graph_metrics(graph)
     return {
+        "degree": graph.degrees().astype(float),
         "clustering_coefficient": clustering,
         "edge_persistence": persistence,
         "topological_overlap": overlap,

@@ -17,6 +17,7 @@ from .reports.comparison import (
 from .roads import RoadNetworkConfig
 from .simulation import run_simulation
 from .simulation import SimulationConfig
+from .social.config import SocialNetworkConfig
 from .tessellation import build_poi_tessellation, build_tessellation
 from .tessellation import TessellationConfig
 
@@ -255,6 +256,11 @@ def simulate(
             "relevance_column": relevance_column,
             "output": output,
             "random_state": random_state,
+        },
+    )
+    soc = apply_overrides(
+        loaded.social,
+        {
             "social_graph_k": social_graph_k,
             "profile_graph_exact_threshold": profile_graph_exact_threshold,
         },
@@ -274,6 +280,7 @@ def simulate(
     )
     assert isinstance(tess, TessellationConfig)
     assert isinstance(sim, SimulationConfig)
+    assert isinstance(soc, SocialNetworkConfig)
     assert isinstance(comp, ComparisonConfig)
     assert isinstance(llm, LLMConfig)
     assert isinstance(road_network, RoadNetworkConfig)
@@ -287,6 +294,7 @@ def simulate(
         schedule=loaded.schedule,
         profiles=loaded.profiles,
         activities=loaded.activities,
+        social=soc,
         comparison=comp,
     )
     try:

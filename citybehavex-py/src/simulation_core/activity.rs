@@ -38,10 +38,13 @@ fn eligible_activities_for_purpose<'a>(
 #[allow(clippy::too_many_arguments)]
 fn activity_weight(
     agent: usize,
+    block_id: i32,
+    previous_activity: i32,
     act: usize,
     count: u32,
     n_acts: usize,
     has_precomputed: bool,
+    has_contextual: bool,
     has_embs: bool,
     prof_slice: &[f64],
     inputs: &ActivityInputs<'_>,
@@ -51,7 +54,31 @@ fn activity_weight(
     } else {
         inputs.kappa
     };
-    let sim = if has_precomputed {
+    let contextual_sim = if has_contextual && block_id >= 0 {
+        let cluster = inputs.cluster_labels[agent];
+        let block = block_id as usize;
+        let previous_idx = if previous_activity >= 0 {
+            (previous_activity as usize + 1).min(inputs.n_previous.saturating_sub(1))
+        } else {
+            0
+        };
+        let base_idx = (((cluster * inputs.n_blocks + block) * inputs.n_previous) * n_acts) + act;
+        let hist_idx = (((cluster * inputs.n_blocks + block) * inputs.n_previous + previous_idx)
+            * n_acts)
+            + act;
+        if hist_idx < inputs.contextual_scores.len() && base_idx < inputs.contextual_scores.len() {
+            let base_score = inputs.contextual_scores[base_idx].clamp(0.0, 1.0);
+            let hist_score = inputs.contextual_scores[hist_idx].clamp(0.0, 1.0);
+            Some(base_score + inputs.history_weight * (hist_score - base_score))
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+    let sim = if let Some(score) = contextual_sim {
+        score
+    } else if has_precomputed {
         inputs.profile_act_sims[agent * n_acts + act].clamp(-1.0, 1.0)
     } else if has_embs && act * inputs.emb_dim + inputs.emb_dim <= inputs.act_embs.len() {
         let act_emb = &inputs.act_embs[act * inputs.emb_dim..(act + 1) * inputs.emb_dim];
@@ -91,6 +118,8 @@ fn sample_duration(chosen: usize, inputs: &ActivityInputs<'_>, rng: &mut impl Rn
 pub(crate) fn sample_activity_and_duration(
     agent: usize,
     abstract_loc: i32,
+    block_id: i32,
+    previous_activity: i32,
     activity_counts: &mut Vec<u32>,
     rng: &mut impl Rng,
     inputs: &ActivityInputs<'_>,
@@ -103,7 +132,17 @@ pub(crate) fn sample_activity_and_duration(
 
     let has_precomputed = !inputs.profile_act_sims.is_empty()
         && inputs.profile_act_sims.len() >= (agent + 1) * n_acts;
+    let has_contextual = !inputs.contextual_scores.is_empty()
+        && !inputs.cluster_labels.is_empty()
+        && inputs.cluster_labels.len() > agent
+        && inputs.n_clusters > 0
+        && inputs.n_blocks > 0
+        && inputs.n_previous > 0
+        && inputs.cluster_labels[agent] < inputs.n_clusters
+        && inputs.contextual_scores.len()
+            >= inputs.n_clusters * inputs.n_blocks * inputs.n_previous * n_acts;
     let has_embs = !has_precomputed
+        && !has_contextual
         && inputs.emb_dim > 0
         && !inputs.act_embs.is_empty()
         && !inputs.profile_embs.is_empty()
@@ -124,10 +163,13 @@ pub(crate) fn sample_activity_and_duration(
         };
         let w = activity_weight(
             agent,
+            block_id,
+            previous_activity,
             a,
             count,
             n_acts,
             has_precomputed,
+            has_contextual,
             has_embs,
             prof_slice,
             inputs,
