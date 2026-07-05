@@ -184,3 +184,4 @@ def test_main_reuses_dataset_and_trains_with_mock(tmp_path, monkeypatch):
 
     assert trained["rows"] == 1
     assert trained["output_model_path"] == str(tmp_path / "model")
+    assert trained["device"] == "cpu"

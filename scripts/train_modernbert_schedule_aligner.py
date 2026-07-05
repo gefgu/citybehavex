@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -12,10 +13,6 @@ from typing import Any, Iterable, Sequence
 import pandas as pd
 import requests
 import numpy as np
-
-from citybehavex.embedding import diary_to_prose
-from citybehavex.llm_diaries import Diary, DiaryBatch
-from citybehavex.profiles import AgentProfile, profile_to_narrative
 
 
 @dataclass(frozen=True)
@@ -62,13 +59,17 @@ def _infer_day_type(path: Path) -> str:
     return stem
 
 
-def load_profiles(path: str | Path) -> list[AgentProfile]:
+def load_profiles(path: str | Path):
+    from citybehavex.profiles import AgentProfile
+
     df = pd.read_parquet(path)
     return [AgentProfile.model_validate(row) for row in df.to_dict(orient="records")]
 
 
-def load_diaries(paths: Sequence[str | Path]) -> list[tuple[str, Diary]]:
-    diaries: list[tuple[str, Diary]] = []
+def load_diaries(paths: Sequence[str | Path]) -> list[tuple[str, object]]:
+    from citybehavex.llm_diaries import DiaryBatch
+
+    diaries: list[tuple[str, object]] = []
     for raw_path in paths:
         path = Path(raw_path)
         batch = DiaryBatch.model_validate(json.loads(path.read_text(encoding="utf-8")))
@@ -80,18 +81,21 @@ def load_diaries(paths: Sequence[str | Path]) -> list[tuple[str, Diary]]:
 
 
 def build_training_pairs(
-    profiles: Sequence[AgentProfile],
-    diaries: Sequence[tuple[str, Diary]],
+    profiles: Sequence[object],
+    diaries: Sequence[tuple[str, object]],
     *,
     sample_size: int,
     seed: int,
 ) -> list[TrainingPair]:
+    from citybehavex.embedding import diary_to_prose
+    from citybehavex.profiles import profile_to_narrative
+
     if not profiles:
         raise ValueError("profiles are empty")
     if not diaries:
         raise ValueError("diaries are empty")
     rng = np.random.default_rng(seed)
-    by_day_type: dict[str, list[Diary]] = {}
+    by_day_type: dict[str, list[object]] = {}
     for day_type, diary in diaries:
         by_day_type.setdefault(day_type, []).append(diary)
     day_types = sorted(by_day_type)
@@ -188,7 +192,10 @@ def train_cross_encoder(
     epochs: int,
     batch_size: int,
     learning_rate: float,
+    device: str | None,
 ) -> None:
+    if device == "cpu":
+        os.environ["CUDA_VISIBLE_DEVICES"] = ""
     try:
         from sentence_transformers import InputExample
         from sentence_transformers.cross_encoder import CrossEncoder
@@ -204,7 +211,7 @@ def train_cross_encoder(
     ]
     if not examples:
         raise ValueError("training dataset is empty")
-    model = CrossEncoder(base_model, num_labels=1)
+    model = CrossEncoder(base_model, num_labels=1, device=device)
     loader = DataLoader(examples, shuffle=True, batch_size=batch_size)
     model.fit(
         train_dataloader=loader,
@@ -213,6 +220,7 @@ def train_cross_encoder(
         warmup_steps=max(1, len(loader) // 10),
         output_path=output_model_path,
     )
+    model.save(output_model_path)
 
 
 def _read_existing_dataset(path: Path) -> pd.DataFrame | None:
@@ -248,6 +256,16 @@ def parse_args(argv: Iterable[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--epochs", type=int, default=1)
     parser.add_argument("--batch-size", type=int, default=8)
     parser.add_argument("--learning-rate", type=float, default=2e-5)
+    parser.add_argument(
+        "--device",
+        default="cpu",
+        help="Training device passed to CrossEncoder. Defaults to CPU for RTX 5090/PyTorch compatibility.",
+    )
+    parser.add_argument(
+        "--label-only",
+        action="store_true",
+        help="Write the supervised label dataset and skip CrossEncoder training.",
+    )
     parser.add_argument("--reuse-dataset", action="store_true")
     return parser.parse_args(argv)
 
@@ -274,6 +292,8 @@ def main(argv: Iterable[str] | None = None) -> None:
             retries=args.llm_retries,
         )
         _write_dataset(dataset, dataset_path)
+    if args.label_only:
+        return
     train_cross_encoder(
         dataset,
         base_model=args.base_model,
@@ -281,6 +301,7 @@ def main(argv: Iterable[str] | None = None) -> None:
         epochs=args.epochs,
         batch_size=args.batch_size,
         learning_rate=args.learning_rate,
+        device=args.device,
     )
 
 
