@@ -21,6 +21,8 @@ from ..timeline_data import (
     query_active_legs,
     query_agent_crp,
     query_agent_encounters,
+    query_agent_encounter_counts,
+    query_agent_social_friends,
     query_agent_trips,
     query_activity_at_stop,
     query_stop_activities,
@@ -88,6 +90,39 @@ def _query_profiles_by_uid(
     return profiles
 
 
+def _profile_artifact_warning(
+    profiles_path: Optional[Any],
+    uid: int,
+    agents_total: Optional[int],
+) -> str:
+    if not profiles_path or not profiles_path.exists():
+        return "no agent profiles available for this experiment"
+
+    con = duckdb.connect()
+    try:
+        row = con.execute(
+            f"""
+                SELECT count(*) AS rows, min(uid) AS min_uid, max(uid) AS max_uid
+                FROM read_parquet('{quote_path(profiles_path)}')
+            """
+        ).fetchone()
+    finally:
+        con.close()
+
+    rows = int(row[0]) if row and row[0] is not None else 0
+    min_uid = row[1] if row else None
+    max_uid = row[2] if row else None
+    if agents_total is not None and rows < int(agents_total):
+        return f"profile artifact has {rows} rows for {int(agents_total)} agents; no profile row for uid {uid}"
+    if min_uid is not None and max_uid is not None:
+        return f"uid {uid} not found in agent profiles (profile uid range {min_uid}..{max_uid})"
+    return f"uid {uid} not found in agent profiles"
+
+
+def _crp_agent_id(display_uid: int) -> int:
+    return int(display_uid) - 1
+
+
 @router.get("/experiments/{exp_id}/timeline/meta")
 def get_timeline_meta(
     exp_id: str, run: Optional[str] = Query(None, description="Run id. Defaults to the latest run.")
@@ -150,14 +185,14 @@ def get_timeline_agent(
     warnings: list[str] = []
     profile_dict: Optional[dict[str, Any]] = None
     narrative: Optional[str] = None
+    summary = run_summary(selected.path)
+    agents_total = summary.get("uids")
 
     profiles = _query_profiles_by_uid(experiment.profiles_path, [uid])
     if profiles:
         profile_dict, narrative = profiles[uid]
-    elif experiment.profiles_path and experiment.profiles_path.exists():
-        warnings.append("uid not found in agent profiles")
     else:
-        warnings.append("no agent profiles available for this experiment")
+        warnings.append(_profile_artifact_warning(experiment.profiles_path, uid, agents_total))
 
     trips = query_agent_trips(selected.path, uid)
     has_activities_table = selected.activities_path.exists()
@@ -235,7 +270,7 @@ def get_timeline_agent_crp(
     alpha_a: Optional[float] = None
 
     if selected.crp_path.exists():
-        rows = query_agent_crp(selected.crp_path, uid)
+        rows = query_agent_crp(selected.crp_path, _crp_agent_id(uid))
         if rows:
             T_a = float(rows[0]["T_a"])
             alpha_a = float(rows[0]["alpha_a"])
@@ -259,6 +294,67 @@ def get_timeline_agent_crp(
         "T_a": T_a,
         "alpha_a": alpha_a,
         "diaries": diaries,
+        "warnings": warnings,
+    }
+    return ApiResponseWrapper(data=payload)
+
+
+@router.get("/experiments/{exp_id}/timeline/agents/{uid}/social")
+def get_timeline_agent_social(
+    exp_id: str, uid: int, run: Optional[str] = Query(None)
+) -> ApiResponseWrapper[dict[str, Any]]:
+    """Initial social graph neighborhood for one displayed timeline agent."""
+    experiment, selected = _resolve_run(exp_id, run)
+    warnings: list[str] = []
+    parameters: dict[str, Any] = {
+        "degree": 0,
+        "total_social_strength": 0.0,
+        "social_graph_k": experiment.params.get("social_graph_k"),
+        "layout": None,
+        "kind": None,
+        "directed": None,
+        "rho": experiment.params.get("rho"),
+        "gamma": experiment.params.get("gamma"),
+        "alpha": experiment.params.get("alpha"),
+        "dt_update_mob_sim_hours": experiment.params.get("dt_update_mob_sim_hours"),
+        "indipendency_window_hours": experiment.params.get("indipendency_window_hours"),
+    }
+    friends: list[dict[str, Any]] = []
+
+    if selected.social_network_path.exists():
+        social_params, friends, social_warnings = query_agent_social_friends(selected.social_network_path, uid)
+        parameters.update({key: value for key, value in social_params.items() if value is not None})
+        warnings.extend(social_warnings)
+    else:
+        warnings.append("no social network sidecar available for this run")
+
+    if selected.encounters_path.exists():
+        encounter_counts = query_agent_encounter_counts(selected.encounters_path, uid)
+    else:
+        encounter_counts = {}
+        warnings.append("no encounters data available for this experiment")
+
+    friend_profiles = _query_profiles_by_uid(
+        experiment.profiles_path,
+        [int(friend["uid"]) for friend in friends],
+    )
+    for friend in friends:
+        friend_uid = int(friend["uid"])
+        profile = friend_profiles.get(friend_uid)
+        friend["encounter_count"] = encounter_counts.get(friend_uid, 0)
+        if profile:
+            friend_profile, _friend_narrative = profile
+            friend["profile"] = friend_profile
+            friend["name"] = friend_profile.get("name")
+        else:
+            friend["profile"] = None
+            friend["name"] = None
+
+    payload = {
+        "uid": uid,
+        "run_id": selected.run_id,
+        "parameters": parameters,
+        "friends": friends,
         "warnings": warnings,
     }
     return ApiResponseWrapper(data=payload)

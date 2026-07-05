@@ -692,6 +692,54 @@ table.agent-table td:first-child { color: var(--muted); }
 .timeline-detail-table {
   margin-top: var(--space-sm);
 }
+.collapsible-panel {
+  padding: 0;
+  overflow: hidden;
+}
+.collapsible-panel-trigger {
+  width: 100%;
+  min-height: 52px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-md);
+  border: none;
+  background: var(--canvas);
+  color: var(--ink);
+  text-align: left;
+  padding: var(--space-md);
+  cursor: pointer;
+}
+.collapsible-panel-trigger:hover,
+.collapsible-panel-trigger:focus-visible {
+  background: var(--surface-soft);
+}
+.collapsible-panel-trigger:focus-visible {
+  outline: 2px solid var(--info);
+  outline-offset: -2px;
+}
+.collapsible-panel-summary {
+  display: block;
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+}
+.collapsible-panel-chevron {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-size: 18px;
+  line-height: 1;
+  transform: rotate(-90deg);
+  transition: transform 140ms ease;
+}
+.collapsible-panel.is-open .collapsible-panel-chevron {
+  transform: rotate(0deg);
+}
+.collapsible-panel-body {
+  padding: 0 var(--space-md) var(--space-md);
+}
 
 /* ---- CRP diary-selection summary ---- */
 .crp-panel-toggle {
@@ -795,6 +843,19 @@ table.agent-table td:first-child { color: var(--muted); }
 .crp-prob-row.is-top .crp-prob-value {
   color: var(--ink);
   font-weight: 500;
+}
+.social-stats-row {
+  flex-wrap: wrap;
+}
+.social-param-table td:first-child {
+  width: 132px;
+}
+.social-friends-scroll {
+  max-height: 260px;
+}
+.social-reciprocal {
+  color: var(--forest);
+  font-weight: 600;
 }
 
 /* ---- states ---- */
