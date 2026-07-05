@@ -316,7 +316,7 @@ def generate_profiles(
 
 
 def load_profiles(path: str, n: int) -> Optional[list[AgentProfile]]:
-    """Load hand-authored profiles from a JSON file.
+    """Load hand-authored profiles from a JSON or parquet file.
 
     Returns ``None`` if the file doesn't exist or has fewer than ``n`` entries
     (caller should then fall back to generation).
@@ -325,7 +325,13 @@ def load_profiles(path: str, n: int) -> Optional[list[AgentProfile]]:
     if not p.exists():
         return None
     try:
-        raw = json.loads(p.read_text(encoding="utf-8"))
+        if p.suffix.lower() == ".parquet":
+            frame = pd.read_parquet(p)
+            if len(frame) < n:
+                return None
+            raw = frame.head(n).to_dict(orient="records")
+        else:
+            raw = json.loads(p.read_text(encoding="utf-8"))
         if not isinstance(raw, list) or len(raw) < n:
             return None
         return [AgentProfile.model_validate(entry) for entry in raw[:n]]

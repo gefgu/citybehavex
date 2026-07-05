@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import json
 from datetime import datetime
 
 import pandas as pd
+import pytest
 
 from web.backend.app.timeline_data import (
     _build_legs_index,
@@ -11,6 +13,8 @@ from web.backend.app.timeline_data import (
     query_active_legs,
     query_activity_at_stop,
     query_agent_crp,
+    query_agent_encounter_counts,
+    query_agent_social_friends,
     query_agent_trips,
     query_stop_activities,
 )
@@ -53,6 +57,53 @@ def test_query_agent_crp_filters_by_agent_and_sorts_by_usage(tmp_path):
     assert [r["diary_id"] for r in rows] == ["wd-1", "we-0", "wd-0"]
     assert rows[0]["T_a"] == 0.31 and rows[0]["alpha_a"] == 0.15
     assert rows[1]["day_type"] == "weekend"
+
+
+def test_query_agent_social_friends_maps_zero_based_graph_to_display_uids(tmp_path):
+    path = tmp_path / "run_social_network.json"
+    path.write_text(
+        json.dumps(
+            {
+                "kind": "initial_profile_similarity",
+                "node_count": 3,
+                "edge_count": 3,
+                "layout": "profile_svd",
+                "directed": True,
+                "social_graph_k": 2,
+                "nodes": [[0, 0, 4, 1], [1, 0, 4, 2], [2, 0, 4, 3]],
+                "edges": [[0, 1, 0.8], [0, 2, 0.4], [1, 0, 0.7]],
+                "degrees": [2, 1, 0],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    params, friends, warnings = query_agent_social_friends(path, 1)
+
+    assert warnings == []
+    assert params["degree"] == 2
+    assert params["total_social_strength"] == pytest.approx(1.2)
+    assert [friend["uid"] for friend in friends] == [2, 3]
+    assert friends[0]["social_strength"] == 0.8
+    assert friends[0]["embedding_similarity"] == 0.8
+    assert friends[0]["reciprocated"] is True
+    assert friends[1]["reciprocated"] is False
+
+
+def test_query_agent_encounter_counts_counts_both_directions(tmp_path):
+    path = tmp_path / "run_encounters.parquet"
+    pd.DataFrame(
+        {
+            "agent": [1, 2, 1, 3],
+            "contact": [2, 1, 3, 1],
+            "tile": [10, 10, 11, 11],
+            "ts": [1, 2, 3, 4],
+        }
+    ).to_parquet(path, index=False)
+
+    counts = query_agent_encounter_counts(path, 1)
+
+    assert counts == {2: 2, 3: 2}
 
 
 def test_query_agent_trips_returns_null_category_for_legacy_runs(tmp_path):

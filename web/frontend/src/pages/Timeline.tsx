@@ -4,6 +4,7 @@ import { fetchTimelineMeta, type TimelineMeta } from "../api";
 import { TimelineMap } from "../components/TimelineMap";
 import { AgentSidebar } from "../components/AgentSidebar";
 import { CrpSummaryPanel } from "../components/CrpSummaryPanel";
+import { SocialSummaryPanel } from "../components/SocialSummaryPanel";
 import {
   TimelineDetailPanel,
   type TimelineDetailSelection,
@@ -54,7 +55,12 @@ export function Timeline() {
         <div className="timeline-workspace">
           <TimelineMap meta={meta} expId={id} runId={run} onSelectAgent={selectAgent} />
           <TimelineDetailPanel selection={detailSelection} />
-          {selectedUid !== null && <CrpSummaryPanel expId={id} uid={selectedUid} runId={run} />}
+          {selectedUid !== null && (
+            <>
+              <CrpSummaryPanel expId={id} uid={selectedUid} runId={run} />
+              <SocialSummaryPanel expId={id} uid={selectedUid} runId={run} />
+            </>
+          )}
         </div>
         {selectedUid !== null && (
           <AgentSidebar

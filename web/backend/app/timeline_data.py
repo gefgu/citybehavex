@@ -26,6 +26,7 @@ index"); all live per-request queries filter that narrower artifact instead.
 
 from __future__ import annotations
 
+import json
 from collections import Counter
 from datetime import datetime
 from pathlib import Path
@@ -289,6 +290,111 @@ def query_agent_crp(crp_path: Path, uid: int) -> list[dict[str, Any]]:
     finally:
         con.close()
     return [dict(zip(cols, r)) for r in rows]
+
+
+def load_social_network_sidecar(path: Path) -> dict[str, Any]:
+    data = json.loads(path.read_text(encoding="utf-8"))
+    nodes = data.get("nodes")
+    edges = data.get("edges")
+    if not isinstance(nodes, list) or not isinstance(edges, list):
+        raise ValueError(f"invalid social network sidecar arrays: {path}")
+    node_count = int(data.get("node_count", len(nodes)))
+    edge_count = int(data.get("edge_count", len(edges)))
+    if node_count != len(nodes) or edge_count != len(edges):
+        raise ValueError(f"social network sidecar count mismatch: {path}")
+    return data
+
+
+def query_agent_social_friends(
+    social_path: Path,
+    display_uid: int,
+) -> tuple[dict[str, Any], list[dict[str, Any]], list[str]]:
+    """Outgoing social neighbors for a displayed one-based agent uid.
+
+    The persisted social sidecar stores graph edge endpoints as zero-based
+    array indexes, while the timeline displays trajectory/profile uids. Convert
+    at the API boundary so the frontend only sees one-based ids.
+    """
+    data = load_social_network_sidecar(social_path)
+    warnings: list[str] = []
+    nodes = data.get("nodes", [])
+    edges = data.get("edges", [])
+    degrees = data.get("degrees")
+    metadata = data.get("metadata") if isinstance(data.get("metadata"), dict) else {}
+    agent_idx = int(display_uid) - 1
+
+    if agent_idx < 0 or agent_idx >= len(nodes):
+        return (
+            {
+                "degree": 0,
+                "total_social_strength": 0.0,
+                "social_graph_k": metadata.get("social_graph_k", data.get("social_graph_k")),
+                "layout": metadata.get("layout", data.get("layout")),
+                "kind": metadata.get("kind", data.get("kind")),
+                "directed": metadata.get("directed", data.get("directed")),
+            },
+            [],
+            [f"uid {display_uid} not found in social network sidecar"],
+        )
+
+    outgoing: list[tuple[int, float]] = []
+    reverse_targets: set[int] = set()
+    for row in edges:
+        if not isinstance(row, list) or len(row) < 2:
+            continue
+        source = int(row[0])
+        target = int(row[1])
+        weight = float(row[2]) if len(row) > 2 and row[2] is not None else 1.0
+        if source == agent_idx:
+            outgoing.append((target, weight))
+        if target == agent_idx:
+            reverse_targets.add(source)
+
+    friends = [
+        {
+            "uid": target + 1,
+            "social_strength": weight,
+            "embedding_similarity": weight,
+            "reciprocated": target in reverse_targets,
+        }
+        for target, weight in outgoing
+    ]
+    friends.sort(key=lambda row: (-float(row["social_strength"]), int(row["uid"])))
+
+    graph_kind = str(metadata.get("kind", data.get("kind", "")))
+    layout = str(metadata.get("layout", data.get("layout", "")))
+    if "fallback" in graph_kind or "fallback" in layout:
+        warnings.append("social weights come from fallback graph data, not profile embedding similarity")
+
+    degree = int(degrees[agent_idx]) if isinstance(degrees, list) and agent_idx < len(degrees) else len(outgoing)
+    parameters = {
+        "degree": degree,
+        "total_social_strength": float(sum(weight for _target, weight in outgoing)),
+        "social_graph_k": metadata.get("social_graph_k", data.get("social_graph_k")),
+        "layout": metadata.get("layout", data.get("layout")),
+        "kind": metadata.get("kind", data.get("kind")),
+        "directed": metadata.get("directed", data.get("directed")),
+    }
+    return parameters, friends, warnings
+
+
+def query_agent_encounter_counts(encounters_path: Path, display_uid: int) -> dict[int, int]:
+    """Encounter counts keyed by one-based friend uid, counted in either direction."""
+    con = duckdb.connect()
+    try:
+        rows = con.execute(
+            f"""
+                SELECT CASE WHEN agent = $uid THEN contact ELSE agent END AS contact_uid,
+                       count(*) AS encounter_count
+                FROM read_parquet('{quote_path(encounters_path)}')
+                WHERE agent = $uid OR contact = $uid
+                GROUP BY 1
+            """,
+            {"uid": display_uid},
+        ).fetchall()
+    finally:
+        con.close()
+    return {int(contact_uid): int(count) for contact_uid, count in rows}
 
 
 def query_agent_trips(trajectory_path: Path, uid: int) -> list[dict[str, Any]]:

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pandas as pd
 
+from citybehavex.profiles.agents import load_profiles
 from citybehavex.profiles.metrics import _cluster_and_label
 
 
@@ -33,3 +34,25 @@ def test_cluster_and_label_ranks_kmeans_clusters_by_degree_of_return() -> None:
     regular_label = labels["regular_0"]
     scouter_label = labels["scouter_0"]
     assert names_order.index(routiner_label) < names_order.index(regular_label) < names_order.index(scouter_label)
+
+
+def test_load_profiles_rejects_partial_parquet_profile_artifact(tmp_path) -> None:
+    path = tmp_path / "profiles.parquet"
+    pd.DataFrame(
+        {
+            "uid": [1],
+            "gender": ["female"],
+            "name": ["Ana"],
+            "age": [30],
+            "education": ["bachelor"],
+            "health": [4],
+            "household": ["single"],
+            "job": ["professional"],
+            "has_car": [True],
+            "has_bike": [False],
+            "home_tile": [10],
+            "work_tile": [12],
+        }
+    ).to_parquet(path, index=False)
+
+    assert load_profiles(str(path), 2) is None

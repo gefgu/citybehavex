@@ -349,6 +349,49 @@ export function fetchTimelineAgentCrp(id: string, uid: number, run?: string): Pr
   );
 }
 
+export interface AgentSocialParameters {
+  degree: number;
+  total_social_strength: number;
+  social_graph_k: number | null;
+  layout: string | null;
+  kind: string | null;
+  directed: boolean | null;
+  rho?: number | null;
+  gamma?: number | null;
+  alpha?: number | null;
+  dt_update_mob_sim_hours?: number | null;
+  indipendency_window_hours?: number | null;
+}
+
+export interface AgentSocialFriend {
+  uid: number;
+  name: string | null;
+  profile: AgentProfileFields | null;
+  social_strength: number;
+  embedding_similarity: number;
+  encounter_count: number;
+  reciprocated: boolean;
+}
+
+export interface AgentSocialPayload {
+  uid: number;
+  run_id: string;
+  parameters: AgentSocialParameters;
+  friends: AgentSocialFriend[];
+  warnings: string[];
+}
+
+export function fetchTimelineAgentSocial(
+  id: string,
+  uid: number,
+  run?: string,
+): Promise<AgentSocialPayload> {
+  const q = run ? `?run=${encodeURIComponent(run)}` : "";
+  return getJson<AgentSocialPayload>(
+    `/api/experiments/${encodeURIComponent(id)}/timeline/agents/${uid}/social${q}`,
+  );
+}
+
 // ---- payload types (mirrors web/backend/app/payload.py) ----
 export interface SeriesPoints {
   name: string;
