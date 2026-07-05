@@ -1,0 +1,20 @@
+{
+  "wasserstein": {
+    "jump_lengths_km": 4.112519306080486,
+    "visits_per_user": 5.5430000000002515,
+    "radius_of_gyration_km": 3.0607895962141995,
+    "dwell_time_min": 111.44636848097471,
+    "trip_duration_min": 30.738244249540315
+  },
+  "jsd": {
+    "activity_distribution": 0.10311375555149664,
+    "activity_transitions": 0.28637883536107667,
+    "daily_activity_profile": 0.38167261037421185,
+    "daily_motifs": 0.2247870485575978
+  },
+  "cpc": {
+    "h3_7": 0.06341593391953104,
+    "h3_8": 0.010465116279069767,
+    "h3_9": 0.0014954868343748332
+  }
+}

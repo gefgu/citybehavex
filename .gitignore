@@ -50,3 +50,7 @@ data/*_trajectories_*_social_network.json
 **/vllm_embed.log
 
 **/*_social_network.json
+
+# Trained model checkpoints (large binaries, regenerable via scripts/train_modernbert_schedule_aligner.py)
+models/
+checkpoints/

@@ -67,6 +67,10 @@ schedule:
   temperature_beta_b: 5.0
   alpha_beta_a: 2.0
   alpha_beta_b: 5.0
+  similarity_backend: alignment_model
+  alignment_base_url: http://localhost:8082
+  alignment_model: models/modernbert-schedule-aligner
+  alignment_cache_path: data/llm_diaries_yjmob/alignment_cache.npz
 activities:
   enabled: true
   kappa: 1.0

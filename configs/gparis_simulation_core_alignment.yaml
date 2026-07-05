@@ -79,14 +79,15 @@ schedule:
   # Profile-driven CRP: w_k = count_k * exp(s_k / T) where s_k is
   # cosine(profile_embedding, diary_embedding). T and alpha are drawn per-agent
   # from Beta distributions to produce heterogeneous schedule preferences.
+  similarity_backend: alignment_model
+  alignment_base_url: http://localhost:8082
+  alignment_model: models/modernbert-schedule-aligner
+  alignment_batch_size: 32
+  alignment_cache_path: data/llm_diaries_gparis/schedule_alignment_scores_cache.npz
   temperature_beta_a: 2.0   # Beta shape a for per-agent temperature T
   temperature_beta_b: 5.0   # Beta shape b for per-agent temperature T
   alpha_beta_a: 3.0         # Beta shape a for per-agent exploration alpha
   alpha_beta_b: 5.0         # Beta shape b for per-agent exploration alpha
-  similarity_backend: alignment_model
-  alignment_base_url: http://localhost:8082
-  alignment_model: models/modernbert-schedule-aligner
-  alignment_cache_path: data/llm_diaries_gparis/alignment_cache.npz
 
 activities:
   enabled: true
