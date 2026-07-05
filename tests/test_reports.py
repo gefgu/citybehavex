@@ -734,6 +734,16 @@ def test_generate_comparison_report_writes_json_metrics(tmp_path):
         observed_label="observed",
         output_path=str(html_path),
         json_output_path=str(json_path),
+        network_validation_config=SimpleNamespace(
+            enabled=True,
+            synthetic_enabled=True,
+            observed_enabled=True,
+            location_mode="location_col",
+            location_col="purpose",
+            h3_resolution=9,
+            max_group_size=200,
+            random_seed=7,
+        ),
     )
 
     assert html_path.exists()
@@ -751,13 +761,15 @@ def test_generate_comparison_report_writes_json_metrics(tmp_path):
         "activity_transitions",
         "daily_activity_profile",
     }
-    assert payload["network_validation"]["comparison"] == "synthetic_vs_random"
-    assert set(payload["network_validation"]["wasserstein"]) == {
+    assert payload["network_validation"]["synthetic_vs_random"]["comparison"] == "synthetic_vs_random"
+    assert payload["network_validation"]["observed_vs_random"]["comparison"] == "observed_vs_random"
+    assert set(payload["network_validation"]["synthetic_vs_random"]["wasserstein"]) == {
         "clustering_coefficient",
         "edge_persistence",
         "topological_overlap",
     }
-    assert payload["network_validation"]["distributions"]["synthetic"]["edge_persistence"]["count"] == 3
+    assert payload["network_validation"]["synthetic_vs_random"]["distributions"]["synthetic"]["edge_persistence"]["count"] == 3
+    assert payload["network_validation"]["observed_vs_random"]["distributions"]["observed"]["edge_persistence"]["count"] > 0
 
 
 def test_generate_comparison_report_uses_road_network_distance_when_provided(tmp_path):
@@ -878,4 +890,15 @@ def test_all_report_sections_constant_matches_config_validator():
 
     # sanity check that the config's validator and the report's own gating
     # agree on the recognized section names.
-    ComparisonConfig(sections=sorted(ALL_REPORT_SECTIONS))
+    cfg = ComparisonConfig(sections=sorted(ALL_REPORT_SECTIONS))
+    assert cfg.network_validation.enabled is False
+    enabled = ComparisonConfig(
+        network_validation={
+            "enabled": True,
+            "observed_enabled": True,
+            "location_mode": "h3",
+            "h3_resolution": 9,
+        }
+    )
+    assert enabled.network_validation.enabled is True
+    assert enabled.network_validation.observed_enabled is True

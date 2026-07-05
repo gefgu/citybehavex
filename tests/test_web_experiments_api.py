@@ -201,6 +201,7 @@ def test_charts_endpoint_allows_missing_observed_path(monkeypatch, tmp_path):
         time_use_weight_col="propwt",
         road_nodes_path=None,
         road_edges_path=None,
+        network_validation_config=None,
         special_days=None,
     ):
         assert observed_path is None

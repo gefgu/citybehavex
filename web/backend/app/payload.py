@@ -632,6 +632,7 @@ def build_comparison_payload(
     road_nodes_path: Optional[str] = None,
     road_edges_path: Optional[str] = None,
     road_snap_max_distance_m: float = 750.0,
+    network_validation_config: Optional[object] = None,
     special_days: Optional[list[dict[str, str]]] = None,
 ) -> dict[str, Any]:
     warnings: list[str] = []
@@ -1026,7 +1027,25 @@ def build_comparison_payload(
 
     # ---- social network --------------------------------------------------- #
     social_network = guard("social_network", lambda: _load_social_network_sidecar(synthetic_path))
-    network_validation = guard("network_validation", lambda: build_network_validation(synthetic_path))
+    nv_cfg = network_validation_config
+    nv_enabled = bool(getattr(nv_cfg, "enabled", False)) if nv_cfg is not None else False
+    network_validation = guard(
+        "network_validation",
+        lambda: build_network_validation(
+            synthetic_path,
+            observed_df=real_df,
+            observed_uid_col=real_traj.uid_col if real_traj is not None else None,
+            observed_datetime_col=real_traj.datetime_col if real_traj is not None else None,
+            enabled=nv_enabled,
+            synthetic_enabled=bool(getattr(nv_cfg, "synthetic_enabled", True)),
+            observed_enabled=bool(getattr(nv_cfg, "observed_enabled", False)),
+            location_mode=str(getattr(nv_cfg, "location_mode", "auto")),
+            location_col=getattr(nv_cfg, "location_col", None),
+            h3_resolution=int(getattr(nv_cfg, "h3_resolution", 9)),
+            max_group_size=int(getattr(nv_cfg, "max_group_size", 200)),
+            seed=int(getattr(nv_cfg, "random_seed", 42)),
+        ),
+    )
     if isinstance(network_validation, tuple):
         network_validation, network_warnings = network_validation
         warnings.extend(f"network_validation: {warning}" for warning in network_warnings)

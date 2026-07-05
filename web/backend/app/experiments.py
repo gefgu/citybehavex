@@ -135,6 +135,7 @@ class Experiment:
     profiles_path: Optional[Path]
     road_nodes_path: Optional[Path]
     road_edges_path: Optional[Path]
+    network_validation_config: Any
     params: dict[str, Any]
     special_days: list[dict[str, str]]
     runs: list[Run]
@@ -153,6 +154,11 @@ class Experiment:
             "time_use_country": self.time_use_country,
             "time_use_survey": self.time_use_survey,
             "time_use_weight_col": self.time_use_weight_col,
+            "network_validation": (
+                self.network_validation_config.model_dump()
+                if hasattr(self.network_validation_config, "model_dump")
+                else self.network_validation_config
+            ),
             "profiles_enabled": self.profiles_enabled,
             "profiles_output": _display_path(self.profiles_output),
             "profiles_path": _display_path(self.profiles_path),
@@ -216,6 +222,7 @@ def _load_experiment(config_path: Path) -> Experiment:
         profiles_path=profiles_path,
         road_nodes_path=road_nodes_path,
         road_edges_path=road_edges_path,
+        network_validation_config=cfg.comparison.network_validation,
         params=params,
         special_days=special_days,
         runs=_discover_runs(synthetic_output),

@@ -158,6 +158,7 @@ def report(
         road_nodes_df=road_nodes_df,
         road_edges_df=road_edges_df,
         road_snap_max_distance_m=rn.snap_max_distance_m,
+        network_validation_config=loaded.comparison.network_validation,
     )
 
 

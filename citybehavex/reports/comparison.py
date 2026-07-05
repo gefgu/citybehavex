@@ -255,34 +255,55 @@ def _plot_network_block(block: dict, *, title: str) -> go.Figure:
 def _network_validation_section_html(network_validation: Optional[dict]) -> str:
     if not network_validation:
         return ""
-    rows = []
-    for key, label in NETWORK_METRIC_LABELS.items():
-        value = network_validation.get("wasserstein", {}).get(key)
-        rows.append(
-            f"<tr><td>{label}</td><td>{value:.4f}</td><td></td></tr>"
-            if value is not None
-            else f"<tr><td>{label}</td><td>n/a</td><td></td></tr>"
+    sections: list[str] = []
+    titles = {
+        "synthetic_vs_random": ("Synthetic vs random", "Synthetic social + encounters"),
+        "observed_vs_random": ("Observed vs random", "Observed daily co-presence"),
+    }
+    for block_key, block in network_validation.items():
+        if not isinstance(block, dict):
+            continue
+        table_title, source_title = titles.get(block_key, (block_key.replace("_", " "), "Source network"))
+        rows = []
+        for key, label in NETWORK_METRIC_LABELS.items():
+            value = block.get("wasserstein", {}).get(key)
+            rows.append(
+                f"<tr><td>{label}</td><td>{value:.4f}</td><td></td></tr>"
+                if value is not None
+                else f"<tr><td>{label}</td><td>n/a</td><td></td></tr>"
+            )
+        source_network = block.get("source_network")
+        random_network = block.get("random_network")
+        source_plot = (
+            _plot_network_block(source_network, title=source_title).to_html(
+                full_html=False,
+                include_plotlyjs=True,
+            )
+            if isinstance(source_network, dict)
+            else ""
         )
-    random_network = network_validation.get("random_network")
-    random_plot = (
-        _plot_network_block(random_network, title="Degree-preserving random network").to_html(
-            full_html=False,
-            include_plotlyjs=True,
+        random_plot = (
+            _plot_network_block(random_network, title="Degree-preserving random network").to_html(
+                full_html=False,
+                include_plotlyjs=True,
+            )
+            if isinstance(random_network, dict)
+            else ""
         )
-        if isinstance(random_network, dict)
-        else ""
-    )
-    return f"""
+        sections.append(
+            f"""
   <div class="section-header">
-    <span>Random network validation</span>
+    <span>Random network validation &mdash; {table_title}</span>
   </div>
   <div class="metrics">
     <div>
-      <h2>Synthetic vs random Wasserstein</h2>
+      <h2>{table_title} Wasserstein</h2>
       <table>{"".join(rows)}</table>
     </div>
   </div>
-  <div class="charts">{random_plot}</div>"""
+  <div class="charts">{source_plot}{random_plot}</div>"""
+        )
+    return "".join(sections)
 
 
 def _visits_for_comparison(
@@ -1069,6 +1090,7 @@ def generate_comparison_report(
     road_nodes_df: Optional[pd.DataFrame] = None,
     road_edges_df: Optional[pd.DataFrame] = None,
     road_snap_max_distance_m: float = 750.0,
+    network_validation_config: Optional[object] = None,
 ) -> None:
     if sections is not None:
         unknown = set(sections) - ALL_REPORT_SECTIONS
@@ -1218,15 +1240,26 @@ def generate_comparison_report(
         metrics["wasserstein"]["trip_duration_min"] = w_trip
 
     network_validation = None
-    if synthetic_path is not None:
+    nv_cfg = network_validation_config
+    nv_enabled = bool(getattr(nv_cfg, "enabled", False)) if nv_cfg is not None else False
+    if synthetic_path is not None and nv_enabled:
         try:
-            network_validation, network_warnings = build_network_validation(synthetic_path)
+            network_validation, network_warnings = build_network_validation(
+                synthetic_path,
+                observed_df=real_df,
+                observed_uid_col=real_traj.uid_col,
+                observed_datetime_col=real_traj.datetime_col,
+                enabled=True,
+                synthetic_enabled=bool(getattr(nv_cfg, "synthetic_enabled", True)),
+                observed_enabled=bool(getattr(nv_cfg, "observed_enabled", False)),
+                location_mode=str(getattr(nv_cfg, "location_mode", "auto")),
+                location_col=getattr(nv_cfg, "location_col", None),
+                h3_resolution=int(getattr(nv_cfg, "h3_resolution", 9)),
+                max_group_size=int(getattr(nv_cfg, "max_group_size", 200)),
+                seed=int(getattr(nv_cfg, "random_seed", 42)),
+            )
             if network_validation is not None:
-                metrics["network_validation"] = {
-                    key: value
-                    for key, value in network_validation.items()
-                    if key not in {"synthetic_network", "random_network"}
-                }
+                metrics["network_validation"] = network_validation
             for warning in network_warnings:
                 typer.echo(f"Warning: network validation: {warning}", err=True)
         except Exception as exc:
