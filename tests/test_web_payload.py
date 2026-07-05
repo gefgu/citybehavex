@@ -4,6 +4,7 @@ import json
 
 import pandas as pd
 
+from citybehavex.reports.network_validation import encounters_sidecar_path
 from citybehavex.simulation.core import social_network_sidecar_path
 from web.backend.app.payload import (
     TIME_USE_CATEGORIES,
@@ -39,6 +40,63 @@ def test_load_social_network_sidecar_validates_and_returns_payload(tmp_path):
     sidecar.write_text(json.dumps(payload), encoding="utf-8")
 
     assert _load_social_network_sidecar(str(synthetic)) == payload
+
+
+def test_build_comparison_payload_includes_network_validation(monkeypatch, tmp_path):
+    synthetic = tmp_path / "synthetic.parquet"
+    pd.DataFrame(
+        {
+            "uid": ["u1", "u1"],
+            "datetime": pd.to_datetime(["2026-01-01 00:00", "2026-01-01 01:00"]),
+            "lat": [48.85, 48.86],
+            "lng": [2.35, 2.36],
+            "purpose": ["HOME", "WORK"],
+        }
+    ).to_parquet(synthetic, index=False)
+    social_network_sidecar_path(synthetic).write_text(
+        json.dumps(
+            {
+                "kind": "initial_profile_similarity",
+                "node_count": 3,
+                "edge_count": 2,
+                "layout": "profile_svd",
+                "directed": True,
+                "social_graph_k": 2,
+                "nodes": [[0.0, 0.0, 8.0, 1], [1.0, 0.0, 8.0, 2], [0.0, 1.0, 8.0, 3]],
+                "edges": [[0, 1, 1.0], [1, 2, 1.0]],
+                "degrees": [1, 2, 1],
+            }
+        ),
+        encoding="utf-8",
+    )
+    pd.DataFrame(
+        {
+            "agent": [0, 0, 1],
+            "contact": [1, 1, 2],
+            "tile": [1, 1, 2],
+            "ts": [1, 2, 1],
+        }
+    ).to_parquet(encounters_sidecar_path(synthetic), index=False)
+    monkeypatch.setattr(
+        "web.backend.app.payload._mobility_law_visits",
+        lambda *args, **kwargs: pd.DataFrame(
+            {
+                "user_id": ["u1"],
+                "timestamp": pd.to_datetime(["2026-01-01 00:00"]),
+                "location_id": ["a"],
+                "lat": [48.85],
+                "lng": [2.35],
+            }
+        ),
+    )
+
+    payload = build_comparison_payload(str(synthetic), None, "observed")
+
+    validation = payload["network_validation"]
+    assert validation is not None
+    assert validation["comparison"] == "synthetic_vs_random"
+    assert validation["distributions"]["synthetic"]["edge_persistence"]["count"] == 2
+    assert validation["random_network"]["kind"] == "degree_preserving_rnd"
 
 
 def test_build_comparison_payload_groups_activity_and_micro_usage(monkeypatch, tmp_path):

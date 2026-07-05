@@ -69,6 +69,7 @@ from citybehavex.metrics import (
     jump_lengths_km as road_jump_lengths_km,
     radius_of_gyration_km as road_radius_of_gyration_km,
 )
+from citybehavex.reports.network_validation import build_network_validation
 from citybehavex.simulation.core import social_network_sidecar_path
 
 # STVD bivariate palette (volume-diff bin x peak-shift bin), matching
@@ -1025,6 +1026,10 @@ def build_comparison_payload(
 
     # ---- social network --------------------------------------------------- #
     social_network = guard("social_network", lambda: _load_social_network_sidecar(synthetic_path))
+    network_validation = guard("network_validation", lambda: build_network_validation(synthetic_path))
+    if isinstance(network_validation, tuple):
+        network_validation, network_warnings = network_validation
+        warnings.extend(f"network_validation: {warning}" for warning in network_warnings)
 
     return {
         "mode": mode,
@@ -1039,6 +1044,7 @@ def build_comparison_payload(
         "motifs": motifs,
         "stvd": stvd,
         "social_network": social_network,
+        "network_validation": network_validation,
         "warnings": warnings,
     }
 

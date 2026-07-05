@@ -218,6 +218,7 @@ def test_charts_endpoint_allows_missing_observed_path(monkeypatch, tmp_path):
             "motifs": None,
             "stvd": None,
             "social_network": None,
+            "network_validation": None,
             "warnings": [],
         }
 

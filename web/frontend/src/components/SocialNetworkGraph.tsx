@@ -4,7 +4,7 @@ import type { SocialNetworkBlock } from "../api";
 import { EChart } from "../charts/EChart";
 import { COLORS } from "../charts/theme";
 
-export function SocialNetworkGraph({ block }: { block: SocialNetworkBlock }) {
+export function SocialNetworkGraph({ block, title }: { block: SocialNetworkBlock; title?: string }) {
   const option = useMemo<EChartsOption>(() => {
     const data = block.nodes.map((node, index) => ({
       id: String(index),
@@ -81,6 +81,7 @@ export function SocialNetworkGraph({ block }: { block: SocialNetworkBlock }) {
 
   return (
     <div>
+      {title && <h4>{title}</h4>}
       <div className="network-meta">
         <span>{block.node_count.toLocaleString()} nodes</span>
         <span>{block.edge_count.toLocaleString()} edges</span>

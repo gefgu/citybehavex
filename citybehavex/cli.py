@@ -149,6 +149,7 @@ def report(
     traj = load_trajectory(synthetic_path)
     generate_comparison_report(
         traj=traj,
+        synthetic_path=synthetic_path,
         real_path=real_path,
         observed_label=label,
         output_path=output,

@@ -50,6 +50,12 @@ const ECDF_TITLES: Record<string, string> = {
   trip_duration: "Trip duration",
 };
 
+const NETWORK_VALIDATION_TITLES: Record<string, string> = {
+  clustering_coefficient: "Clustering coefficient",
+  edge_persistence: "Edge persistence",
+  topological_overlap: "Topological overlap",
+};
+
 type FilterChoice = { key: string; label: string };
 
 const DAY_FILTERS: FilterChoice[] = [
@@ -137,6 +143,39 @@ function FilteredMetricTable({
               <td className="unit">{m.unit ?? unit ?? ""}</td>
             </tr>
           ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function NetworkValidationTable({
+  validation,
+}: {
+  validation: NonNullable<ChartPayload["network_validation"]>;
+}) {
+  return (
+    <div>
+      <h4>Synthetic vs random Wasserstein</h4>
+      <table className="metrics">
+        <tbody>
+          {Object.entries(NETWORK_VALIDATION_TITLES).map(([key, label]) => {
+            const value = validation.wasserstein[key as keyof typeof validation.wasserstein];
+            const syn = validation.distributions.synthetic[key];
+            const rnd = validation.distributions.random[key];
+            return (
+              <tr key={key}>
+                <td>
+                  {label}
+                  <span className="metric-filter">
+                    synthetic n={syn?.count ?? 0} · random n={rnd?.count ?? 0}
+                  </span>
+                </td>
+                <td className="value">{value == null ? "n/a" : value.toFixed(4)}</td>
+                <td className="unit" />
+              </tr>
+            );
+          })}
         </tbody>
       </table>
     </div>
@@ -474,8 +513,24 @@ export function Charts() {
       )}
 
       <SectionHeading title="Social network" />
-      {payload.social_network ? (
-        <SocialNetworkGraph block={payload.social_network} />
+      {payload.network_validation ? (
+        <>
+          <div className="metric-tables">
+            <NetworkValidationTable validation={payload.network_validation} />
+          </div>
+          <div className="network-validation-grid">
+            <SocialNetworkGraph
+              block={payload.network_validation.synthetic_network}
+              title="Synthetic social + encounters"
+            />
+            <SocialNetworkGraph
+              block={payload.network_validation.random_network}
+              title="Degree-preserving random"
+            />
+          </div>
+        </>
+      ) : payload.social_network ? (
+        <SocialNetworkGraph block={payload.social_network} title="Initial social graph" />
       ) : (
         <div className="network-empty">
           No social network sidecar found for this run. Re-run the simulation with the latest code,
