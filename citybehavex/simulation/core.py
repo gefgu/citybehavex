@@ -164,6 +164,96 @@ def _build_moving_frame(
     )
 
 
+def _build_encounters_frame(
+    agent: np.ndarray,
+    contact: np.ndarray,
+    tile: np.ndarray,
+    ts: np.ndarray,
+) -> pd.DataFrame:
+    """Build the one-row-per-encounter `encounters` frame from the raw arrays
+    the Rust core returns -- shared by the final one-shot build and the
+    per-day streaming callback so both produce identically-shaped chunks."""
+    return pd.DataFrame(
+        {
+            "agent": np.asarray(agent, dtype=np.int64),
+            "contact": np.asarray(contact, dtype=np.int64),
+            "tile": np.asarray(tile, dtype=np.int64),
+            "ts": np.asarray(ts, dtype=np.int64),
+        }
+    )
+
+
+def _build_activity_frame(
+    agent: np.ndarray,
+    stop_id: np.ndarray,
+    seq: np.ndarray,
+    activity: np.ndarray,
+    arrival: np.ndarray,
+    departure: np.ndarray,
+) -> pd.DataFrame:
+    """Build the one-row-per-micro-activity `activities` frame from the raw
+    arrays the Rust core returns -- shared by the final one-shot build and
+    the per-day streaming callback so both produce identically-shaped
+    chunks."""
+    arrival_arr = np.asarray(arrival, dtype=np.int64)
+    departure_arr = np.asarray(departure, dtype=np.int64)
+    return pd.DataFrame(
+        {
+            "uid": np.asarray(agent, dtype=np.int64),
+            "stop_id": np.asarray(stop_id, dtype=np.int64),
+            "seq": np.asarray(seq, dtype=np.int32),
+            "activity": np.asarray(activity, dtype=np.int64),
+            "arrival": arrival_arr.astype("datetime64[s]"),
+            "departure": departure_arr.astype("datetime64[s]"),
+        }
+    )
+
+
+def _build_trip_frame(
+    agent: np.ndarray,
+    loc_id: np.ndarray,
+    arrival: np.ndarray,
+    departure: np.ndarray,
+    duration: np.ndarray,
+    stop_id: np.ndarray,
+    abstract_loc: np.ndarray,
+    lats: np.ndarray,
+    lngs: np.ndarray,
+) -> pd.DataFrame:
+    """Build the one-row-per-stop `trajectories` frame from the raw arrays the
+    Rust core returns. The Rust side stores a `loc_id` (tessellation row
+    index) instead of a lat/lng copy per stop to keep the per-row footprint
+    small; the join back to actual coordinates happens here, against the
+    small O(n_locations) `lats`/`lngs` tables already built from
+    `tessellation_df`."""
+    loc_idx = np.asarray(loc_id, dtype=np.int64)
+    arrival_arr = np.asarray(arrival, dtype=np.int64)
+    departure_arr = np.asarray(departure, dtype=np.int64)
+    # Purpose comes straight from the abstract-location code that drove each
+    # stop in the Rust engine (0=HOME, 1=WORK, everything else=OTHER) --
+    # matches citybehavex.schedules.ddcrp._PURPOSE_CODE exactly, so it always
+    # reflects the actual routing decision instead of being re-derived from
+    # a stop's (possibly slot-shifted) arrival timestamp.
+    abstract_loc_arr = np.asarray(abstract_loc, dtype=np.int32)
+    purpose = np.where(
+        abstract_loc_arr == 0, "HOME", np.where(abstract_loc_arr == 1, "WORK", "OTHER")
+    )
+    return pd.DataFrame(
+        {
+            "uid": np.asarray(agent, dtype=np.int64),
+            "stop_id": np.asarray(stop_id, dtype=np.int64),
+            "datetime": arrival_arr.astype("datetime64[s]"),
+            "lat": lats[loc_idx],
+            "lng": lngs[loc_idx],
+            "arrival": arrival_arr.astype("datetime64[s]"),
+            "departure": departure_arr.astype("datetime64[s]"),
+            "trip_duration_minutes": np.asarray(duration, dtype=np.float64) / 60.0,
+            "dwell_minutes": (departure_arr - arrival_arr) / 60.0,
+            "purpose": purpose,
+        }
+    )
+
+
 def simulate_agents(
     tessellation_df: pd.DataFrame,
     relevance_column: str | None,
@@ -207,6 +297,9 @@ def simulate_agents(
     return_social_graph: bool = False,
     social_node_profiles: list[str] | None = None,
     on_day_flush: Callable[[pd.DataFrame], None] | None = None,
+    on_encounter_day_flush: Callable[[pd.DataFrame], None] | None = None,
+    on_trip_day_flush: Callable[[pd.DataFrame], None] | None = None,
+    on_activity_day_flush: Callable[[pd.DataFrame], None] | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame] | tuple[
     pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame, SocialGraphArtifact
 ]:
@@ -333,10 +426,34 @@ def simulate_agents(
         def rust_on_day_flush(agent, dest_stop_id, seq, lat, lng, t):
             on_day_flush(_build_moving_frame(agent, dest_stop_id, seq, lat, lng, t))
 
+    rust_on_encounter_day_flush = None
+    if on_encounter_day_flush is not None:
+
+        def rust_on_encounter_day_flush(agent, contact, tile, ts):
+            on_encounter_day_flush(_build_encounters_frame(agent, contact, tile, ts))
+
+    rust_on_trip_day_flush = None
+    if on_trip_day_flush is not None:
+
+        def rust_on_trip_day_flush(agent, loc_id, arrival, departure, duration, stop_id, abstract_loc):
+            on_trip_day_flush(
+                _build_trip_frame(
+                    agent, loc_id, arrival, departure, duration, stop_id, abstract_loc, lats, lngs
+                )
+            )
+
+    rust_on_activity_day_flush = None
+    if on_activity_day_flush is not None:
+
+        def rust_on_activity_day_flush(agent, stop_id, seq, activity, arrival, departure):
+            on_activity_day_flush(
+                _build_activity_frame(agent, stop_id, seq, activity, arrival, departure)
+            )
+
     start = time.perf_counter()
     (
         (
-            agent_ids, out_lats, out_lngs, arrival, departure, trip_dur,
+            agent_ids, loc_id, arrival, departure, trip_dur,
             enc_agent, enc_contact, enc_tile, enc_ts, stop_abstract_loc,
         ),
         (
@@ -392,60 +509,24 @@ def simulate_agents(
         float(gravity_origin_exponent),
         float(gravity_destination_exponent),
         rust_on_day_flush,
+        rust_on_encounter_day_flush,
+        rust_on_trip_day_flush,
+        rust_on_activity_day_flush,
     )
     elapsed = time.perf_counter() - start
     if timing is not None:
         timing.seconds += elapsed
 
-    arrival = np.asarray(arrival, dtype=np.int64)
-    departure = np.asarray(departure, dtype=np.int64)
-    trip_dur = np.asarray(trip_dur, dtype=float)
-    # Purpose comes straight from the abstract-location code that drove each
-    # stop in the Rust engine (0=HOME, 1=WORK, everything else=OTHER) --
-    # matches citybehavex.schedules.ddcrp._PURPOSE_CODE exactly, so it always
-    # reflects the actual routing decision instead of being re-derived from
-    # a stop's (possibly slot-shifted) arrival timestamp.
-    abstract_loc_arr = np.asarray(stop_abstract_loc, dtype=np.int32)
-    purpose = np.where(
-        abstract_loc_arr == 0, "HOME", np.where(abstract_loc_arr == 1, "WORK", "OTHER")
-    )
-    trajectories = pd.DataFrame(
-        {
-            "uid": np.asarray(agent_ids, dtype=np.int64),
-            "stop_id": np.asarray(stop_id, dtype=np.int64),
-            "datetime": arrival.astype("datetime64[s]"),
-            "lat": np.asarray(out_lats, dtype=float),
-            "lng": np.asarray(out_lngs, dtype=float),
-            "arrival": arrival.astype("datetime64[s]"),
-            "departure": departure.astype("datetime64[s]"),
-            "trip_duration_minutes": trip_dur / 60.0,
-            "dwell_minutes": (departure - arrival) / 60.0,
-            "purpose": purpose,
-        }
+    trajectories = _build_trip_frame(
+        agent_ids, loc_id, arrival, departure, trip_dur, stop_id, stop_abstract_loc, lats, lngs
     )
 
-    encounters = pd.DataFrame(
-        {
-            "agent": np.asarray(enc_agent, dtype=np.int64),
-            "contact": np.asarray(enc_contact, dtype=np.int64),
-            "tile": np.asarray(enc_tile, dtype=np.int64),
-            "ts": np.asarray(enc_ts, dtype=np.int64),
-        }
-    )
+    encounters = _build_encounters_frame(enc_agent, enc_contact, enc_tile, enc_ts)
 
     moving = _build_moving_frame(path_agent, path_stop_id, path_seq, path_lat, path_lng, path_t)
 
-    act_arrival_arr = np.asarray(act_arrival, dtype=np.int64)
-    act_departure_arr = np.asarray(act_departure, dtype=np.int64)
-    activities = pd.DataFrame(
-        {
-            "uid": np.asarray(act_agent, dtype=np.int64),
-            "stop_id": np.asarray(act_stop_id, dtype=np.int64),
-            "seq": np.asarray(act_seq, dtype=np.int32),
-            "activity": np.asarray(act_activity, dtype=np.int64),
-            "arrival": act_arrival_arr.astype("datetime64[s]"),
-            "departure": act_departure_arr.astype("datetime64[s]"),
-        }
+    activities = _build_activity_frame(
+        act_agent, act_stop_id, act_seq, act_activity, act_arrival, act_departure
     )
 
     if social_graph_artifact is not None:

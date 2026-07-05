@@ -36,15 +36,13 @@ struct FallbackCounts {
     disconnected: i64,
 }
 
-struct TripAppendContext<'a> {
+struct TripAppendContext {
     agent_idx: usize,
     next_loc: usize,
     /// Diary abstract-location code that triggered this relocation (0=HOME,
     /// 1=WORK, 2+=OTHER); recorded on the new stop so purpose can be read
     /// directly off it instead of re-derived from arrival timestamps.
     abstract_loc: i32,
-    lats: &'a [f64],
-    lngs: &'a [f64],
     departure: i64,
     max_leg_waypoints: usize,
 }
@@ -153,29 +151,30 @@ fn route_leg(
 /// (`visit`/`current_location`), and push its stop row. Returns
 /// `(departure, arrival, stop_id)`.
 fn push_stop_record(
-    ctx: &TripAppendContext<'_>,
+    ctx: &TripAppendContext,
     dur_s: i64,
     output: &mut TripOutputBuffers,
     agents: &mut [AgentState],
-) -> (i64, i64, i64) {
+    next_stop_id: &mut u32,
+) -> (i64, i64, u32) {
     let prev_idx = output.last_output_idx[ctx.agent_idx];
-    let departure = ctx.departure.max(output.arrival[prev_idx]);
+    let departure = ctx.departure.max(output.arrival[prev_idx] as i64);
     let arrival = departure + dur_s;
-    output.departure[prev_idx] = departure;
+    output.departure[prev_idx] = departure as i32;
 
     agents[ctx.agent_idx].visit(ctx.next_loc);
     agents[ctx.agent_idx].current_location = ctx.next_loc;
 
-    let stop_id = output.agents.len() as i64;
+    let stop_id = *next_stop_id;
+    *next_stop_id += 1;
     output.last_output_idx[ctx.agent_idx] = output.agents.len();
-    output.agents.push(ctx.agent_idx as i64 + 1);
-    output.lats.push(ctx.lats[ctx.next_loc]);
-    output.lngs.push(ctx.lngs[ctx.next_loc]);
-    output.arrival.push(arrival);
-    output.departure.push(arrival);
-    output.duration.push(dur_s as f64);
+    output.agents.push(ctx.agent_idx as u32 + 1);
+    output.loc_id.push(ctx.next_loc as u32);
+    output.arrival.push(arrival as i32);
+    output.departure.push(arrival as i32);
+    output.duration.push(dur_s.max(0) as u32);
     output.stop_id.push(stop_id);
-    output.abstract_loc.push(ctx.abstract_loc);
+    output.abstract_loc.push(ctx.abstract_loc as u8);
 
     (departure, arrival, stop_id)
 }
@@ -186,8 +185,8 @@ fn push_stop_record(
 /// push the leg.
 #[allow(clippy::too_many_arguments)]
 fn push_path_waypoints(
-    ctx: &TripAppendContext<'_>,
-    stop_id: i64,
+    ctx: &TripAppendContext,
+    stop_id: u32,
     departure: i64,
     dur_s: i64,
     wp_lats: &[f64],
@@ -206,7 +205,7 @@ fn push_path_waypoints(
     };
     let (sub_lats, sub_lngs, sub_times) =
         subsample_waypoints(wp_lats, wp_lngs, &times, ctx.max_leg_waypoints);
-    let agent_id = ctx.agent_idx as i64 + 1;
+    let agent_id = ctx.agent_idx as u32 + 1;
     paths.push_leg(agent_id, stop_id, &sub_lats, &sub_lngs, &sub_times);
 }
 
@@ -217,7 +216,7 @@ fn push_path_waypoints(
 /// when the old stop/activity closed, `arrival` is when the new stop opened
 /// (and thus when its first micro-activity, if any, starts).
 fn append_trip_record(
-    ctx: TripAppendContext<'_>,
+    ctx: TripAppendContext,
     dur_s: i64,
     wp_lats: &[f64],
     wp_lngs: &[f64],
@@ -225,8 +224,9 @@ fn append_trip_record(
     output: &mut TripOutputBuffers,
     agents: &mut [AgentState],
     paths: &mut RoadPathOutputBuffers,
+    next_stop_id: &mut u32,
 ) -> (i64, i64) {
-    let (departure, arrival, stop_id) = push_stop_record(&ctx, dur_s, output, agents);
+    let (departure, arrival, stop_id) = push_stop_record(&ctx, dur_s, output, agents, next_stop_id);
     push_path_waypoints(
         &ctx, stop_id, departure, dur_s, wp_lats, wp_lngs, wp_cum_ds, paths,
     );
@@ -242,6 +242,12 @@ fn validate_locations(locations: &LocationInputs<'_>) -> Result<usize, String> {
     ])?;
     if n_locations < 2 {
         return Err("need at least 2 locations".to_string());
+    }
+    if n_locations > u32::MAX as usize {
+        return Err(format!(
+            "n_locations={} exceeds u32::MAX; location indices are stored as u32",
+            n_locations
+        ));
     }
     if !locations.distances.is_empty() && locations.distances.len() != n_locations * n_locations {
         return Err(format!(
@@ -335,6 +341,12 @@ fn validate_per_agent_ranges(inputs: &CoreInputs<'_>, n_agents: usize) -> Result
 }
 
 fn validate_inputs(inputs: &CoreInputs<'_>) -> Result<usize, String> {
+    if inputs.params.n_agents > u32::MAX as usize {
+        return Err(format!(
+            "n_agents={} exceeds u32::MAX; agent ids are stored as u32",
+            inputs.params.n_agents
+        ));
+    }
     let n_locations = validate_locations(&inputs.locations)?;
     validate_social_graph_lengths(&inputs.social_graph, inputs.params.n_agents)?;
     validate_diary_lengths(&inputs.diary, inputs.params.n_agents)?;
@@ -363,10 +375,8 @@ fn build_od_rows<'a>(
     }
 }
 
-fn new_agent_states(n_agents: usize, n_locations: usize) -> Vec<AgentState> {
-    (0..n_agents)
-        .map(|_| AgentState::new(n_locations))
-        .collect()
+fn new_agent_states(n_agents: usize) -> Vec<AgentState> {
+    (0..n_agents).map(|_| AgentState::new()).collect()
 }
 
 fn new_agent_par_data(inputs: &CoreInputs<'_>, master_seed: u64) -> Vec<AgentParData> {
@@ -401,7 +411,6 @@ fn new_agent_par_data(inputs: &CoreInputs<'_>, master_seed: u64) -> Vec<AgentPar
                 activity_counts: vec![0u32; inputs.activities.act_dur_mu.len()],
                 pending_departure: 0,
                 activity_seq: 0,
-                explore_cache: None,
             }
         })
         .collect()
@@ -513,7 +522,6 @@ fn resolve_agent_moves(
                     diary_abs_locs: inputs.diary.abstract_locations,
                     scratch: &mut data.scratch,
                     encounters: &mut data.encounters,
-                    explore_cache: &mut data.explore_cache,
                 }),
             };
             data.active_abs_loc = abstract_loc;
@@ -555,7 +563,7 @@ fn collect_sorted_moves(
 }
 
 fn current_stop_abstract_loc(a: usize, output: &TripOutputBuffers) -> i32 {
-    output.abstract_loc[output.last_output_idx[a]]
+    output.abstract_loc[output.last_output_idx[a]] as i32
 }
 
 /// Samples and opens the next micro-activity for the currently-open stop.
@@ -588,7 +596,7 @@ fn start_activity_sample(
         scratch,
     );
     let new_idx = activities.push(a, current_stop_id, seq, arrival);
-    activities.activity[new_idx] = act_idx;
+    activities.activity[new_idx] = act_idx as u16;
     *pending_departure = arrival + dur;
 }
 
@@ -606,17 +614,17 @@ fn fill_activities_until(
 ) {
     loop {
         let last_idx = activities.last_idx[a];
-        let last_arrival = activities.arrival[last_idx];
+        let last_arrival = activities.arrival[last_idx] as i64;
         let deadline = until.max(last_arrival);
         let pending_departure = par_data[a].pending_departure;
         if pending_departure <= 0 || pending_departure >= deadline {
-            activities.departure[last_idx] = deadline;
+            activities.departure[last_idx] = deadline as i32;
             par_data[a].pending_departure = 0;
             break;
         }
 
         let next_arrival = pending_departure.max(last_arrival);
-        activities.departure[last_idx] = next_arrival;
+        activities.departure[last_idx] = next_arrival as i32;
         start_activity_sample(
             a,
             abstract_loc,
@@ -649,6 +657,7 @@ fn commit_one_move(
     fallback: &mut FallbackCounts,
     inputs: &CoreInputs<'_>,
     activities_on: bool,
+    next_stop_id: &mut u32,
 ) {
     let cur_loc = agents[a].current_location;
     let is_new_location = loc != cur_loc;
@@ -665,10 +674,10 @@ fn commit_one_move(
     // micro-activity's arrival when activities are on (which may be later
     // than the stop's own arrival, if this stop already had other
     // activities sampled into it), else the stop's arrival.
-    let prev_arrival = if activities_on {
-        activities.arrival[activities.last_idx[a]]
+    let prev_arrival: i64 = if activities_on {
+        activities.arrival[activities.last_idx[a]] as i64
     } else {
-        output.arrival[output.last_output_idx[a]]
+        output.arrival[output.last_output_idx[a]] as i64
     };
 
     if is_new_location {
@@ -710,8 +719,6 @@ fn commit_one_move(
                 agent_idx: a,
                 next_loc: loc,
                 abstract_loc,
-                lats: inputs.locations.lats,
-                lngs: inputs.locations.lngs,
                 departure,
                 max_leg_waypoints: inputs.road_network.max_leg_waypoints,
             },
@@ -722,6 +729,7 @@ fn commit_one_move(
             output,
             agents,
             paths,
+            next_stop_id,
         );
         par_data[a].activity_seq = 0;
         if activities_on {
@@ -776,6 +784,7 @@ fn commit_moves(
     fallback: &mut FallbackCounts,
     inputs: &CoreInputs<'_>,
     activities_on: bool,
+    next_stop_id: &mut u32,
 ) {
     for &(ts, a, loc, abstract_loc) in commit_buf {
         commit_one_move(
@@ -793,6 +802,7 @@ fn commit_moves(
             fallback,
             inputs,
             activities_on,
+            next_stop_id,
         );
     }
 }
@@ -820,13 +830,13 @@ fn update_all_edge_sims(
 
 fn finalize_open_stops(output: &mut TripOutputBuffers, end_ts: i64) {
     for &idx in &output.last_output_idx {
-        output.departure[idx] = end_ts.max(output.arrival[idx]);
+        output.departure[idx] = end_ts.max(output.arrival[idx] as i64) as i32;
     }
 }
 
 fn finalize_open_activities(activities: &mut ActivityOutputBuffers, end_ts: i64) {
     for &idx in &activities.last_idx {
-        activities.departure[idx] = end_ts.max(activities.arrival[idx]);
+        activities.departure[idx] = end_ts.max(activities.arrival[idx] as i64) as i32;
     }
 }
 
@@ -841,25 +851,31 @@ fn report_road_fallbacks(road_network: &RoadNetworkInputs<'_>, fallback: &Fallba
     }
 }
 
-fn flatten_encounters(par_data: &[AgentParData]) -> (Vec<i64>, Vec<i64>, Vec<i64>, Vec<i64>) {
-    let mut enc_agent: Vec<i64> = Vec::new();
-    let mut enc_contact: Vec<i64> = Vec::new();
-    let mut enc_tile: Vec<i64> = Vec::new();
-    let mut enc_ts: Vec<i64> = Vec::new();
+fn flatten_encounters(par_data: &[AgentParData]) -> (Vec<u32>, Vec<u32>, Vec<u32>, Vec<i32>) {
+    let mut enc_agent: Vec<u32> = Vec::new();
+    let mut enc_contact: Vec<u32> = Vec::new();
+    let mut enc_tile: Vec<u32> = Vec::new();
+    let mut enc_ts: Vec<i32> = Vec::new();
     for data in par_data {
         for e in &data.encounters {
-            enc_agent.push(e.agent as i64 + 1);
-            enc_contact.push(e.contact as i64 + 1);
-            enc_tile.push(e.tile as i64);
+            enc_agent.push(e.agent + 1);
+            enc_contact.push(e.contact + 1);
+            enc_tile.push(e.tile);
             enc_ts.push(e.ts);
         }
     }
     (enc_agent, enc_contact, enc_tile, enc_ts)
 }
 
+#[allow(clippy::type_complexity)]
 pub(crate) fn simulate(
     inputs: CoreInputs<'_>,
     mut on_day_flush: Option<&mut dyn FnMut(RoadPathOutputBuffers) -> Result<(), String>>,
+    mut on_encounter_day_flush: Option<
+        &mut dyn FnMut((Vec<u32>, Vec<u32>, Vec<u32>, Vec<i32>)) -> Result<(), String>,
+    >,
+    mut on_trip_day_flush: Option<&mut dyn FnMut(TripOutputBuffers) -> Result<(), String>>,
+    mut on_activity_day_flush: Option<&mut dyn FnMut(ActivityOutputBuffers) -> Result<(), String>>,
 ) -> Result<SimulationOutput, String> {
     let n_locations = validate_inputs(&inputs)?;
     if inputs.params.n_agents == 0 {
@@ -869,16 +885,18 @@ pub(crate) fn simulate(
     let master_seed = inputs.params.master_seed.unwrap_or_else(rand::random);
     let od_rows = build_od_rows(&inputs.locations, &inputs.params);
 
-    let mut agents = new_agent_states(inputs.params.n_agents, n_locations);
+    let mut agents = new_agent_states(inputs.params.n_agents);
     let mut par_data = new_agent_par_data(&inputs, master_seed);
     init_agent_locations(&mut agents, &mut par_data, &inputs, n_locations);
 
-    let mut output = TripOutputBuffers::with_initial_agents(
-        &agents,
-        inputs.locations.lats,
-        inputs.locations.lngs,
-        inputs.params.start_ts,
-    );
+    // Monotonic stop id counter, decoupled from `TripOutputBuffers`'s array
+    // length so day-boundary compaction (which physically removes closed
+    // rows) never causes id reuse or collisions. Lives outside the struct
+    // (not a field) so it can't be silently reset when the struct is
+    // replaced during compaction (`*self = residual` in `take_day_chunk`).
+    let mut next_stop_id: u32 = 0;
+    let mut output =
+        TripOutputBuffers::with_initial_agents(&agents, inputs.params.start_ts, &mut next_stop_id);
     let mut activities = ActivityOutputBuffers::with_capacity(inputs.params.n_agents);
     if activities_on {
         sample_initial_activities(&inputs, &mut par_data, &output, &mut activities);
@@ -918,6 +936,27 @@ pub(crate) fn simulate(
                     flush(chunk)?;
                 }
             }
+            if let Some(flush) = on_encounter_day_flush.as_deref_mut() {
+                let chunk = flatten_encounters(&par_data);
+                if !chunk.0.is_empty() {
+                    flush(chunk)?;
+                }
+                for data in par_data.iter_mut() {
+                    data.encounters.clear();
+                }
+            }
+            if let Some(flush) = on_trip_day_flush.as_deref_mut() {
+                let chunk = output.take_day_chunk();
+                if !chunk.agents.is_empty() {
+                    flush(chunk)?;
+                }
+            }
+            if let Some(flush) = on_activity_day_flush.as_deref_mut() {
+                let chunk = activities.take_day_chunk();
+                if !chunk.agent.is_empty() {
+                    flush(chunk)?;
+                }
+            }
             current_day = simulated_day;
             day_start_instant = std::time::Instant::now();
         }
@@ -946,6 +985,7 @@ pub(crate) fn simulate(
             &mut fallback,
             &inputs,
             activities_on,
+            &mut next_stop_id,
         );
         update_all_edge_sims(
             &mut par_data,

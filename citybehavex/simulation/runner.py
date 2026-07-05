@@ -851,7 +851,7 @@ def _run_simulation_core(
     profiles: Optional[list[AgentProfile]] = None,
     profile_embeddings: Optional[np.ndarray] = None,
     output_path: Optional[str] = None,
-) -> tuple[skmob2.TrajDataFrame, Optional[str]]:
+) -> tuple[skmob2.TrajDataFrame, Optional[str], bool]:
     granularity = config.simulation.granularity_minutes
     typer.echo(
         f"Running simulation core: {config.simulation.agents} agents x {config.simulation.days} days "
@@ -905,6 +905,28 @@ def _run_simulation_core(
     moving_writer = _IncrementalParquetWriter(moving_path) if stream_moving else None
     on_day_flush = moving_writer.write if moving_writer is not None else None
 
+    enc_path = base.replace(".parquet", "_encounters.parquet")
+    stream_encounters = config.simulation.stream_output
+    encounters_writer = _IncrementalParquetWriter(enc_path) if stream_encounters else None
+    on_encounter_day_flush = encounters_writer.write if encounters_writer is not None else None
+
+    # Streaming the main stop table means this function -- not run_simulation
+    # -- owns writing `base` incrementally; run_simulation skips its own
+    # to_parquet call in that case (nothing else consumes the returned
+    # TrajDataFrame's `.df`, confirmed via callers).
+    stream_trip = config.simulation.stream_output
+    trip_writer = _IncrementalParquetWriter(base) if stream_trip else None
+    on_trip_day_flush = None
+    if trip_writer is not None:
+
+        def on_trip_day_flush(chunk_df):
+            trip_writer.write(_merge_tessellation_metadata(chunk_df, tessellation_df, ["tile_id", "category"]))
+
+    act_path = base.replace(".parquet", "_activities.parquet")
+    stream_activities = config.simulation.stream_output
+    activities_writer = _IncrementalParquetWriter(act_path) if stream_activities else None
+    on_activity_day_flush = activities_writer.write if activities_writer is not None else None
+
     profile_types = [p.job for p in profiles] if profiles is not None else None
     df, encounters, moving, activities, social_graph = simulate_agents(
         tessellation_df,
@@ -940,6 +962,9 @@ def _run_simulation_core(
         return_social_graph=True,
         social_node_profiles=profile_types,
         on_day_flush=on_day_flush,
+        on_encounter_day_flush=on_encounter_day_flush,
+        on_trip_day_flush=on_trip_day_flush,
+        on_activity_day_flush=on_activity_day_flush,
         **road_kwargs,
     )
     social_path = social_network_sidecar_path(base)
@@ -948,8 +973,16 @@ def _run_simulation_core(
         f"Saved social network ({social_graph.metadata['node_count']:,} nodes, "
         f"{social_graph.metadata['edge_count']:,} edges) -> {social_path}"
     )
-    if len(encounters) > 0:
-        enc_path = base.replace(".parquet", "_encounters.parquet")
+    if encounters_writer is not None:
+        # `encounters` here is only the tail since the last flush -- earlier
+        # days were already streamed to disk via on_encounter_day_flush.
+        encounters_writer.write(encounters)
+        encounters_writer.close()
+        if encounters_writer.rows_written > 0:
+            typer.echo(
+                f"Saved {encounters_writer.rows_written:,} encounters (streamed) -> {enc_path}"
+            )
+    elif len(encounters) > 0:
         encounters.to_parquet(enc_path, index=False)
         typer.echo(f"Saved {len(encounters):,} encounters -> {enc_path}")
     if moving_writer is not None:
@@ -962,15 +995,32 @@ def _run_simulation_core(
     elif rn.enabled and len(moving) > 0:
         moving.to_parquet(moving_path, index=False)
         typer.echo(f"Saved {len(moving):,} waypoints -> {moving_path}")
-    if config.activities.enabled and len(activities) > 0:
-        act_path = base.replace(".parquet", "_activities.parquet")
+    if activities_writer is not None:
+        # `activities` here is only the tail since the last flush -- earlier
+        # days were already streamed to disk via on_activity_day_flush.
+        activities_writer.write(activities)
+        activities_writer.close()
+        if activities_writer.rows_written > 0:
+            typer.echo(f"Saved {activities_writer.rows_written:,} activities (streamed) -> {act_path}")
+    elif config.activities.enabled and len(activities) > 0:
         activities.to_parquet(act_path, index=False)
         typer.echo(f"Saved {len(activities):,} activities -> {act_path}")
+
     df = _merge_tessellation_metadata(df, tessellation_df, ["tile_id", "category"])
+    if trip_writer is not None:
+        # `df` here is only the tail (the final, possibly-partial day plus
+        # every agent's still-open stop) -- earlier days were already
+        # streamed to disk via on_trip_day_flush.
+        trip_writer.write(df)
+        trip_writer.close()
+        typer.echo(
+            f"Saved {trip_writer.rows_written:,} records "
+            f"({config.simulation.agents} agents) -> {base}"
+        )
     traj = skmob2.TrajDataFrame(
         df, datetime_col="datetime", lat_col="lat", lng_col="lng", uid_col="uid"
     )
-    return traj, "purpose"
+    return traj, "purpose", trip_writer is not None
 
 
 def maybe_build_profiles(
@@ -1016,6 +1066,7 @@ def run_simulation(config: CityBehavExConfig) -> skmob2.TrajDataFrame:
         traj, synth_activity_col = _run_density_epr(
             config, tessellation_df, relevance_column, start_date, end_date
         )
+        already_written = False
     else:
         diary_batches, llm_stats, llm_seconds = diary_result
         cache_text = (
@@ -1036,7 +1087,7 @@ def run_simulation(config: CityBehavExConfig) -> skmob2.TrajDataFrame:
             f"Saved ddCRP diary selection state "
             f"({config.simulation.agents} agents x {len(bank.diaries)} diaries) -> {crp_path}"
         )
-        traj, synth_activity_col = _run_simulation_core(
+        traj, synth_activity_col, already_written = _run_simulation_core(
             config,
             tessellation_df,
             relevance_column,
@@ -1050,11 +1101,12 @@ def run_simulation(config: CityBehavExConfig) -> skmob2.TrajDataFrame:
         )
         typer.echo(f"Rust simulation phase: {core_timing.seconds:.2f}s")
 
-    traj.df.to_parquet(stamped_output, index=False)
-    typer.echo(
-        f"Saved {len(traj.df):,} records "
-        f"({traj.df[traj.uid_col].nunique()} agents) -> {stamped_output}"
-    )
+    if not already_written:
+        traj.df.to_parquet(stamped_output, index=False)
+        typer.echo(
+            f"Saved {len(traj.df):,} records "
+            f"({traj.df[traj.uid_col].nunique()} agents) -> {stamped_output}"
+        )
 
     if config.comparison.path:
         typer.echo("Comparison data configured; view this run in the CityBehavEx web UI.")

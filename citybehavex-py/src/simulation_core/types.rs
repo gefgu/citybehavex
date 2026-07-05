@@ -1,4 +1,5 @@
 use rand_xoshiro::Xoshiro256PlusPlus;
+use std::collections::HashMap;
 
 /// Abstract location code reserved for WORK episodes (matches diary_to_abs_locs fixed map).
 pub(crate) const WORK_CODE: i32 = 1;
@@ -41,20 +42,27 @@ pub(crate) struct AgentState {
     pub(crate) home_location: usize,
     pub(crate) work_location: usize,
     pub(crate) visited_locs: Vec<usize>,
-    pub(crate) visit_counts: Vec<u32>,
+    /// Sparse visit counts, keyed by location id; absence means a count of 0.
+    /// Was a `Vec<u32>` sized by the FULL location count (bounded only by
+    /// `n_locations`, ~100k+ for large cities) per agent -- with 100k agents
+    /// that's tens of GB of mostly-zero memory. Agents realistically visit a
+    /// tiny fraction of all locations over a run, so a sparse map (sized by
+    /// actual distinct visits, matching `visited_locs`) is the correct
+    /// asymptotic representation.
+    pub(crate) visit_counts: HashMap<usize, u32>,
     pub(crate) total_visits: f64,
     pub(crate) s: f64,
     pub(crate) norm_sq: f64,
 }
 
 impl AgentState {
-    pub(crate) fn new(n_locations: usize) -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             current_location: 0,
             home_location: 0,
             work_location: 0,
             visited_locs: Vec::with_capacity(200),
-            visit_counts: vec![0u32; n_locations],
+            visit_counts: HashMap::with_capacity(200),
             total_visits: 0.0,
             s: 0.0,
             norm_sq: 0.0,
@@ -62,13 +70,14 @@ impl AgentState {
     }
 
     pub(crate) fn visit(&mut self, loc: usize) {
-        let old = self.visit_counts[loc];
+        let entry = self.visit_counts.entry(loc).or_insert(0);
+        let old = *entry;
         self.norm_sq += (2 * old + 1) as f64;
         if old == 0 {
             self.s += 1.0;
             self.visited_locs.push(loc);
         }
-        self.visit_counts[loc] += 1;
+        *entry += 1;
         self.total_visits += 1.0;
     }
 }
@@ -92,10 +101,10 @@ impl Scratch {
 /// An encounter recorded when a social action selects a contact's location.
 #[derive(Clone)]
 pub(crate) struct Encounter {
-    pub(crate) agent: usize,
-    pub(crate) contact: usize,
-    pub(crate) tile: usize,
-    pub(crate) ts: i64,
+    pub(crate) agent: u32,
+    pub(crate) contact: u32,
+    pub(crate) tile: u32,
+    pub(crate) ts: i32,
 }
 
 pub(crate) struct AgentParData {
@@ -114,9 +123,6 @@ pub(crate) struct AgentParData {
     /// Ordinal of the next micro-activity sampled within the currently-open
     /// stop; reset to 0 whenever a real relocation opens a new stop.
     pub(crate) activity_seq: i32,
-    /// Cached CDF for gravity-exploration of unvisited tiles.
-    /// Keyed by (source_tile, s_at_build); invalidated when either changes.
-    pub(crate) explore_cache: Option<(usize, f64, Vec<usize>, Vec<f64>)>,
 }
 
 #[derive(Clone, Copy, PartialEq)]

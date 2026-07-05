@@ -69,8 +69,8 @@ def _run(
     starts = np.array([0], dtype=np.int64)
     ends = np.array([len(diary_ts)], dtype=np.int64)
     rels = np.ones(len(lats), dtype=float) if relevances is None else np.asarray(relevances, dtype=float)
-    # Returns a 3-tuple of tuples: (11 trip arrays), (7 path arrays), (6 activity arrays).
-    # Trip: agents, lats, lngs, arrival, departure, duration,
+    # Returns a 3-tuple of tuples: (10 trip arrays), (7 path arrays), (6 activity arrays).
+    # Trip: agents, loc_id, arrival, departure, duration,
     #       enc_agent, enc_contact, enc_tile, enc_ts, stop_abstract_loc
     # Paths: stop_id, path_agent, path_stop_id, path_seq, path_lat, path_lng, path_t
     # Activities: act_agent, act_stop_id, act_seq, act_activity, act_arrival, act_departure
@@ -112,7 +112,7 @@ def test_simulation_core_long_trip_is_centered_on_slot_boundary():
     slot_times = [0, 8 * 3600, 18 * 3600]
     abs_locs = [0, 1, 0]
     trip, _, _ = _run(lats, lngs, abs_locs, slot_times, end_ts=86400)
-    ag, _, _, arr, dep, dur, *_ = trip
+    ag, _, arr, dep, dur, *_ = trip
 
     assert len(ag) == 3
     arr, dep, dur = np.asarray(arr), np.asarray(dep), np.asarray(dur)
@@ -130,7 +130,7 @@ def test_simulation_core_short_trip_arrives_within_the_slot():
     slot_times = [0, 8 * 3600, 18 * 3600]
     abs_locs = [0, 1, 0]
     trip, _, _ = _run(lats, lngs, abs_locs, slot_times, end_ts=86400)
-    _, _, _, arr, dep, dur, *_ = trip
+    _, _, arr, dep, dur, *_ = trip
     arr, dep, dur = np.asarray(arr), np.asarray(dep), np.asarray(dur)
 
     assert dur[1] < _SLOT
@@ -144,7 +144,7 @@ def test_simulation_core_trip_durations_are_off_the_hourly_grid():
     slot_times = [0, 8 * 3600, 18 * 3600]
     abs_locs = [0, 1, 0]
     trip, _, _ = _run(lats, lngs, abs_locs, slot_times, end_ts=86400)
-    _, _, _, arr, *_ = trip
+    _, _, arr, *_ = trip
     assert any(int(a) % _SLOT != 0 for a in np.asarray(arr))
 
 
@@ -195,11 +195,9 @@ def test_work_code_always_resolves_to_fixed_work_tile():
         gamma=0.0,
     )
 
-    out_lats = np.asarray(trip[1])
-    out_lngs = np.asarray(trip[2])
-    assert len(out_lats) == 5
-    assert out_lats[1] == out_lats[3]
-    assert out_lngs[1] == out_lngs[3]
+    loc_id = np.asarray(trip[1])
+    assert len(loc_id) == 5
+    assert loc_id[1] == loc_id[3]
 
 
 def test_other_code_does_not_reuse_a_cached_location_within_a_day():
@@ -231,10 +229,9 @@ def test_other_code_does_not_reuse_a_cached_location_within_a_day():
         gamma=0.0,
     )
 
-    out_lats = np.asarray(trip[1])
-    out_lngs = np.asarray(trip[2])
-    assert len(out_lats) == 5
-    assert out_lats[1] != out_lats[3] or out_lngs[1] != out_lngs[3]
+    loc_id = np.asarray(trip[1])
+    assert len(loc_id) == 5
+    assert loc_id[1] != loc_id[3]
 
 
 def test_same_physical_location_across_abstract_codes_yields_one_stop():
@@ -256,12 +253,12 @@ def test_same_physical_location_across_abstract_codes_yields_one_stop():
         gamma=0.0,
         work_tile=0,
     )
-    ag, out_lats, _, arr, dep, *_ = trip
+    ag, loc_id, arr, dep, *_ = trip
 
     assert len(ag) == 1
     assert arr[0] == 0
     assert dep[0] == 86400
-    assert out_lats[0] == lats[0]
+    assert loc_id[0] == 0
 
 
 def test_same_physical_location_still_samples_multiple_activities():
@@ -539,7 +536,7 @@ def test_activities_chain_until_macro_departure_deadline():
         purpose_acts=purpose_acts,
     )
 
-    _, _, _, arr, dep, dur, *_ = (np.asarray(a) for a in trip)
+    _, _, arr, dep, dur, *_ = (np.asarray(a) for a in trip)
     assert len(arr) == 3
     assert dep[0] == 7 * 3600 - 900
     assert arr[1] == 7 * 3600 - 900
@@ -1067,7 +1064,13 @@ def test_activities_catalog_uses_25_mtus_categories():
     assert catalog[-1].eligible_purposes == []
 
 
-def _run_multi_agent_multi_day(*, on_day_flush=None):
+def _run_multi_agent_multi_day(
+    *,
+    on_day_flush=None,
+    on_trip_day_flush=None,
+    on_activity_day_flush=None,
+    with_activities=False,
+):
     """2 agents alternating HOME/WORK/OTHER across 3 simulated days -- enough
     relocations (and day boundaries) to exercise the per-day waypoint flush."""
     lats = [48.8566, 48.9000, 48.9500]
@@ -1092,6 +1095,17 @@ def _run_multi_agent_multi_day(*, on_day_flush=None):
         diary_ts.extend(slots)
         diary_loc.extend(locs)
         ends.append(len(diary_ts))
+
+    act_kwargs = {}
+    if with_activities:
+        act_dur_mu, act_dur_sigma = activity_duration_arrays()
+        purpose_act_starts, purpose_acts = build_eligibility_csr()
+        act_kwargs = dict(
+            act_dur_mu=act_dur_mu,
+            act_dur_sigma=act_dur_sigma,
+            purpose_act_starts=purpose_act_starts,
+            purpose_acts=purpose_acts,
+        )
 
     return core.simulation_core_simulate_agents(
         latitudes=np.asarray(lats, dtype=float),
@@ -1119,7 +1133,186 @@ def _run_multi_agent_multi_day(*, on_day_flush=None):
         starting_locs_mode_relevance=False,
         work_tiles=np.ones(n_agents, dtype=np.int64),
         on_day_flush=on_day_flush,
+        on_trip_day_flush=on_trip_day_flush,
+        on_activity_day_flush=on_activity_day_flush,
+        **act_kwargs,
     )
+
+
+def test_on_trip_and_activity_day_flush_none_matches_baseline_return_shape():
+    """The default (no callback) path must be unaffected by the new params."""
+    trip, _, activities = _run_multi_agent_multi_day(with_activities=True)
+    assert len(trip[0]) > 0
+    assert len(activities[0]) > 0
+
+
+def test_on_trip_day_flush_chunks_plus_tail_reproduce_the_no_callback_trip():
+    # trip tuple: agents, loc_id, arrival, departure, duration,
+    #             enc_agent, enc_contact, enc_tile, enc_ts, stop_abstract_loc
+    # paths tuple: stop_id, path_agent, ...
+    # A row's flush position depends on when it *finally* closes (which may
+    # be a later day than when it was pushed), not its original push order,
+    # so -- like encounters -- compare as a multiset of (agent, stop_id,
+    # arrival, departure, duration, abstract_loc) rows rather than
+    # positionally. `stop_id` alone guarantees no row is double-counted or
+    # dropped; including arrival/departure/duration/abstract_loc also
+    # verifies the departure-patching relationship survived compaction
+    # (a still-open row flushed at the wrong time would show a placeholder
+    # departure == arrival instead of its real, later-patched value).
+    baseline_trip, baseline_paths, _ = _run_multi_agent_multi_day()
+
+    chunks: list[tuple] = []
+    streamed_trip, streamed_paths, _ = _run_multi_agent_multi_day(
+        on_trip_day_flush=lambda *arrays: chunks.append(tuple(np.asarray(a) for a in arrays))
+    )
+
+    # At least one mid-run flush must have happened, given 3 simulated days
+    # and 3 relocations/day/agent.
+    assert len(chunks) > 0
+
+    # Chunk field order: agent, loc_id, arrival, departure, duration, stop_id, abstract_loc.
+    streamed_tail = [np.asarray(col) for col in streamed_trip[0:5]] + [
+        np.asarray(streamed_paths[0]),
+        np.asarray(streamed_trip[9]),
+    ]
+    reconstructed_cols = [
+        np.concatenate([chunk[col_idx] for chunk in chunks] + [streamed_tail[col_idx]])
+        for col_idx in range(7)
+    ]
+    reconstructed_rows = sorted(zip(*reconstructed_cols))
+
+    baseline_cols = [np.asarray(col) for col in baseline_trip[0:5]] + [
+        np.asarray(baseline_paths[0]),
+        np.asarray(baseline_trip[9]),
+    ]
+    baseline_rows = sorted(zip(*baseline_cols))
+    assert baseline_rows == reconstructed_rows
+
+
+def test_on_activity_day_flush_chunks_plus_tail_reproduce_the_no_callback_activities():
+    # activities tuple: act_agent, act_stop_id, act_seq, act_activity, act_arrival, act_departure
+    # Same unordered-multiset comparison as trips, for the same reason.
+    _, _, baseline_acts = _run_multi_agent_multi_day(with_activities=True)
+
+    chunks: list[tuple] = []
+    _, _, streamed_acts = _run_multi_agent_multi_day(
+        with_activities=True,
+        on_activity_day_flush=lambda *arrays: chunks.append(
+            tuple(np.asarray(a) for a in arrays)
+        ),
+    )
+
+    assert len(chunks) > 0
+
+    streamed_tail = [np.asarray(col) for col in streamed_acts]
+    reconstructed_cols = [
+        np.concatenate([chunk[col_idx] for chunk in chunks] + [streamed_tail[col_idx]])
+        for col_idx in range(6)
+    ]
+    reconstructed_rows = sorted(zip(*reconstructed_cols))
+    baseline_rows = sorted(zip(*(np.asarray(col) for col in baseline_acts)))
+    assert baseline_rows == reconstructed_rows
+
+
+def _run_multi_agent_multi_day_with_social(*, on_encounter_day_flush=None):
+    """6 fully-connected agents, high social mixing (alpha=0.9) and moderate
+    exploration (rho=0.3) across 3 simulated days -- enough social-choice
+    encounters (and day boundaries) to exercise the per-day encounter flush."""
+    lats = [48.8566, 48.9000, 48.9500, 48.86, 48.87, 48.88]
+    lngs = [2.3522, 2.4000, 2.4500, 2.40, 2.41, 2.42]
+    n_agents = 6
+
+    def diary_for_agent(offset):
+        slots, locs = [], []
+        for d in range(3):
+            base = d * 86400
+            slots += [base + offset, base + 8 * 3600 + offset, base + 18 * 3600 + offset]
+            locs += [0, 1, 2]
+        return locs, slots
+
+    diary_ts: list[int] = []
+    diary_loc: list[int] = []
+    starts: list[int] = []
+    ends: list[int] = []
+    for agent in range(n_agents):
+        locs, slots = diary_for_agent(agent * 60)
+        starts.append(len(diary_ts))
+        diary_ts.extend(slots)
+        diary_loc.extend(locs)
+        ends.append(len(diary_ts))
+
+    neighbor_starts = np.arange(
+        0, n_agents * (n_agents - 1) + 1, n_agents - 1, dtype=np.int64
+    )
+    neighbors = np.array(
+        [b for a in range(n_agents) for b in range(n_agents) if b != a], dtype=np.int64
+    )
+    edge_sim = np.ones(len(neighbors), dtype=np.float64)
+
+    return core.simulation_core_simulate_agents(
+        latitudes=np.asarray(lats, dtype=float),
+        longitudes=np.asarray(lngs, dtype=float),
+        relevances=np.ones(len(lats), dtype=float),
+        distances=np.empty(0, dtype=np.float64),
+        neighbor_starts=neighbor_starts,
+        neighbors=neighbors,
+        diary_timestamps=np.asarray(diary_ts, dtype=np.int64),
+        diary_abs_locs=np.asarray(diary_loc, dtype=np.int32),
+        diary_starts=np.asarray(starts, dtype=np.int64),
+        diary_ends=np.asarray(ends, dtype=np.int64),
+        rho=0.3,
+        gamma=0.21,
+        alpha=0.9,
+        start_ts=0,
+        end_ts=3 * 86400,
+        indipendency_window_s=1800,
+        dt_update_mob_sim_s=3600,
+        slot_seconds=_SLOT,
+        car_speed_kmh=_SPEED,
+        n_agents=n_agents,
+        master_seed=42,
+        starting_locs=np.zeros(n_agents, dtype=np.int64),
+        starting_locs_mode_relevance=False,
+        work_tiles=np.ones(n_agents, dtype=np.int64),
+        edge_profile_sim=edge_sim,
+        on_encounter_day_flush=on_encounter_day_flush,
+    )
+
+
+def test_on_encounter_day_flush_none_matches_baseline_return_shape():
+    """The default (no callback) path must be unaffected by the new parameter."""
+    trip, _, _ = _run_multi_agent_multi_day_with_social()
+    assert len(trip[5]) > 0  # sanity: this fixture does generate encounters
+
+
+def test_on_encounter_day_flush_chunks_plus_tail_reproduce_the_no_callback_encounters():
+    # trip tuple: agents, loc_id, arrival, departure, duration,
+    #             enc_agent, enc_contact, enc_tile, enc_ts, stop_abstract_loc
+    baseline_trip, _, _ = _run_multi_agent_multi_day_with_social()
+
+    chunks: list[tuple] = []
+    streamed_trip, _, _ = _run_multi_agent_multi_day_with_social(
+        on_encounter_day_flush=lambda *arrays: chunks.append(
+            tuple(np.asarray(a) for a in arrays)
+        )
+    )
+
+    # At least one mid-run flush must have happened, given 3 simulated days.
+    assert len(chunks) > 0
+
+    # Encounters are unordered records: the baseline flattens once at the end
+    # (grouped by agent, chronological within agent), while streaming
+    # flattens per day (grouped by day, then agent) -- same multiset of
+    # records, different order. Compare as sorted tuples rather than
+    # positionally.
+    streamed_tail = [np.asarray(col) for col in streamed_trip[5:9]]
+    reconstructed_cols = [
+        np.concatenate([chunk[col_idx] for chunk in chunks] + [streamed_tail[col_idx]])
+        for col_idx in range(4)
+    ]
+    reconstructed_rows = sorted(zip(*reconstructed_cols))
+    baseline_rows = sorted(zip(*(np.asarray(col) for col in baseline_trip[5:9])))
+    assert baseline_rows == reconstructed_rows
 
 
 def test_on_day_flush_none_matches_baseline_return_shape():
