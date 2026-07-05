@@ -1,17 +1,22 @@
 use rand::Rng;
 use skmob2_core::models::od::CachedGravityOdRows;
 use skmob2_core::models::shared::cdf_choice;
+use std::collections::HashMap;
 
 use crate::simulation_core::inputs::{LocationInputs, SimulationParams};
 use crate::simulation_core::types::{
     AgentState, DiaryState, Encounter, GRAVITY_REJECTION_ATTEMPTS, Scratch, SocialMode, WORK_CODE,
 };
 
+fn count_at(counts: &HashMap<usize, u32>, loc: usize) -> u32 {
+    counts.get(&loc).copied().unwrap_or(0)
+}
+
 fn cosine_similarity_sparse(
     a_locs: &[usize],
-    a_counts: &[u32],
+    a_counts: &HashMap<usize, u32>,
     norm_a_sq: f64,
-    b_counts: &[u32],
+    b_counts: &HashMap<usize, u32>,
     norm_b_sq: f64,
 ) -> f64 {
     if norm_a_sq == 0.0 || norm_b_sq == 0.0 {
@@ -19,7 +24,7 @@ fn cosine_similarity_sparse(
     }
     let dot: f64 = a_locs
         .iter()
-        .map(|&l| (a_counts[l] as f64) * (b_counts[l] as f64))
+        .map(|&l| (count_at(a_counts, l) as f64) * (count_at(b_counts, l) as f64))
         .sum();
     dot / (norm_a_sq.sqrt() * norm_b_sq.sqrt())
 }
@@ -44,7 +49,7 @@ fn make_individual_return(
     scratch.cdf.clear();
     let mut cumsum = 0.0_f64;
     for &loc in &a.visited_locs {
-        cumsum += a.visit_counts[loc] as f64;
+        cumsum += count_at(&a.visit_counts, loc) as f64;
         scratch.candidates.push(loc);
         scratch.cdf.push(cumsum);
     }
@@ -63,11 +68,9 @@ fn social_exploration(
     n_locations: usize,
     rng: &mut impl Rng,
     scratch: &mut Scratch,
-    explore_cache: &mut Option<(usize, f64, Vec<usize>, Vec<f64>)>,
 ) -> Option<usize> {
     let src = agents[agent].current_location;
     let home = agents[agent].home_location;
-    let s = agents[agent].s;
     let visit_counts = &agents[agent].visit_counts;
 
     if let Some(od_rows) = od_rows {
@@ -77,19 +80,22 @@ fn social_exploration(
             if total.is_finite() && total > 0.0 {
                 for _ in 0..GRAVITY_REJECTION_ATTEMPTS {
                     let loc = cdf_choice(rng, &row);
-                    if visit_counts[loc] == 0 && loc != src && loc != home {
+                    if !visit_counts.contains_key(&loc) && loc != src && loc != home {
                         return Some(loc);
                     }
                 }
             }
 
-            // Rejection sampling exhausted — check cache before doing O(n_locations) scan.
-            if let Some((cached_src, cached_s, ref candidates, ref cdf)) = *explore_cache {
-                if cached_src == src && (cached_s - s).abs() < 0.5 && !candidates.is_empty() {
-                    return Some(cdf_sample(rng, candidates, cdf));
-                }
-            }
-
+            // Rejection sampling exhausted -- fall back to a full scan of
+            // unvisited tiles. Deliberately not cached: for a real city
+            // (tens/hundreds of thousands of locations) this candidate list
+            // is close to the entire location space for any agent that
+            // hasn't visited most of it, so a per-agent cache of it costs
+            // O(n_locations) memory per agent regardless of how sparse the
+            // agent's actual visit history is -- multiplied across 100k+
+            // agents this exhausted available RAM long before the memory
+            // used by any output buffer. Recomputing this scan is pure CPU
+            // cost with no correctness or memory downside.
             scratch.candidates.clear();
             scratch.cdf.clear();
             let mut prev = 0.0_f64;
@@ -97,7 +103,7 @@ fn social_exploration(
             for (j, &value) in row.iter().enumerate() {
                 let weight = value - prev;
                 prev = value;
-                if visit_counts[j] == 0
+                if !visit_counts.contains_key(&j)
                     && j != src
                     && j != home
                     && weight.is_finite()
@@ -109,12 +115,9 @@ fn social_exploration(
                 }
             }
             if scratch.candidates.is_empty() {
-                *explore_cache = None;
                 return None;
             }
-            let result = cdf_sample(rng, &scratch.candidates, &scratch.cdf);
-            *explore_cache = Some((src, s, scratch.candidates.clone(), scratch.cdf.clone()));
-            return Some(result);
+            return Some(cdf_sample(rng, &scratch.candidates, &scratch.cdf));
         }
     }
 
@@ -123,8 +126,8 @@ fn social_exploration(
     scratch.cdf.clear();
     let mut all_zero = true;
     let mut cumsum = 0.0_f64;
-    for (j, &count) in visit_counts.iter().enumerate().take(n_locations) {
-        if count != 0 || j == src || j == home {
+    for j in 0..n_locations {
+        if visit_counts.contains_key(&j) || j == src || j == home {
             continue;
         }
         let d = locations.distances[src * n_locations + j].max(0.001);
@@ -213,9 +216,9 @@ fn make_social_action_local<R: Rng>(ctx: SocialActionContext<'_, R>) -> Option<(
         SocialMode::Exploration => {
             let mut cumsum = 0.0_f64;
             for &loc in contact_locs {
-                if agent_counts[loc] == 0 {
+                if !agent_counts.contains_key(&loc) {
                     ctx.scratch.candidates.push(loc);
-                    cumsum += contact_counts[loc] as f64;
+                    cumsum += count_at(contact_counts, loc) as f64;
                     ctx.scratch.cdf.push(cumsum);
                 }
             }
@@ -223,7 +226,7 @@ fn make_social_action_local<R: Rng>(ctx: SocialActionContext<'_, R>) -> Option<(
         SocialMode::Return => {
             let mut cumsum = 0.0_f64;
             for &loc in agent_locs {
-                let w = contact_counts[loc] as f64;
+                let w = count_at(contact_counts, loc) as f64;
                 if w > 0.0 {
                     ctx.scratch.candidates.push(loc);
                     cumsum += w;
@@ -256,7 +259,6 @@ pub(crate) struct LocationChoiceContext<'a, R: Rng> {
     pub(crate) diary_abs_locs: &'a [i32],
     pub(crate) scratch: &'a mut Scratch,
     pub(crate) encounters: &'a mut Vec<Encounter>,
-    pub(crate) explore_cache: &'a mut Option<(usize, f64, Vec<usize>, Vec<f64>)>,
 }
 
 fn social_action_for_choice<R: Rng>(
@@ -274,10 +276,10 @@ fn social_action_for_choice<R: Rng>(
     })
     .map(|(loc, contact)| {
         ctx.encounters.push(Encounter {
-            agent: ctx.agent,
-            contact,
-            tile: loc,
-            ts: ctx.current_ts,
+            agent: ctx.agent as u32,
+            contact: contact as u32,
+            tile: loc as u32,
+            ts: ctx.current_ts as i32,
         });
         loc
     })
@@ -292,7 +294,6 @@ fn exploration_for_choice<R: Rng>(ctx: &mut LocationChoiceContext<'_, R>) -> Opt
         ctx.n_locations,
         ctx.rng,
         ctx.scratch,
-        ctx.explore_cache,
     )
 }
 

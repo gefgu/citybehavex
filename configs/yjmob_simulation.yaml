@@ -12,6 +12,7 @@ simulation:
   start_date: '2019-09-15'
   output: data/yjmob/yjmob_simulation_trajectories.parquet
   random_state: 42
+  stream_output: true  # flush waypoints to disk per-day; RSS grew unbounded otherwise at this scale
   relevance_column: total_poi_count
   granularity_minutes: 30
   car_speed_kmh: 40.0

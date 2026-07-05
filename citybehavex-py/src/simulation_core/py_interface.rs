@@ -7,7 +7,7 @@ use crate::simulation_core::inputs::{
     ActivityInputs, CoreInputs, DiaryInputs, InitialLocationInputs, LocationInputs,
     RoadNetworkInputs, SimulationParams, SocialGraphInputs,
 };
-use crate::simulation_core::outputs::RoadPathOutputBuffers;
+use crate::simulation_core::outputs::{ActivityOutputBuffers, RoadPathOutputBuffers, TripOutputBuffers};
 use crate::simulation_core::roads::{batch_road_distances, RoadGraph};
 
 /// Borrowed slice from an optional numpy array, or an empty slice when absent.
@@ -59,7 +59,10 @@ fn opt_i64_as_usize_vec(v: &Option<PyReadonlyArray1<'_, i64>>) -> PyResult<Optio
     max_leg_waypoints=16usize,
     gravity_deterrence_exponent=-2.0f64, gravity_origin_exponent=1.0f64,
     gravity_destination_exponent=1.0f64,
-    on_day_flush=None
+    on_day_flush=None,
+    on_encounter_day_flush=None,
+    on_trip_day_flush=None,
+    on_activity_day_flush=None
 ))]
 pub fn simulation_core_simulate_agents<'py>(
     py: Python<'py>,
@@ -109,36 +112,38 @@ pub fn simulation_core_simulate_agents<'py>(
     gravity_origin_exponent: f64,
     gravity_destination_exponent: f64,
     on_day_flush: Option<Py<PyAny>>,
+    on_encounter_day_flush: Option<Py<PyAny>>,
+    on_trip_day_flush: Option<Py<PyAny>>,
+    on_activity_day_flush: Option<Py<PyAny>>,
 ) -> PyResult<(
     (
-        Bound<'py, PyArray1<i64>>,
-        Bound<'py, PyArray1<f64>>,
-        Bound<'py, PyArray1<f64>>,
-        Bound<'py, PyArray1<i64>>,
-        Bound<'py, PyArray1<i64>>,
-        Bound<'py, PyArray1<f64>>,
-        Bound<'py, PyArray1<i64>>,
-        Bound<'py, PyArray1<i64>>,
-        Bound<'py, PyArray1<i64>>,
-        Bound<'py, PyArray1<i64>>,
+        Bound<'py, PyArray1<u32>>,
+        Bound<'py, PyArray1<u32>>,
+        Bound<'py, PyArray1<i32>>,
+        Bound<'py, PyArray1<i32>>,
+        Bound<'py, PyArray1<u32>>,
+        Bound<'py, PyArray1<u32>>,
+        Bound<'py, PyArray1<u32>>,
+        Bound<'py, PyArray1<u32>>,
+        Bound<'py, PyArray1<i32>>,
+        Bound<'py, PyArray1<u8>>,
+    ),
+    (
+        Bound<'py, PyArray1<u32>>,
+        Bound<'py, PyArray1<u32>>,
+        Bound<'py, PyArray1<u32>>,
+        Bound<'py, PyArray1<u16>>,
+        Bound<'py, PyArray1<f32>>,
+        Bound<'py, PyArray1<f32>>,
         Bound<'py, PyArray1<i32>>,
     ),
     (
-        Bound<'py, PyArray1<i64>>,
-        Bound<'py, PyArray1<i64>>,
-        Bound<'py, PyArray1<i64>>,
+        Bound<'py, PyArray1<u32>>,
+        Bound<'py, PyArray1<u32>>,
+        Bound<'py, PyArray1<u16>>,
+        Bound<'py, PyArray1<u16>>,
         Bound<'py, PyArray1<i32>>,
-        Bound<'py, PyArray1<f64>>,
-        Bound<'py, PyArray1<f64>>,
-        Bound<'py, PyArray1<i64>>,
-    ),
-    (
-        Bound<'py, PyArray1<i64>>,
-        Bound<'py, PyArray1<i64>>,
         Bound<'py, PyArray1<i32>>,
-        Bound<'py, PyArray1<i64>>,
-        Bound<'py, PyArray1<i64>>,
-        Bound<'py, PyArray1<i64>>,
     ),
 )> {
     let lats = latitudes.as_slice()?;
@@ -202,6 +207,71 @@ pub fn simulation_core_simulate_agents<'py>(
         .as_mut()
         .map(|f| f as &mut dyn FnMut(RoadPathOutputBuffers) -> Result<(), String>);
 
+    // Marshal one day's worth of encounters to the Python callback (if given)
+    // as numpy arrays, in the same column order as the final `encounter_*`
+    // return tuple, so callers can share one DataFrame-building helper for
+    // both the streamed chunks and the final tail.
+    let mut on_encounter_day_flush_closure = on_encounter_day_flush.map(|callback| {
+        move |chunk: (Vec<u32>, Vec<u32>, Vec<u32>, Vec<i32>)| -> Result<(), String> {
+            let agent = chunk.0.into_pyarray(py);
+            let contact = chunk.1.into_pyarray(py);
+            let tile = chunk.2.into_pyarray(py);
+            let ts = chunk.3.into_pyarray(py);
+            callback
+                .call1(py, (agent, contact, tile, ts))
+                .map(|_| ())
+                .map_err(|e| e.to_string())
+        }
+    });
+    let on_encounter_day_flush_ref = on_encounter_day_flush_closure.as_mut().map(|f| {
+        f as &mut dyn FnMut((Vec<u32>, Vec<u32>, Vec<u32>, Vec<i32>)) -> Result<(), String>
+    });
+
+    // Marshal one day's worth of closed stop rows to the Python callback (if
+    // given) as numpy arrays, in the same field order `_build_trip_frame`
+    // expects (matching `TripOutputBuffers`), so callers can share one
+    // DataFrame-building helper for both the streamed chunks and the final
+    // tail.
+    let mut on_trip_day_flush_closure = on_trip_day_flush.map(|callback| {
+        move |chunk: TripOutputBuffers| -> Result<(), String> {
+            let agent = chunk.agents.into_pyarray(py);
+            let loc_id = chunk.loc_id.into_pyarray(py);
+            let arrival = chunk.arrival.into_pyarray(py);
+            let departure = chunk.departure.into_pyarray(py);
+            let duration = chunk.duration.into_pyarray(py);
+            let stop_id = chunk.stop_id.into_pyarray(py);
+            let abstract_loc = chunk.abstract_loc.into_pyarray(py);
+            callback
+                .call1(py, (agent, loc_id, arrival, departure, duration, stop_id, abstract_loc))
+                .map(|_| ())
+                .map_err(|e| e.to_string())
+        }
+    });
+    let on_trip_day_flush_ref = on_trip_day_flush_closure
+        .as_mut()
+        .map(|f| f as &mut dyn FnMut(TripOutputBuffers) -> Result<(), String>);
+
+    // Marshal one day's worth of closed micro-activity rows to the Python
+    // callback (if given) as numpy arrays, in the same field order as the
+    // final `act_*` return tuple.
+    let mut on_activity_day_flush_closure = on_activity_day_flush.map(|callback| {
+        move |chunk: ActivityOutputBuffers| -> Result<(), String> {
+            let agent = chunk.agent.into_pyarray(py);
+            let stop_id = chunk.stop_id.into_pyarray(py);
+            let seq = chunk.seq.into_pyarray(py);
+            let activity = chunk.activity.into_pyarray(py);
+            let arrival = chunk.arrival.into_pyarray(py);
+            let departure = chunk.departure.into_pyarray(py);
+            callback
+                .call1(py, (agent, stop_id, seq, activity, arrival, departure))
+                .map(|_| ())
+                .map_err(|e| e.to_string())
+        }
+    });
+    let on_activity_day_flush_ref = on_activity_day_flush_closure
+        .as_mut()
+        .map(|f| f as &mut dyn FnMut(ActivityOutputBuffers) -> Result<(), String>);
+
     let output = simulate(CoreInputs {
         locations: LocationInputs {
             lats,
@@ -262,14 +332,13 @@ pub fn simulation_core_simulate_agents<'py>(
             location_node: location_road_node_s,
             max_leg_waypoints,
         },
-    }, on_day_flush_ref)
+    }, on_day_flush_ref, on_encounter_day_flush_ref, on_trip_day_flush_ref, on_activity_day_flush_ref)
     .map_err(PyValueError::new_err)?;
 
     Ok((
         (
             output.agents.into_pyarray(py),
-            output.lats.into_pyarray(py),
-            output.lngs.into_pyarray(py),
+            output.loc_id.into_pyarray(py),
             output.arrival.into_pyarray(py),
             output.departure.into_pyarray(py),
             output.duration.into_pyarray(py),
