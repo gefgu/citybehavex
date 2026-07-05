@@ -147,11 +147,22 @@ def _build_moving_frame(
     path_lat: np.ndarray,
     path_lng: np.ndarray,
     path_t: np.ndarray,
+    path_mode: np.ndarray | None = None,
 ) -> pd.DataFrame:
     """Build the one-row-per-waypoint `moving` frame from the raw arrays the
     Rust core returns -- shared by the final one-shot build and the per-day
     streaming callback so both produce identically-shaped chunks."""
     path_t_arr = np.asarray(path_t, dtype=np.int64)
+    mode_arr = (
+        np.asarray(path_mode, dtype=np.uint8)
+        if path_mode is not None
+        else np.ones(len(path_agent), dtype=np.uint8)
+    )
+    mode = np.select(
+        [mode_arr == 2, mode_arr == 3, mode_arr == 4],
+        ["walk", "bike", "rail"],
+        default="car",
+    )
     return pd.DataFrame(
         {
             "uid": np.asarray(path_agent, dtype=np.int64),
@@ -160,6 +171,7 @@ def _build_moving_frame(
             "lat": np.asarray(path_lat, dtype=float),
             "lng": np.asarray(path_lng, dtype=float),
             "t": path_t_arr.astype("datetime64[s]"),
+            "mode": mode,
         }
     )
 
@@ -265,6 +277,12 @@ def simulate_agents(
     car_speed_kmh: float,
     n_agents: int,
     random_state: int,
+    walking_speed_kmh: float = 4.8,
+    bike_speed_kmh: float = 15.0,
+    walking_threshold_mu_ln_km: float = -0.35,
+    walking_threshold_sigma_ln: float = 0.45,
+    bike_threshold_mu_ln_km: float = 1.4,
+    bike_threshold_sigma_ln: float = 0.55,
     rho: float = 0.6,
     gamma: float = 0.21,
     alpha: float = 0.2,
@@ -294,6 +312,15 @@ def simulate_agents(
     road_node_lngs: np.ndarray | None = None,
     location_road_node: np.ndarray | None = None,
     max_leg_waypoints: int = 16,
+    rail_edge_from: np.ndarray | None = None,
+    rail_edge_to: np.ndarray | None = None,
+    rail_edge_weight_ds: np.ndarray | None = None,
+    rail_node_lats: np.ndarray | None = None,
+    rail_node_lngs: np.ndarray | None = None,
+    location_rail_node: np.ndarray | None = None,
+    max_rail_leg_waypoints: int = 16,
+    has_car: np.ndarray | None = None,
+    has_bike: np.ndarray | None = None,
     return_social_graph: bool = False,
     social_node_profiles: list[str] | None = None,
     on_day_flush: Callable[[pd.DataFrame], None] | None = None,
@@ -403,6 +430,56 @@ def simulate_agents(
         r_node_lngs = np.empty(0, dtype=np.float64)
         r_location_node = np.empty(0, dtype=np.int64)
 
+    rail_enabled = (
+        rail_edge_from is not None
+        and rail_edge_to is not None
+        and rail_edge_weight_ds is not None
+        and len(rail_edge_from) > 0
+    )
+    if rail_enabled:
+        rail_from = np.ascontiguousarray(rail_edge_from, dtype=np.int64)
+        rail_to = np.ascontiguousarray(rail_edge_to, dtype=np.int64)
+        rail_weight = np.ascontiguousarray(rail_edge_weight_ds, dtype=np.int64)
+        rail_lats = np.ascontiguousarray(rail_node_lats, dtype=np.float64)
+        rail_lngs = np.ascontiguousarray(rail_node_lngs, dtype=np.float64)
+        rail_location_node = (
+            np.ascontiguousarray(location_rail_node, dtype=np.int64)
+            if location_rail_node is not None
+            else np.full(len(tessellation_df), -1, dtype=np.int64)
+        )
+    else:
+        rail_from = np.empty(0, dtype=np.int64)
+        rail_to = np.empty(0, dtype=np.int64)
+        rail_weight = np.empty(0, dtype=np.int64)
+        rail_lats = np.empty(0, dtype=np.float64)
+        rail_lngs = np.empty(0, dtype=np.float64)
+        rail_location_node = np.empty(0, dtype=np.int64)
+
+    rng = np.random.default_rng(random_state)
+    has_car_arr = (
+        np.ascontiguousarray(has_car, dtype=np.bool_)
+        if has_car is not None
+        else np.ones(n_agents, dtype=np.bool_)
+    )
+    has_bike_arr = (
+        np.ascontiguousarray(has_bike, dtype=np.bool_)
+        if has_bike is not None
+        else np.zeros(n_agents, dtype=np.bool_)
+    )
+    walking_threshold = rng.lognormal(
+        mean=float(walking_threshold_mu_ln_km),
+        sigma=float(walking_threshold_sigma_ln),
+        size=n_agents,
+    )
+    bike_threshold = rng.lognormal(
+        mean=float(bike_threshold_mu_ln_km),
+        sigma=float(bike_threshold_sigma_ln),
+        size=n_agents,
+    )
+    bike_threshold = np.maximum(bike_threshold, walking_threshold)
+    walking_threshold = np.ascontiguousarray(walking_threshold, dtype=np.float64)
+    bike_threshold = np.ascontiguousarray(bike_threshold, dtype=np.float64)
+
     # Flatten activity embedding matrix if provided.
     emb_dim = 0
     act_embs_flat: np.ndarray | None = None
@@ -423,8 +500,8 @@ def simulate_agents(
     rust_on_day_flush = None
     if on_day_flush is not None:
 
-        def rust_on_day_flush(agent, dest_stop_id, seq, lat, lng, t):
-            on_day_flush(_build_moving_frame(agent, dest_stop_id, seq, lat, lng, t))
+        def rust_on_day_flush(agent, dest_stop_id, seq, lat, lng, t, mode):
+            on_day_flush(_build_moving_frame(agent, dest_stop_id, seq, lat, lng, t, mode))
 
     rust_on_encounter_day_flush = None
     if on_encounter_day_flush is not None:
@@ -457,7 +534,7 @@ def simulate_agents(
             enc_agent, enc_contact, enc_tile, enc_ts, stop_abstract_loc,
         ),
         (
-            stop_id, path_agent, path_stop_id, path_seq, path_lat, path_lng, path_t,
+            stop_id, path_agent, path_stop_id, path_seq, path_lat, path_lng, path_t, path_mode,
         ),
         (
             act_agent, act_stop_id, act_seq, act_activity, act_arrival, act_departure,
@@ -508,6 +585,19 @@ def simulate_agents(
         float(gravity_deterrence_exponent),
         float(gravity_origin_exponent),
         float(gravity_destination_exponent),
+        float(walking_speed_kmh),
+        float(bike_speed_kmh),
+        has_car_arr,
+        has_bike_arr,
+        walking_threshold,
+        bike_threshold,
+        rail_from,
+        rail_to,
+        rail_weight,
+        rail_lats,
+        rail_lngs,
+        rail_location_node,
+        int(max_rail_leg_waypoints),
         rust_on_day_flush,
         rust_on_encounter_day_flush,
         rust_on_trip_day_flush,
@@ -523,7 +613,7 @@ def simulate_agents(
 
     encounters = _build_encounters_frame(enc_agent, enc_contact, enc_tile, enc_ts)
 
-    moving = _build_moving_frame(path_agent, path_stop_id, path_seq, path_lat, path_lng, path_t)
+    moving = _build_moving_frame(path_agent, path_stop_id, path_seq, path_lat, path_lng, path_t, path_mode)
 
     activities = _build_activity_frame(
         act_agent, act_stop_id, act_seq, act_activity, act_arrival, act_departure

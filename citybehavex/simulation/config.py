@@ -21,6 +21,12 @@ class SimulationConfig(BaseModel):
     relevance_column: str = "total_poi_count"
     granularity_minutes: int = 15
     car_speed_kmh: float = 50.0
+    walking_speed_kmh: float = 4.8
+    bike_speed_kmh: float = 15.0
+    walking_threshold_mu_ln_km: float = -0.35
+    walking_threshold_sigma_ln: float = 0.45
+    bike_threshold_mu_ln_km: float = 1.4
+    bike_threshold_sigma_ln: float = 0.55
     social_graph_k: int = 20
     profile_graph_exact_threshold: int = 10_000
 
@@ -63,11 +69,18 @@ class SimulationConfig(BaseModel):
             raise ValueError("granularity_minutes must be a positive divisor of 1440")
         return value
 
-    @field_validator("car_speed_kmh")
+    @field_validator("car_speed_kmh", "walking_speed_kmh", "bike_speed_kmh")
     @classmethod
     def positive_speed(cls, value: float) -> float:
         if value <= 0:
-            raise ValueError("car_speed_kmh must be positive")
+            raise ValueError("speed must be positive")
+        return value
+
+    @field_validator("walking_threshold_sigma_ln", "bike_threshold_sigma_ln")
+    @classmethod
+    def positive_threshold_sigma(cls, value: float) -> float:
+        if value <= 0:
+            raise ValueError("threshold sigma must be positive")
         return value
 
     @model_validator(mode="after")

@@ -62,7 +62,7 @@ def moving_index_path(exp_id: str, run: "Run") -> Path | None:
         return None
     return get_or_build_parquet(
         "timeline_moving",
-        ("v1", exp_id, run.run_id),
+        ("v2", exp_id, run.run_id),
         run.moving_path,
         build=lambda out: _build_moving_index(run.moving_path, out),
     )
@@ -71,10 +71,12 @@ def moving_index_path(exp_id: str, run: "Run") -> Path | None:
 def _build_moving_index(moving_path: Path, out_path: Path) -> None:
     con = duckdb.connect()
     try:
+        columns = _parquet_columns(con, moving_path)
+        mode_expr = "mode" if "mode" in columns else "'car' AS mode"
         con.execute(
             f"""
             COPY (
-                SELECT uid, stop_id, seq, lat, lng, t
+                SELECT uid, stop_id, seq, lat, lng, t, {mode_expr}
                 FROM read_parquet('{quote_path(moving_path)}')
                 ORDER BY uid, stop_id, seq
             )
@@ -230,6 +232,10 @@ def query_active_legs(
     if moving_path is not None:
         _attach_waypoints(segments, moving_path)
     for s in segments:
+        if s["kind"] == "dwell":
+            s["mode"] = "stay"
+        elif "mode" not in s:
+            s["mode"] = "car"
         s.pop("stop_id", None)
 
     return segments, truncated
@@ -248,7 +254,7 @@ def _attach_waypoints(segments: list[dict[str, Any]], moving_path: Path) -> None
     try:
         rows = con.execute(
             f"""
-            SELECT m.uid, m.stop_id, m.lat, m.lng, m.t
+            SELECT m.uid, m.stop_id, m.lat, m.lng, m.t, m.mode
             FROM read_parquet('{quote_path(moving_path)}') m
             JOIN (VALUES {values}) AS requested(uid, stop_id)
               ON m.uid = requested.uid AND m.stop_id = requested.stop_id
@@ -259,14 +265,19 @@ def _attach_waypoints(segments: list[dict[str, Any]], moving_path: Path) -> None
         con.close()
 
     waypoints_by_key: dict[tuple[int, int], list[dict[str, Any]]] = {}
-    for uid, stop_id, lat, lng, t in rows:
-        waypoints_by_key.setdefault((uid, stop_id), []).append(
+    mode_by_key: dict[tuple[int, int], str] = {}
+    for uid, stop_id, lat, lng, t, mode in rows:
+        key = (uid, stop_id)
+        waypoints_by_key.setdefault(key, []).append(
             {"lat": lat, "lng": lng, "t": t.isoformat() if hasattr(t, "isoformat") else t}
         )
+        mode_by_key[key] = str(mode or "car")
 
     for s in segments:
         if s["kind"] == "leg" and s.get("stop_id") is not None:
-            s["waypoints"] = waypoints_by_key.get((s["uid"], s["stop_id"]))
+            key = (s["uid"], s["stop_id"])
+            s["waypoints"] = waypoints_by_key.get(key)
+            s["mode"] = mode_by_key.get(key, "car")
 
 
 def query_agent_crp(crp_path: Path, uid: int) -> list[dict[str, Any]]:

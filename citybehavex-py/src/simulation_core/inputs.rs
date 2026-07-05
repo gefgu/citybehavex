@@ -6,6 +6,8 @@ pub(crate) struct CoreInputs<'a> {
     pub(crate) initial_locations: InitialLocationInputs<'a>,
     pub(crate) activities: ActivityInputs<'a>,
     pub(crate) road_network: RoadNetworkInputs<'a>,
+    pub(crate) rail_network: RoadNetworkInputs<'a>,
+    pub(crate) transport: TransportInputs<'a>,
 }
 
 pub(crate) struct RoadNetworkInputs<'a> {
@@ -57,8 +59,17 @@ pub(crate) struct SimulationParams {
     pub(crate) dt_update_mob_sim_s: i64,
     pub(crate) slot_seconds: i64,
     pub(crate) car_speed_kmh: f64,
+    pub(crate) walking_speed_kmh: f64,
+    pub(crate) bike_speed_kmh: f64,
     pub(crate) n_agents: usize,
     pub(crate) master_seed: Option<u64>,
+}
+
+pub(crate) struct TransportInputs<'a> {
+    pub(crate) has_car: &'a [bool],
+    pub(crate) has_bike: &'a [bool],
+    pub(crate) walking_threshold_km: &'a [f64],
+    pub(crate) bike_threshold_km: &'a [f64],
 }
 
 pub(crate) struct InitialLocationInputs<'a> {

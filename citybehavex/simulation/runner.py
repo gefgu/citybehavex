@@ -21,7 +21,7 @@ from citybehavex.config import CityBehavExConfig
 from citybehavex.embedding import embed_profiles, embed_texts
 from citybehavex.llm_diaries import DiaryBatch, LLMStats, allocate_location_counts, fetch_diary_batch
 from citybehavex.profiles import AgentProfile, generate_profiles, load_profiles, profile_to_narrative, profiles_to_frame
-from citybehavex.roads import build_road_graph, snap_locations_to_graph
+from citybehavex.roads import build_rail_graph, build_road_graph, snap_locations_to_graph
 from citybehavex.schedules import (
     DdcrpAgentInfo,
     DiaryBank,
@@ -270,6 +270,7 @@ def load_or_build_tessellation(config: CityBehavExConfig) -> tuple[pd.DataFrame,
     tessellation_df, relevance_column = _append_work_scores(config, tessellation_df, relevance_column)
     tessellation_df, home_tile_pool = _append_home_anchors(config, tessellation_df, relevance_column)
     tessellation_df = _maybe_snap_to_roads(config, tessellation_df)
+    tessellation_df = _maybe_snap_to_rail(config, tessellation_df)
     return tessellation_df, relevance_column, home_tile_pool
 
 
@@ -520,6 +521,62 @@ def _maybe_snap_to_roads(config: CityBehavExConfig, tessellation_df: pd.DataFram
     Path(rn.snap_output).parent.mkdir(parents=True, exist_ok=True)
     pd.DataFrame({"road_node": road_node}).to_parquet(rn.snap_output, index=False)
     return tessellation_df.assign(road_node=road_node)
+
+
+def _maybe_snap_to_rail(config: CityBehavExConfig, tessellation_df: pd.DataFrame) -> pd.DataFrame:
+    """Add a ``rail_node`` column mapping each location to its nearest rail graph node."""
+    rn = config.rail_network
+    if not rn.enabled:
+        return tessellation_df
+
+    if Path(rn.snap_output).exists():
+        snap_df = pd.read_parquet(rn.snap_output)
+        if len(snap_df) == len(tessellation_df):
+            typer.echo(f"Loading cached rail-node snapping from {rn.snap_output} ...")
+            return tessellation_df.assign(rail_node=snap_df["rail_node"].to_numpy())
+        typer.echo(
+            f"Warning: cached rail-node snapping at {rn.snap_output} has "
+            f"{len(snap_df):,} rows but tessellation has {len(tessellation_df):,} — rebuilding"
+        )
+
+    sim = config.simulation
+    tess = config.tessellation
+    min_lon = sim.min_lon if sim.min_lon is not None else tess.min_lon
+    min_lat = sim.min_lat if sim.min_lat is not None else tess.min_lat
+    max_lon = sim.max_lon if sim.max_lon is not None else tess.max_lon
+    max_lat = sim.max_lat if sim.max_lat is not None else tess.max_lat
+    lng_col = "lng" if "lng" in tessellation_df.columns else "lon"
+    if None in [min_lon, min_lat, max_lon, max_lat]:
+        min_lon, max_lon = float(tessellation_df[lng_col].min()), float(tessellation_df[lng_col].max())
+        min_lat, max_lat = float(tessellation_df["lat"].min()), float(tessellation_df["lat"].max())
+
+    overture_release = rn.overture_release or tess.overture_release
+    nodes_df, _edges_df = build_rail_graph(
+        min_lon,
+        min_lat,
+        max_lon,
+        max_lat,
+        overture_release,
+        rn.nodes_output,
+        rn.edges_output,
+        rn.classes,
+        rn.speed_kmh_by_class,
+        rn.default_speed_kmh,
+    )
+    rail_node = snap_locations_to_graph(
+        tessellation_df, nodes_df, rn.snap_max_distance_m, lat_col="lat", lng_col=lng_col
+    )
+    n_unsnapped = int((rail_node < 0).sum())
+    if n_unsnapped:
+        typer.echo(
+            f"Warning: {n_unsnapped:,}/{len(rail_node):,} locations are farther than "
+            f"{rn.snap_max_distance_m:.0f}m from the rail graph and will fall back to car "
+            "for rail-eligible trips touching them"
+        )
+
+    Path(rn.snap_output).parent.mkdir(parents=True, exist_ok=True)
+    pd.DataFrame({"rail_node": rail_node}).to_parquet(rn.snap_output, index=False)
+    return tessellation_df.assign(rail_node=rail_node)
 
 
 def _load_or_build_tessellation_df(config: CityBehavExConfig) -> tuple[pd.DataFrame, str]:
@@ -899,9 +956,48 @@ def _run_simulation_core(
             max_leg_waypoints=rn.max_leg_waypoints,
         )
 
+    rail_kwargs: dict = {}
+    railn = config.rail_network
+    if railn.enabled and "rail_node" in tessellation_df.columns:
+        lng_col = "lng" if "lng" in tessellation_df.columns else "lon"
+        min_lon = config.simulation.min_lon if config.simulation.min_lon is not None else config.tessellation.min_lon
+        min_lat = config.simulation.min_lat if config.simulation.min_lat is not None else config.tessellation.min_lat
+        max_lon = config.simulation.max_lon if config.simulation.max_lon is not None else config.tessellation.max_lon
+        max_lat = config.simulation.max_lat if config.simulation.max_lat is not None else config.tessellation.max_lat
+        if None in [min_lon, min_lat, max_lon, max_lat]:
+            min_lon, max_lon = float(tessellation_df[lng_col].min()), float(tessellation_df[lng_col].max())
+            min_lat, max_lat = float(tessellation_df["lat"].min()), float(tessellation_df["lat"].max())
+        overture_release = railn.overture_release or config.tessellation.overture_release
+        rail_nodes_df, rail_edges_df = build_rail_graph(
+            min_lon,
+            min_lat,
+            max_lon,
+            max_lat,
+            overture_release,
+            railn.nodes_output,
+            railn.edges_output,
+            railn.classes,
+            railn.speed_kmh_by_class,
+            railn.default_speed_kmh,
+        )
+        typer.echo(
+            f"Rail routing enabled: {len(rail_nodes_df):,} nodes, {len(rail_edges_df):,} directed edges, "
+            f"max {railn.max_leg_waypoints} waypoints/leg"
+        )
+        rail_kwargs = dict(
+            rail_edge_from=rail_edges_df["from_node"].to_numpy(dtype=np.int64),
+            rail_edge_to=rail_edges_df["to_node"].to_numpy(dtype=np.int64),
+            rail_edge_weight_ds=rail_edges_df["weight_ds"].to_numpy(dtype=np.int64),
+            rail_node_lats=rail_nodes_df["lat"].to_numpy(dtype=np.float64),
+            rail_node_lngs=rail_nodes_df["lng"].to_numpy(dtype=np.float64),
+            location_rail_node=tessellation_df["rail_node"].to_numpy(dtype=np.int64),
+            max_rail_leg_waypoints=railn.max_leg_waypoints,
+        )
+
     base = output_path or config.simulation.output
     moving_path = base.replace(".parquet", "_moving.parquet")
-    stream_moving = config.simulation.stream_output and rn.enabled
+    transport_paths_enabled = rn.enabled or config.rail_network.enabled
+    stream_moving = config.simulation.stream_output and transport_paths_enabled
     moving_writer = _IncrementalParquetWriter(moving_path) if stream_moving else None
     on_day_flush = moving_writer.write if moving_writer is not None else None
 
@@ -928,6 +1024,8 @@ def _run_simulation_core(
     on_activity_day_flush = activities_writer.write if activities_writer is not None else None
 
     profile_types = [p.job for p in profiles] if profiles is not None else None
+    has_car = np.asarray([p.has_car for p in profiles], dtype=np.bool_) if profiles is not None else None
+    has_bike = np.asarray([p.has_bike for p in profiles], dtype=np.bool_) if profiles is not None else None
     df, encounters, moving, activities, social_graph = simulate_agents(
         tessellation_df,
         relevance_column,
@@ -936,6 +1034,12 @@ def _run_simulation_core(
         end_ts=int(end_date.timestamp()),
         slot_seconds=granularity * 60,
         car_speed_kmh=config.simulation.car_speed_kmh,
+        walking_speed_kmh=config.simulation.walking_speed_kmh,
+        bike_speed_kmh=config.simulation.bike_speed_kmh,
+        walking_threshold_mu_ln_km=config.simulation.walking_threshold_mu_ln_km,
+        walking_threshold_sigma_ln=config.simulation.walking_threshold_sigma_ln,
+        bike_threshold_mu_ln_km=config.simulation.bike_threshold_mu_ln_km,
+        bike_threshold_sigma_ln=config.simulation.bike_threshold_sigma_ln,
         n_agents=config.simulation.agents,
         random_state=config.simulation.random_state,
         social_graph_k=config.simulation.social_graph_k,
@@ -961,11 +1065,14 @@ def _run_simulation_core(
         act_temp=config.activities.temperature,
         return_social_graph=True,
         social_node_profiles=profile_types,
+        has_car=has_car,
+        has_bike=has_bike,
         on_day_flush=on_day_flush,
         on_encounter_day_flush=on_encounter_day_flush,
         on_trip_day_flush=on_trip_day_flush,
         on_activity_day_flush=on_activity_day_flush,
         **road_kwargs,
+        **rail_kwargs,
     )
     social_path = social_network_sidecar_path(base)
     social_graph.write_json(social_path)
@@ -992,7 +1099,7 @@ def _run_simulation_core(
         moving_writer.close()
         if moving_writer.rows_written > 0:
             typer.echo(f"Saved {moving_writer.rows_written:,} waypoints (streamed) -> {moving_path}")
-    elif rn.enabled and len(moving) > 0:
+    elif transport_paths_enabled and len(moving) > 0:
         moving.to_parquet(moving_path, index=False)
         typer.echo(f"Saved {len(moving):,} waypoints -> {moving_path}")
     if activities_writer is not None:

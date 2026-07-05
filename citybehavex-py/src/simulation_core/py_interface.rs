@@ -5,7 +5,7 @@ use pyo3::prelude::*;
 use crate::simulation_core::engine::simulate;
 use crate::simulation_core::inputs::{
     ActivityInputs, CoreInputs, DiaryInputs, InitialLocationInputs, LocationInputs,
-    RoadNetworkInputs, SimulationParams, SocialGraphInputs,
+    RoadNetworkInputs, SimulationParams, SocialGraphInputs, TransportInputs,
 };
 use crate::simulation_core::outputs::{ActivityOutputBuffers, RoadPathOutputBuffers, TripOutputBuffers};
 use crate::simulation_core::roads::{batch_road_distances, RoadGraph};
@@ -59,6 +59,11 @@ fn opt_i64_as_usize_vec(v: &Option<PyReadonlyArray1<'_, i64>>) -> PyResult<Optio
     max_leg_waypoints=16usize,
     gravity_deterrence_exponent=-2.0f64, gravity_origin_exponent=1.0f64,
     gravity_destination_exponent=1.0f64,
+    walking_speed_kmh=4.8f64, bike_speed_kmh=15.0f64,
+    has_car=None, has_bike=None, walking_threshold_km=None, bike_threshold_km=None,
+    rail_edge_from=None, rail_edge_to=None, rail_edge_weight_ds=None,
+    rail_node_lats=None, rail_node_lngs=None, location_rail_node=None,
+    max_rail_leg_waypoints=16usize,
     on_day_flush=None,
     on_encounter_day_flush=None,
     on_trip_day_flush=None,
@@ -111,6 +116,19 @@ pub fn simulation_core_simulate_agents<'py>(
     gravity_deterrence_exponent: f64,
     gravity_origin_exponent: f64,
     gravity_destination_exponent: f64,
+    walking_speed_kmh: f64,
+    bike_speed_kmh: f64,
+    has_car: Option<PyReadonlyArray1<'py, bool>>,
+    has_bike: Option<PyReadonlyArray1<'py, bool>>,
+    walking_threshold_km: Option<PyReadonlyArray1<'py, f64>>,
+    bike_threshold_km: Option<PyReadonlyArray1<'py, f64>>,
+    rail_edge_from: Option<PyReadonlyArray1<'py, i64>>,
+    rail_edge_to: Option<PyReadonlyArray1<'py, i64>>,
+    rail_edge_weight_ds: Option<PyReadonlyArray1<'py, i64>>,
+    rail_node_lats: Option<PyReadonlyArray1<'py, f64>>,
+    rail_node_lngs: Option<PyReadonlyArray1<'py, f64>>,
+    location_rail_node: Option<PyReadonlyArray1<'py, i64>>,
+    max_rail_leg_waypoints: usize,
     on_day_flush: Option<Py<PyAny>>,
     on_encounter_day_flush: Option<Py<PyAny>>,
     on_trip_day_flush: Option<Py<PyAny>>,
@@ -136,6 +154,7 @@ pub fn simulation_core_simulate_agents<'py>(
         Bound<'py, PyArray1<f32>>,
         Bound<'py, PyArray1<f32>>,
         Bound<'py, PyArray1<i32>>,
+        Bound<'py, PyArray1<u8>>,
     ),
     (
         Bound<'py, PyArray1<u32>>,
@@ -185,6 +204,34 @@ pub fn simulation_core_simulate_agents<'py>(
     let road_node_lngs_s = opt_slice(&road_node_lngs)?;
     let location_road_node_s = opt_slice(&location_road_node)?;
 
+    let rail_edge_from_v = opt_i64_as_usize_vec(&rail_edge_from)?.unwrap_or_default();
+    let rail_edge_to_v = opt_i64_as_usize_vec(&rail_edge_to)?.unwrap_or_default();
+    let rail_edge_weight_v = opt_i64_as_usize_vec(&rail_edge_weight_ds)?.unwrap_or_default();
+    let rail_node_lats_s = opt_slice(&rail_node_lats)?;
+    let rail_node_lngs_s = opt_slice(&rail_node_lngs)?;
+    let location_rail_node_s = opt_slice(&location_rail_node)?;
+
+    let default_has_car = vec![true; n_agents];
+    let default_has_bike = vec![false; n_agents];
+    let default_walk_threshold = vec![0.0; n_agents];
+    let default_bike_threshold = vec![0.0; n_agents];
+    let has_car_s = match &has_car {
+        Some(arr) => arr.as_slice()?,
+        None => &default_has_car,
+    };
+    let has_bike_s = match &has_bike {
+        Some(arr) => arr.as_slice()?,
+        None => &default_has_bike,
+    };
+    let walking_threshold_s = match &walking_threshold_km {
+        Some(arr) => arr.as_slice()?,
+        None => &default_walk_threshold,
+    };
+    let bike_threshold_s = match &bike_threshold_km {
+        Some(arr) => arr.as_slice()?,
+        None => &default_bike_threshold,
+    };
+
     // Marshal one day's worth of closed waypoint rows to the Python callback
     // (if given) as numpy arrays, in the same column order as the final
     // `path_*` return tuple below, so callers can share one DataFrame-
@@ -197,8 +244,9 @@ pub fn simulation_core_simulate_agents<'py>(
             let lat = chunk.lat.into_pyarray(py);
             let lng = chunk.lng.into_pyarray(py);
             let t = chunk.t.into_pyarray(py);
+            let mode = chunk.mode.into_pyarray(py);
             callback
-                .call1(py, (agent, dest_stop_id, seq, lat, lng, t))
+                .call1(py, (agent, dest_stop_id, seq, lat, lng, t, mode))
                 .map(|_| ())
                 .map_err(|e| e.to_string())
         }
@@ -303,6 +351,8 @@ pub fn simulation_core_simulate_agents<'py>(
             dt_update_mob_sim_s,
             slot_seconds,
             car_speed_kmh,
+            walking_speed_kmh,
+            bike_speed_kmh,
             n_agents,
             master_seed,
         },
@@ -332,6 +382,21 @@ pub fn simulation_core_simulate_agents<'py>(
             location_node: location_road_node_s,
             max_leg_waypoints,
         },
+        rail_network: RoadNetworkInputs {
+            edge_from: &rail_edge_from_v,
+            edge_to: &rail_edge_to_v,
+            edge_weight_ds: &rail_edge_weight_v,
+            node_lats: rail_node_lats_s,
+            node_lngs: rail_node_lngs_s,
+            location_node: location_rail_node_s,
+            max_leg_waypoints: max_rail_leg_waypoints,
+        },
+        transport: TransportInputs {
+            has_car: has_car_s,
+            has_bike: has_bike_s,
+            walking_threshold_km: walking_threshold_s,
+            bike_threshold_km: bike_threshold_s,
+        },
     }, on_day_flush_ref, on_encounter_day_flush_ref, on_trip_day_flush_ref, on_activity_day_flush_ref)
     .map_err(PyValueError::new_err)?;
 
@@ -356,6 +421,7 @@ pub fn simulation_core_simulate_agents<'py>(
             output.path_lat.into_pyarray(py),
             output.path_lng.into_pyarray(py),
             output.path_t.into_pyarray(py),
+            output.path_mode.into_pyarray(py),
         ),
         (
             output.act_agent.into_pyarray(py),
