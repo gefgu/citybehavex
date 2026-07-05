@@ -13,6 +13,7 @@ from web.backend.app.payload import (
     _load_social_network_sidecar,
     _special_day_filters,
     build_comparison_payload,
+    build_network_validation_payload,
 )
 
 
@@ -43,17 +44,13 @@ def test_load_social_network_sidecar_validates_and_returns_payload(tmp_path):
     assert _load_social_network_sidecar(str(synthetic)) == payload
 
 
-def test_build_comparison_payload_includes_network_validation(monkeypatch, tmp_path):
+def test_build_network_validation_payload_includes_synthetic_validation(tmp_path):
+    # network_validation moved to its own endpoint/build function (see
+    # web/backend/app/api/charts.py's /network-validation route) so its
+    # build time doesn't block the rest of /charts -- these two tests moved
+    # from build_comparison_payload accordingly.
     synthetic = tmp_path / "synthetic.parquet"
-    pd.DataFrame(
-        {
-            "uid": ["u1", "u1"],
-            "datetime": pd.to_datetime(["2026-01-01 00:00", "2026-01-01 01:00"]),
-            "lat": [48.85, 48.86],
-            "lng": [2.35, 2.36],
-            "purpose": ["HOME", "WORK"],
-        }
-    ).to_parquet(synthetic, index=False)
+    pd.DataFrame({"uid": ["u1", "u1"]}).to_parquet(synthetic, index=False)
     social_network_sidecar_path(synthetic).write_text(
         json.dumps(
             {
@@ -78,24 +75,11 @@ def test_build_comparison_payload_includes_network_validation(monkeypatch, tmp_p
             "ts": [1, 2, 1],
         }
     ).to_parquet(encounters_sidecar_path(synthetic), index=False)
-    monkeypatch.setattr(
-        "web.backend.app.payload._mobility_law_visits",
-        lambda *args, **kwargs: pd.DataFrame(
-            {
-                "user_id": ["u1"],
-                "timestamp": pd.to_datetime(["2026-01-01 00:00"]),
-                "location_id": ["a"],
-                "lat": [48.85],
-                "lng": [2.35],
-            }
-        ),
-    )
 
-    payload = build_comparison_payload(
+    payload = build_network_validation_payload(
         str(synthetic),
         None,
-        "observed",
-        network_validation_config=SimpleNamespace(
+        SimpleNamespace(
             enabled=True,
             synthetic_enabled=True,
             observed_enabled=False,
@@ -110,18 +94,10 @@ def test_build_comparison_payload_includes_network_validation(monkeypatch, tmp_p
     assert validation["synthetic_vs_random"]["random_network"]["kind"] == "degree_preserving_rnd"
 
 
-def test_build_comparison_payload_includes_observed_network_validation(monkeypatch, tmp_path):
+def test_build_network_validation_payload_includes_observed_validation(tmp_path):
     synthetic = tmp_path / "synthetic.parquet"
     observed = tmp_path / "observed.parquet"
-    pd.DataFrame(
-        {
-            "uid": ["u1"],
-            "datetime": pd.to_datetime(["2026-01-01 00:00"]),
-            "lat": [48.85],
-            "lng": [2.35],
-            "purpose": ["HOME"],
-        }
-    ).to_parquet(synthetic, index=False)
+    pd.DataFrame({"uid": ["u1"]}).to_parquet(synthetic, index=False)
     pd.DataFrame(
         {
             "uid": ["a", "b", "a", "b"],
@@ -131,24 +107,11 @@ def test_build_comparison_payload_includes_observed_network_validation(monkeypat
             "location_id": ["x", "x", "x", "x"],
         }
     ).to_parquet(observed, index=False)
-    monkeypatch.setattr(
-        "web.backend.app.payload._mobility_law_visits",
-        lambda *args, **kwargs: pd.DataFrame(
-            {
-                "user_id": ["u1"],
-                "timestamp": pd.to_datetime(["2026-01-01 00:00"]),
-                "location_id": ["a"],
-                "lat": [48.85],
-                "lng": [2.35],
-            }
-        ),
-    )
 
-    payload = build_comparison_payload(
+    payload = build_network_validation_payload(
         str(synthetic),
         str(observed),
-        "observed",
-        network_validation_config=SimpleNamespace(
+        SimpleNamespace(
             enabled=True,
             synthetic_enabled=False,
             observed_enabled=True,

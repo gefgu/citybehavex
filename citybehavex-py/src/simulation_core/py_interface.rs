@@ -1,14 +1,46 @@
+use h3o::Resolution;
 use numpy::{IntoPyArray, PyArray1, PyReadonlyArray1};
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 
 use crate::simulation_core::engine::simulate;
+use crate::simulation_core::h3_batch::batch_latlng_to_cells;
 use crate::simulation_core::inputs::{
     ActivityInputs, CoreInputs, DiaryInputs, InitialLocationInputs, LocationInputs,
     RoadNetworkInputs, SimulationParams, SocialGraphInputs, TransportInputs,
 };
+use crate::simulation_core::network_graph::{build_co_presence_edges, compute_graph_metrics};
 use crate::simulation_core::outputs::{ActivityOutputBuffers, RoadPathOutputBuffers, TripOutputBuffers};
 use crate::simulation_core::roads::{batch_road_distances, RoadGraph};
+
+/// Batch lat/lng (degrees) -> H3 cell index conversion at a fixed resolution,
+/// in parallel. Returns `u64` cell indices (`INVALID_CELL` == `u64::MAX` for
+/// non-finite/out-of-range input rows) rather than the hex-string form
+/// `h3.latlng_to_cell` returns in Python -- callers only use this to group/
+/// compare locations, and comparing `u64`s avoids re-introducing a per-row
+/// Python loop just to format each cell back into a string.
+#[pyfunction]
+#[pyo3(name = "batch_latlng_to_cells")]
+pub fn batch_latlng_to_cells_py<'py>(
+    py: Python<'py>,
+    lats: PyReadonlyArray1<'py, f64>,
+    lngs: PyReadonlyArray1<'py, f64>,
+    resolution: u8,
+) -> PyResult<Bound<'py, PyArray1<u64>>> {
+    let lat_slice = lats.as_slice()?;
+    let lng_slice = lngs.as_slice()?;
+    if lat_slice.len() != lng_slice.len() {
+        return Err(PyValueError::new_err(format!(
+            "lats and lngs must have the same length, got {} and {}",
+            lat_slice.len(),
+            lng_slice.len()
+        )));
+    }
+    let res = Resolution::try_from(resolution)
+        .map_err(|e| PyValueError::new_err(format!("invalid H3 resolution {resolution}: {e}")))?;
+    let cells = batch_latlng_to_cells(lat_slice, lng_slice, res);
+    Ok(cells.into_pyarray(py))
+}
 
 /// Borrowed slice from an optional numpy array, or an empty slice when absent.
 fn opt_slice<'a, T: numpy::Element>(v: &'a Option<PyReadonlyArray1<'_, T>>) -> PyResult<&'a [T]> {
@@ -431,6 +463,76 @@ pub fn simulation_core_simulate_agents<'py>(
             output.act_arrival.into_pyarray(py),
             output.act_departure.into_pyarray(py),
         ),
+    ))
+}
+
+/// Groups `(day, location, node)` presence rows by `(day, location)` and
+/// emits one edge per unique co-presence pair, with per-edge persistence
+/// (fraction of `time_steps` the pair was seen together on). Replaces the
+/// `itertools.combinations` + `dict[edge, set[day]]` loop in
+/// `citybehavex.reports.network_validation._observed_edges_and_persistence`
+/// -- see `network_graph.rs` for why (measured 150s there on shanghai's
+/// ~65M raw pair-instances). Groups larger than `max_group_size` are
+/// skipped (`skipped_groups`/`skipped_rows` report how many/how large).
+#[pyfunction]
+#[pyo3(name = "build_co_presence_edges")]
+pub fn build_co_presence_edges_py<'py>(
+    py: Python<'py>,
+    day_codes: PyReadonlyArray1<'py, i64>,
+    location_codes: PyReadonlyArray1<'py, i64>,
+    nodes: PyReadonlyArray1<'py, i64>,
+    max_group_size: usize,
+    time_steps: usize,
+) -> PyResult<(
+    Bound<'py, PyArray1<u32>>,
+    Bound<'py, PyArray1<u32>>,
+    Bound<'py, PyArray1<f64>>,
+    u64,
+    u64,
+)> {
+    let day = day_codes.as_slice()?;
+    let location = location_codes.as_slice()?;
+    let node = nodes.as_slice()?;
+    if day.len() != location.len() || day.len() != node.len() {
+        return Err(PyValueError::new_err(
+            "day_codes, location_codes and nodes must have the same length",
+        ));
+    }
+    let (edge_from, edge_to, persistence, skipped_groups, skipped_rows) =
+        build_co_presence_edges(day, location, node, max_group_size, time_steps);
+    Ok((
+        edge_from.into_pyarray(py),
+        edge_to.into_pyarray(py),
+        persistence.into_pyarray(py),
+        skipped_groups,
+        skipped_rows,
+    ))
+}
+
+/// Per-node clustering coefficient and per-edge topological overlap
+/// (Jaccard similarity of endpoint neighborhoods) for an undirected graph
+/// given as an edge list. Replaces the pure-Python `O(sum of degree^2)`
+/// nested loops over `set`-based adjacency in
+/// `citybehavex.reports.network_validation.clustering_coefficients`/
+/// `topological_overlap` (measured: ~51 minutes extrapolated for shanghai's
+/// unusually dense observed co-presence graph, ~1,070 average degree).
+#[pyfunction]
+#[pyo3(name = "graph_metrics")]
+pub fn graph_metrics_py<'py>(
+    py: Python<'py>,
+    node_count: usize,
+    edge_from: PyReadonlyArray1<'py, u32>,
+    edge_to: PyReadonlyArray1<'py, u32>,
+) -> PyResult<(Bound<'py, PyArray1<f64>>, Bound<'py, PyArray1<f64>>)> {
+    let from = edge_from.as_slice()?;
+    let to = edge_to.as_slice()?;
+    if from.len() != to.len() {
+        return Err(PyValueError::new_err("edge_from and edge_to must have the same length"));
+    }
+    let metrics = compute_graph_metrics(node_count, from, to);
+    Ok((
+        metrics.clustering_coefficient.into_pyarray(py),
+        metrics.topological_overlap.into_pyarray(py),
     ))
 }
 

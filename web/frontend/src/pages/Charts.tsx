@@ -2,7 +2,16 @@ import { useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import type { EChartsOption } from "echarts";
-import { fetchCharts, fetchHomeWork, type ChartPayload, type DemographicFilter as DemographicFilterValue, type HomeWorkResponse } from "../api";
+import {
+  fetchCharts,
+  fetchHomeWork,
+  fetchNetworkValidation,
+  type ChartPayload,
+  type DemographicFilter as DemographicFilterValue,
+  type HomeWorkResponse,
+  type NetworkValidationComparisonBlock,
+  type NetworkValidationResponse,
+} from "../api";
 import { EChart } from "../charts/EChart";
 import { DemographicFilter } from "../components/DemographicFilter";
 import { HomeWorkMap } from "../components/HomeWorkMap";
@@ -153,7 +162,7 @@ function NetworkValidationTable({
   validation,
   sourceLabel,
 }: {
-  validation: NonNullable<ChartPayload["network_validation"]>[keyof NonNullable<ChartPayload["network_validation"]>];
+  validation: NetworkValidationComparisonBlock | undefined;
   sourceLabel: "synthetic" | "observed";
 }) {
   if (!validation) return null;
@@ -190,7 +199,7 @@ function NetworkValidationSection({
   sourceLabel,
   sourceTitle,
 }: {
-  block: NonNullable<ChartPayload["network_validation"]>[keyof NonNullable<ChartPayload["network_validation"]>];
+  block: NetworkValidationComparisonBlock | undefined;
   sourceLabel: "synthetic" | "observed";
   sourceTitle: string;
 }) {
@@ -217,6 +226,8 @@ export function Charts() {
   const [dayFilter, setDayFilter] = useState("all");
   const [distributionFilter, setDistributionFilter] = useState("all");
   const [homeWork, setHomeWork] = useState<HomeWorkResponse | null>(null);
+  const [networkValidation, setNetworkValidation] = useState<NetworkValidationResponse | null>(null);
+  const [networkValidationError, setNetworkValidationError] = useState<string | null>(null);
   const [demoFilter, setDemoFilter] = useState<DemographicFilterValue>({
     gender: null,
     age_bracket: null,
@@ -231,6 +242,18 @@ export function Charts() {
   useEffect(() => {
     fetchHomeWork(id, run, demoFilter).then(setHomeWork).catch(() => setHomeWork(null));
   }, [id, run, demoFilter]);
+
+  // Fetched independently of the main charts payload -- network_validation
+  // is the single largest section to build for shanghai/yjmob-scale
+  // simulations, so it shouldn't block first paint of everything else (see
+  // web/backend/app/api/charts.py's /network-validation route).
+  useEffect(() => {
+    setNetworkValidation(null);
+    setNetworkValidationError(null);
+    fetchNetworkValidation(id, run)
+      .then(setNetworkValidation)
+      .catch((e) => setNetworkValidationError(String(e)));
+  }, [id, run]);
 
   const fitSubtitle = useMemo(
     () => (fits: { label: string; params: Record<string, number> }[]) =>
@@ -539,15 +562,19 @@ export function Charts() {
       )}
 
       <SectionHeading title="Social network" />
-      {payload.network_validation ? (
+      {networkValidationError ? (
+        <div className="state">Failed to load network validation: {networkValidationError}</div>
+      ) : networkValidation === null ? (
+        <div className="state">Building social network validation… (fetched separately from the rest of the charts)</div>
+      ) : networkValidation.network_validation ? (
         <>
           <NetworkValidationSection
-            block={payload.network_validation.synthetic_vs_random}
+            block={networkValidation.network_validation.synthetic_vs_random}
             sourceLabel="synthetic"
             sourceTitle="Synthetic social + encounters"
           />
           <NetworkValidationSection
-            block={payload.network_validation.observed_vs_random}
+            block={networkValidation.network_validation.observed_vs_random}
             sourceLabel="observed"
             sourceTitle="Observed daily co-presence"
           />

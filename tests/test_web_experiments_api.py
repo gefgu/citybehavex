@@ -229,3 +229,37 @@ def test_charts_endpoint_allows_missing_observed_path(monkeypatch, tmp_path):
 
     assert response.data["mode"] == "synthetic_only"
     assert response.data["run_id"] == "20260101T010203"
+
+
+def test_network_validation_endpoint_is_independent_of_charts(monkeypatch, tmp_path):
+    """network_validation moved to its own route/cache entry so it never
+    blocks (or is blocked by) the main /charts payload -- see
+    web/backend/app/api/charts.py's get_network_validation."""
+    run = tmp_path / "trajectories_20260101T010203.parquet"
+    pd.DataFrame({"uid": [1]}).to_parquet(run, index=False)
+    selected = SimpleNamespace(
+        run_id="20260101T010203",
+        path=run,
+        social_network_path=tmp_path / "missing_social.json",
+        encounters_path=tmp_path / "missing_encounters.parquet",
+    )
+    experiment = SimpleNamespace(
+        observed_path=tmp_path / "missing_observed.parquet",
+        network_validation_config=None,
+        run=lambda run_id=None: selected,
+    )
+    monkeypatch.setattr(charts_mod, "get_experiment", lambda exp_id: experiment)
+
+    calls = []
+
+    def fake_build(synthetic_path, observed_path, network_validation_config):
+        calls.append((synthetic_path, observed_path, network_validation_config))
+        return {"network_validation": {"synthetic_vs_random": None}, "warnings": []}
+
+    monkeypatch.setattr(charts_mod, "build_network_validation_payload", fake_build)
+
+    response = charts_mod.get_network_validation("demo", run="20260101T010203", refresh=True)
+
+    assert response.data["run_id"] == "20260101T010203"
+    assert response.data["network_validation"] == {"synthetic_vs_random": None}
+    assert len(calls) == 1

@@ -84,7 +84,10 @@ export function SocialNetworkGraph({ block, title }: { block: SocialNetworkBlock
       {title && <h4>{title}</h4>}
       <div className="network-meta">
         <span>{block.node_count.toLocaleString()} nodes</span>
-        <span>{block.edge_count.toLocaleString()} edges</span>
+        <span>
+          {block.edge_count.toLocaleString()} edges
+          {block.edges_sampled ? ` (showing a ${block.edges.length.toLocaleString()}-edge sample)` : ""}
+        </span>
         <span>{block.layout}</span>
         <span>k={block.social_graph_k}</span>
       </div>

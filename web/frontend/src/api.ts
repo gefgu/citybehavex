@@ -513,6 +513,7 @@ export interface SocialNetworkBlock {
   social_graph_k: number;
   nodes: ([number, number, number, number] | [number, number, number, number, string])[];
   edges: [number, number, number?][];
+  edges_sampled?: boolean;
   degrees?: number[];
 }
 export interface NetworkMetricSummary {
@@ -557,6 +558,22 @@ export interface ChartPayload {
   motifs: { groups: FilteredSingleBlock<MotifsBlock>[] } | null;
   stvd: { groups: FilteredSingleBlock<StvdBlock>[] } | null;
   social_network: SocialNetworkBlock | null;
+  warnings: string[];
+}
+
+// network_validation is fetched separately (its own endpoint/cache entry)
+// so its build time doesn't block first paint of the rest of the charts --
+// see fetchNetworkValidation below and web/backend/app/api/charts.py's
+// /network-validation route.
+export interface NetworkValidationResponse {
+  run_id: string;
   network_validation: NetworkValidationBlock | null;
   warnings: string[];
+}
+
+export function fetchNetworkValidation(id: string, run?: string): Promise<NetworkValidationResponse> {
+  const q = run ? `?run=${encodeURIComponent(run)}` : "";
+  return getJson<NetworkValidationResponse>(
+    `/api/experiments/${encodeURIComponent(id)}/network-validation${q}`,
+  );
 }

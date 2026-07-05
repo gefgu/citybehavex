@@ -10,7 +10,7 @@ from ..cache import get_or_build
 from ..experiments import get_experiment
 from ..home_work_data import DemoFilter, GENDERS, JOBS, get_or_build_home_work, resolve_age_bracket
 from ..models import ApiResponseWrapper
-from ..payload import build_comparison_payload
+from ..payload import build_comparison_payload, build_network_validation_payload
 
 router = APIRouter(tags=["charts"])
 
@@ -66,7 +66,6 @@ def get_charts(
             time_use_weight_col=experiment.time_use_weight_col,
             road_nodes_path=str(road_nodes_path) if road_nodes_path is not None else None,
             road_edges_path=str(road_edges_path) if road_edges_path is not None else None,
-            network_validation_config=getattr(experiment, "network_validation_config", None),
             special_days=experiment.special_days,
         ),
         refresh=refresh,
@@ -79,6 +78,56 @@ def get_charts(
                 time_use_path,
                 road_nodes_path,
                 road_edges_path,
+            )
+            if p is not None
+        ),
+    )
+    payload = {**payload, "run_id": selected.run_id}
+    return ApiResponseWrapper(data=payload)
+
+
+@router.get("/experiments/{exp_id}/network-validation")
+def get_network_validation(
+    exp_id: str,
+    run: Optional[str] = Query(None, description="Run id (timestamp). Defaults to the latest run."),
+    refresh: bool = Query(False, description="Bypass the cache and recompute."),
+) -> ApiResponseWrapper[dict[str, Any]]:
+    """Split out of ``/charts`` so its build time (still the largest single
+    section for shanghai/yjmob even after moving the graph computation to
+    Rust -- see ``build_network_validation_payload``) doesn't block first
+    paint of the rest of the charts. Cached separately under its own key
+    (``{exp_id}__network_validation``) so it never collides with the main
+    comparison payload's cache entry for the same run.
+    """
+    experiment = get_experiment(exp_id)
+    if experiment is None:
+        raise HTTPException(status_code=404, detail=f"unknown experiment {exp_id!r}")
+
+    selected = experiment.run(run)
+    if selected is None:
+        raise HTTPException(status_code=404, detail=f"no runs found for experiment {exp_id!r}")
+    observed_path = (
+        experiment.observed_path
+        if experiment.observed_path is not None and experiment.observed_path.exists()
+        else None
+    )
+
+    payload = get_or_build(
+        f"{exp_id}__network_validation",
+        selected.run_id,
+        selected.path,
+        observed_path,
+        build=lambda: build_network_validation_payload(
+            str(selected.path),
+            str(observed_path) if observed_path is not None else None,
+            getattr(experiment, "network_validation_config", None),
+        ),
+        refresh=refresh,
+        extra_paths=tuple(
+            p
+            for p in (
+                selected.social_network_path,
+                getattr(selected, "encounters_path", None),
             )
             if p is not None
         ),
