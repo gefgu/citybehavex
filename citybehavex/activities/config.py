@@ -27,9 +27,10 @@ class ActivitiesConfig(BaseModel):
     # alignment, no road/rail routing) to discover which (cluster, block)
     # pairs are actually reachable, and only score those through the
     # reranker -- see citybehavex.simulation.runner._probe_visited_activity_blocks.
-    # Opt-in: this is new, approximate machinery, so existing configs keep
-    # today's exact (unpruned) behavior unless they turn it on.
-    prune_to_reachable: bool = False
+    # Validated on the Greater Paris config (~51% fewer pairs scored, ~2x
+    # faster alignment phase, correct end-to-end output), so it's the default
+    # now; set false to restore the exact (unpruned) behavior.
+    prune_to_reachable: bool = True
 
     # Uniform tuning knobs over the MTUS catalog's per-activity log-normal
     # duration params (citybehavex.activities.catalog._CATALOG_RAW). `mu_ln`
