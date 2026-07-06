@@ -9,10 +9,12 @@ export function EChart({
   option,
   className = "echart",
   preventPageScrollOnWheel = false,
+  onOptionApplied,
 }: {
   option: EChartsOption;
   className?: string;
   preventPageScrollOnWheel?: boolean;
+  onOptionApplied?: (chart: echarts.ECharts) => void;
 }) {
   const ref = useRef<HTMLDivElement | null>(null);
   const chartRef = useRef<echarts.ECharts | null>(null);
@@ -31,8 +33,11 @@ export function EChart({
   }, []);
 
   useEffect(() => {
-    chartRef.current?.setOption(option, true);
-  }, [option]);
+    const chart = chartRef.current;
+    if (!chart) return;
+    chart.setOption(option, true);
+    onOptionApplied?.(chart);
+  }, [option, onOptionApplied]);
 
   useEffect(() => {
     if (!ref.current || !preventPageScrollOnWheel) return;

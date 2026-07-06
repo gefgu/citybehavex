@@ -434,6 +434,36 @@ table.metrics td.unit { color: var(--muted); }
 
 /* ---- STVD map ---- */
 .stvd-map { height: 560px; border-radius: var(--radius-md); overflow: hidden; }
+.stvd-map .leaflet-control-zoom a,
+.hw-map .leaflet-control-zoom a {
+  display: block;
+  width: 30px;
+  min-width: 0;
+  height: 30px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-bottom: 1px solid #cccccc;
+  border-radius: 0;
+  background: #ffffff;
+  box-shadow: none;
+  line-height: 30px;
+  font-size: 22px;
+  font-weight: 700;
+  color: #000000;
+  text-align: center;
+  text-decoration: none;
+}
+.stvd-map .leaflet-control-zoom a:last-child,
+.hw-map .leaflet-control-zoom a:last-child {
+  border-bottom: 0;
+}
+.stvd-map .leaflet-control-zoom a:hover,
+.hw-map .leaflet-control-zoom a:hover {
+  background: #f4f4f4;
+  color: #000000;
+  text-decoration: none;
+}
 .stvd-controls {
   display: flex;
   gap: var(--space-md);
@@ -612,6 +642,12 @@ table.metrics td.unit { color: var(--muted); }
 .timeline-legend-item .timeline-mode-stay {
   border-radius: 50%;
 }
+.timeline-legend-item .timeline-mode-car {
+  width: 18px;
+  height: 18px;
+  background: url("/transport/red_car/east.png") center / contain no-repeat;
+  border-radius: 0;
+}
 .timeline-legend-item .timeline-mode-walk {
   width: 0;
   height: 0;
@@ -624,7 +660,10 @@ table.metrics td.unit { color: var(--muted); }
   clip-path: polygon(50% 0%, 100% 38%, 82% 100%, 18% 100%, 0% 38%);
 }
 .timeline-legend-item .timeline-mode-rail {
-  transform: rotate(45deg) scale(0.85);
+  width: 18px;
+  height: 18px;
+  background: url("/transport/rail/east.png") center / contain no-repeat;
+  border-radius: 0;
 }
 .timeline-sidebar {
   width: 340px;

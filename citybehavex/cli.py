@@ -288,6 +288,7 @@ def simulate(
         tessellation=tess,
         simulation=sim,
         road_network=road_network,
+        rail_network=loaded.rail_network,
         llm=llm,
         diaries=loaded.diaries,
         embedding=loaded.embedding,

@@ -20,7 +20,11 @@ pub const INVALID_CELL: u64 = u64::MAX;
 /// in parallel. Invalid coordinates map to [`INVALID_CELL`] rather than
 /// failing the whole batch, since real-world check-in data routinely has a
 /// few bad rows mixed into an otherwise valid column.
-pub(crate) fn batch_latlng_to_cells(lats: &[f64], lngs: &[f64], resolution: Resolution) -> Vec<u64> {
+pub(crate) fn batch_latlng_to_cells(
+    lats: &[f64],
+    lngs: &[f64],
+    resolution: Resolution,
+) -> Vec<u64> {
     lats.par_iter()
         .zip(lngs.par_iter())
         .map(|(&lat, &lng)| {
@@ -45,7 +49,8 @@ mod tests {
 
     #[test]
     fn invalid_coordinates_map_to_sentinel() {
-        let cells = batch_latlng_to_cells(&[f64::NAN, 10.0], &[20.0, f64::INFINITY], Resolution::Nine);
+        let cells =
+            batch_latlng_to_cells(&[f64::NAN, 10.0], &[20.0, f64::INFINITY], Resolution::Nine);
         assert_eq!(cells, vec![INVALID_CELL, INVALID_CELL]);
     }
 

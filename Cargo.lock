@@ -80,6 +80,7 @@ dependencies = [
  "rand",
  "rand_xoshiro",
  "rayon",
+ "rustc-hash",
  "skmob2-core",
 ]
 

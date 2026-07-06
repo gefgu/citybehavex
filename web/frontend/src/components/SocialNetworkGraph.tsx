@@ -1,10 +1,36 @@
-import { useMemo } from "react";
+import { useCallback, useMemo } from "react";
+import type * as echarts from "echarts";
 import type { EChartsOption } from "echarts";
 import type { SocialNetworkBlock } from "../api";
 import { EChart } from "../charts/EChart";
 import { COLORS } from "../charts/theme";
 
+type GraphGLControl = {
+  minZoom?: number;
+  maxZoom?: number;
+};
+
+type GraphGLView = {
+  _control?: GraphGLControl;
+};
+
+type GraphRuntimeChart = {
+  getModel: () => {
+    getSeriesByIndex: (index: number) => unknown;
+  };
+  getViewOfSeriesModel: (model: unknown) => GraphGLView | undefined;
+};
+
 export function SocialNetworkGraph({ block, title }: { block: SocialNetworkBlock; title?: string }) {
+  const deepenGraphZoom = useCallback((chart: echarts.ECharts) => {
+    const runtimeChart = chart as unknown as GraphRuntimeChart;
+    const model = runtimeChart.getModel().getSeriesByIndex(0);
+    const view = model ? runtimeChart.getViewOfSeriesModel(model) : undefined;
+    if (!view?._control) return;
+    view._control.minZoom = 0.08;
+    view._control.maxZoom = 48;
+  }, []);
+
   const option = useMemo<EChartsOption>(() => {
     const data = block.nodes.map((node, index) => ({
       id: String(index),
@@ -63,6 +89,7 @@ export function SocialNetworkGraph({ block, title }: { block: SocialNetworkBlock
           links: edges,
           edges,
           roam: true,
+          zoom: 2.1,
           draggable: false,
           symbol: "circle",
           lineStyle: {
@@ -91,7 +118,12 @@ export function SocialNetworkGraph({ block, title }: { block: SocialNetworkBlock
         <span>{block.layout}</span>
         <span>k={block.social_graph_k}</span>
       </div>
-      <EChart option={option} className="network-graph" preventPageScrollOnWheel />
+      <EChart
+        option={option}
+        className="network-graph"
+        preventPageScrollOnWheel
+        onOptionApplied={deepenGraphZoom}
+      />
     </div>
   );
 }

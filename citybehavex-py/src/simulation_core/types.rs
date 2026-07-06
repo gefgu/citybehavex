@@ -1,5 +1,5 @@
 use rand_xoshiro::Xoshiro256PlusPlus;
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 
 /// Abstract location code reserved for WORK episodes (matches diary_to_abs_locs fixed map).
 pub(crate) const WORK_CODE: i32 = 1;
@@ -58,7 +58,7 @@ pub(crate) struct AgentState {
     /// tiny fraction of all locations over a run, so a sparse map (sized by
     /// actual distinct visits, matching `visited_locs`) is the correct
     /// asymptotic representation.
-    pub(crate) visit_counts: HashMap<usize, u32>,
+    pub(crate) visit_counts: FxHashMap<usize, u32>,
     pub(crate) total_visits: f64,
     pub(crate) s: f64,
     pub(crate) norm_sq: f64,
@@ -71,7 +71,7 @@ impl AgentState {
             home_location: 0,
             work_location: 0,
             visited_locs: Vec::with_capacity(200),
-            visit_counts: HashMap::with_capacity(200),
+            visit_counts: FxHashMap::with_capacity_and_hasher(200, Default::default()),
             total_visits: 0.0,
             s: 0.0,
             norm_sq: 0.0,
