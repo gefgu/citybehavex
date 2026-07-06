@@ -28,6 +28,7 @@ pub(crate) struct SimulationOutput {
     pub(crate) act_activity: Vec<u16>,
     pub(crate) act_arrival: Vec<i32>,
     pub(crate) act_departure: Vec<i32>,
+    pub(crate) act_block_id: Vec<i32>,
 }
 
 impl SimulationOutput {
@@ -57,6 +58,7 @@ impl SimulationOutput {
             act_activity: Vec::new(),
             act_arrival: Vec::new(),
             act_departure: Vec::new(),
+            act_block_id: Vec::new(),
         }
     }
 }
@@ -77,6 +79,12 @@ pub(crate) struct ActivityOutputBuffers {
     pub(crate) activity: Vec<u16>,
     pub(crate) arrival: Vec<i32>,
     pub(crate) departure: Vec<i32>,
+    /// The diary block that drove this activity's contextual-alignment
+    /// lookup (see `ActivityInputs`/`activity_weight`), exposed here purely
+    /// so Python-side reachability analysis can tell which (cluster, block)
+    /// pairs a run actually visited -- never read back by the Rust core
+    /// itself once the activity has been sampled.
+    pub(crate) block_id: Vec<i32>,
     pub(crate) last_idx: Vec<usize>,
 }
 
@@ -89,6 +97,7 @@ impl ActivityOutputBuffers {
             activity: Vec::with_capacity(n_agents),
             arrival: Vec::with_capacity(n_agents),
             departure: Vec::with_capacity(n_agents),
+            block_id: Vec::with_capacity(n_agents),
             last_idx: Vec::with_capacity(n_agents),
         }
     }
@@ -96,7 +105,14 @@ impl ActivityOutputBuffers {
     /// Push a new micro-activity row for `agent_idx`, recording its index in
     /// `last_idx` so a later call can patch its `departure`. Returns the new
     /// row's index (unused by callers today, kept for symmetry/testability).
-    pub(crate) fn push(&mut self, agent_idx: usize, stop_id: u32, seq: i32, arrival: i64) -> usize {
+    pub(crate) fn push(
+        &mut self,
+        agent_idx: usize,
+        stop_id: u32,
+        seq: i32,
+        arrival: i64,
+        block_id: i32,
+    ) -> usize {
         let idx = self.agent.len();
         self.agent.push(agent_idx as u32 + 1);
         self.stop_id.push(stop_id);
@@ -104,6 +120,7 @@ impl ActivityOutputBuffers {
         self.activity.push(0); // placeholder, patched immediately after sampling
         self.arrival.push(arrival as i32);
         self.departure.push(arrival as i32); // placeholder, patched when this activity closes
+        self.block_id.push(block_id);
         if agent_idx < self.last_idx.len() {
             self.last_idx[agent_idx] = idx;
         } else {
@@ -126,6 +143,7 @@ impl ActivityOutputBuffers {
             activity: Vec::with_capacity(n_agents),
             arrival: Vec::with_capacity(n_agents),
             departure: Vec::with_capacity(n_agents),
+            block_id: Vec::with_capacity(n_agents),
             last_idx: std::mem::take(&mut self.last_idx),
         };
         for i in 0..n_rows {
@@ -138,6 +156,7 @@ impl ActivityOutputBuffers {
                 residual.activity.push(self.activity[i]);
                 residual.arrival.push(self.arrival[i]);
                 residual.departure.push(self.departure[i]);
+                residual.block_id.push(self.block_id[i]);
                 residual.last_idx[owner] = new_idx;
             } else {
                 flushed.agent.push(self.agent[i]);
@@ -146,6 +165,7 @@ impl ActivityOutputBuffers {
                 flushed.activity.push(self.activity[i]);
                 flushed.arrival.push(self.arrival[i]);
                 flushed.departure.push(self.departure[i]);
+                flushed.block_id.push(self.block_id[i]);
             }
         }
         *self = residual;
@@ -343,6 +363,7 @@ impl TripOutputBuffers {
             act_activity: activities.activity,
             act_arrival: activities.arrival,
             act_departure: activities.departure,
+            act_block_id: activities.block_id,
         }
     }
 }
@@ -401,10 +422,8 @@ mod tests {
         assert_eq!(out.agents.len(), 3); // exactly one open row per agent survives
 
         // No stop_id appears in both flushed and residual.
-        let flushed_ids: std::collections::HashSet<u32> =
-            flushed.stop_id.iter().copied().collect();
-        let residual_ids: std::collections::HashSet<u32> =
-            out.stop_id.iter().copied().collect();
+        let flushed_ids: std::collections::HashSet<u32> = flushed.stop_id.iter().copied().collect();
+        let residual_ids: std::collections::HashSet<u32> = out.stop_id.iter().copied().collect();
         assert!(flushed_ids.is_disjoint(&residual_ids));
         assert_eq!(flushed_ids.len() + residual_ids.len(), total_before);
 
@@ -424,10 +443,10 @@ mod tests {
     fn take_day_chunk_on_activity_buffers_conserves_rows_and_remaps() {
         let mut acts = ActivityOutputBuffers::with_capacity(2);
         // Agent 0: two activities (first closes, second stays open).
-        acts.push(0, 100, 0, 0);
-        acts.push(0, 100, 1, 10);
+        acts.push(0, 100, 0, 0, 7);
+        acts.push(0, 100, 1, 10, 8);
         // Agent 1: one activity (stays open).
-        acts.push(1, 200, 0, 0);
+        acts.push(1, 200, 0, 0, 9);
 
         let total_before = acts.agent.len();
         let flushed = acts.take_day_chunk();
@@ -441,5 +460,13 @@ mod tests {
         }
         // The closed first activity for agent 0 (seq=0) must have been flushed.
         assert!(flushed.seq.contains(&0) && flushed.agent.iter().all(|&a| a == 1));
+        // block_id must survive the flush/residual split in lockstep with the
+        // other parallel fields (same row, same position).
+        assert_eq!(flushed.block_id, vec![7]);
+        assert_eq!(acts.block_id.len(), 2);
+        for (i, &agent) in acts.agent.iter().enumerate() {
+            let expected = if agent == 1 { 8 } else { 9 };
+            assert_eq!(acts.block_id[i], expected);
+        }
     }
 }

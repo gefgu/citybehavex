@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import hashlib
+import os
+import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Optional, Sequence
@@ -9,7 +12,7 @@ import numpy as np
 import pandas as pd
 import requests
 
-from citybehavex.activities.catalog import Activity, build_catalog
+from citybehavex.activities.catalog import N_PURPOSES, Activity, build_catalog
 from citybehavex.activities.config import ActivitiesConfig
 from citybehavex.llm_diaries import Diary
 
@@ -177,10 +180,23 @@ def _load_cache(path: Path) -> dict[str, float]:
 
 
 def _save_cache(path: Path, cache: dict[str, float]) -> None:
+    """Write the cache atomically: a crash or interrupt mid-write must never
+    leave `path` holding a truncated/corrupt ``.npz``, since it's reused
+    across runs."""
     path.parent.mkdir(parents=True, exist_ok=True)
     keys = np.array(list(cache.keys()))
     scores = np.array([cache[k] for k in cache], dtype=np.float32)
-    np.savez(path, keys=keys, scores=scores)
+    # Write via an explicit file handle (rather than a bare path) so numpy
+    # doesn't append its own ".npz" suffix to the temp name, which would
+    # break the atomic rename below.
+    tmp_path = path.parent / (path.name + ".tmp")
+    try:
+        with open(tmp_path, "wb") as fh:
+            np.savez(fh, keys=keys, scores=scores)
+        os.replace(tmp_path, path)
+    except BaseException:
+        tmp_path.unlink(missing_ok=True)
+        raise
 
 
 def _extract_scores(payload: Any, expected: int) -> Optional[list[float]]:
@@ -244,16 +260,77 @@ def _post_rerank(
     return _extract_scores(resp.json(), len(texts))
 
 
+def _post_pair_scores(
+    base_url: str,
+    model: str | None,
+    pairs: Sequence[tuple[str, str]],
+    *,
+    timeout: float,
+) -> Optional[list[float]]:
+    payload: dict[str, Any] = {
+        "pairs": [[query, text] for query, text in pairs],
+        "raw_scores": False,
+        "truncate": True,
+    }
+    if model:
+        payload["model"] = model
+    resp = requests.post(
+        base_url.rstrip("/") + "/score_pairs",
+        headers={"Content-Type": "application/json"},
+        json=payload,
+        timeout=timeout,
+    )
+    resp.raise_for_status()
+    return _extract_scores(resp.json(), len(pairs))
+
+
+def _score_chunk_with_retries(
+    base_url: str,
+    model: str | None,
+    pairs: Sequence[tuple[str, str]],
+    *,
+    timeout: float,
+    retries: int,
+) -> list[float]:
+    """Score one batch, retrying transient failures. Raises (rather than
+    returning ``None``) once retries are exhausted, so callers' existing
+    broad ``except Exception: return None`` fallback still applies."""
+    last_error: Exception | None = None
+    for _attempt in range(max(1, retries)):
+        try:
+            scores = _post_pair_scores(base_url, model, pairs, timeout=timeout)
+        except Exception as exc:  # noqa: BLE001 - retry, raise on exhaustion.
+            last_error = exc
+            continue
+        if scores is None:
+            last_error = ValueError("reranker response could not be parsed")
+            continue
+        return scores
+    raise RuntimeError(f"failed to score a batch of {len(pairs)} pairs") from last_error
+
+
 def score_activity_alignment(
     cluster_narratives: Sequence[str],
     diaries: Sequence[Diary],
     config: ActivitiesConfig,
+    visited_pairs: Optional[set[tuple[int, int]]] = None,
 ) -> Optional[tuple[np.ndarray, list[ActivityBlock], pd.DataFrame]]:
     """Return contextual micro-activity alignment scores or ``None`` on failure.
 
     Shape is ``[n_clusters, n_blocks, n_activities + 1, n_activities]``. The
     third dimension reserves index 0 for no previous activity and activity ``a``
     at index ``a + 1``.
+
+    ``visited_pairs``, when given, is a set of ``(cluster_id, block_id)`` pairs
+    a cheap reachability probe found were actually visited; any other pair is
+    skipped entirely (both the network request and the tensor slot, which
+    stays at its zero-initialized default -- a documented graceful-degradation
+    fallback toward base-rate weighting, not a crash). Pruning at this
+    (cluster, block) granularity rather than per previous-activity is
+    deliberate: block visitation is driven by diary structure, identical
+    between the probe run and the final run, while which previous activity
+    gets sampled within an already-visited block depends on weights that
+    differ between the two runs.
     """
     if (
         not cluster_narratives
@@ -265,7 +342,6 @@ def score_activity_alignment(
 
     catalog = build_catalog()
     n_activities = len(catalog)
-    previous_values = [START_PREVIOUS_ACTIVITY, *range(n_activities)]
     blocks = diary_activity_blocks(diaries)
     scores = np.zeros(
         (len(cluster_narratives), len(blocks), n_activities + 1, n_activities),
@@ -278,35 +354,134 @@ def score_activity_alignment(
     if cache_path is not None:
         cache = _load_cache(cache_path)
 
+    # A block's true previous activity is whichever activity the agent last
+    # performed, which is always either START (nothing simulated yet) or an
+    # activity eligible for the *actual preceding episode's* purpose: the same
+    # diary's prior episode, or -- for a diary's first episode -- any diary's
+    # closing episode, since days chain onto each other across the week.
+    # Restricting to that set (rather than every catalog activity) is provably
+    # safe because the Rust engine can never present any other previous state
+    # to this block; scoring the rest would be wasted work. Diary ids repeat
+    # across weekday/weekend banks, so predecessors are computed by mirroring
+    # diary_activity_blocks' own (diary, episode) iteration rather than a
+    # diary_id lookup, which would silently collide.
+    day_boundary_purposes = sorted(
+        {_purpose_code(diary.episodes[-1].purpose) for diary in diaries}
+    )
+    eligible_by_purpose = {
+        purpose: [activity.idx for activity in catalog if purpose in activity.eligible_purposes]
+        for purpose in range(N_PURPOSES)
+    }
+
+    block_previous_candidates: list[list[int]] = []
+    for diary in diaries:
+        for episode_index, episode in enumerate(diary.episodes):
+            if episode_index > 0:
+                purpose_codes = [_purpose_code(diary.episodes[episode_index - 1].purpose)]
+            else:
+                purpose_codes = day_boundary_purposes
+            candidates = {START_PREVIOUS_ACTIVITY}
+            for purpose in purpose_codes:
+                candidates.update(eligible_by_purpose[purpose])
+            block_previous_candidates.append(sorted(candidates))
+
+    block_eligible = [_eligible_activity_indices(block, catalog) for block in blocks]
+
+    def should_score(cluster_id: int, block: ActivityBlock) -> bool:
+        return visited_pairs is None or (cluster_id, block.block_id) in visited_pairs
+
     try:
+        pending: list[tuple[str, str, str]] = []
+        pending_seen: set[str] = set()
         for cluster_id, profile_text in enumerate(cluster_narratives):
-            for block in blocks:
-                eligible = _eligible_activity_indices(block, catalog)
-                if not eligible:
+            for block, eligible, previous_candidates in zip(
+                blocks, block_eligible, block_previous_candidates
+            ):
+                if not eligible or not should_score(cluster_id, block):
                     continue
                 texts = [_activity_text(catalog[idx]) for idx in eligible]
-                for prev_pos, previous in enumerate(previous_values):
-                    keys = [
-                        _cache_key(config.alignment_model, profile_text, block, previous, text)
-                        for text in texts
-                    ]
-                    missing = [idx for idx, key in enumerate(keys) if key not in cache]
+                for previous in previous_candidates:
                     query = _query_text(profile_text, block, previous, catalog)
-                    for start in range(0, len(missing), config.alignment_batch_size):
-                        chunk_idx = missing[start : start + config.alignment_batch_size]
-                        chunk_scores = _post_rerank(
-                            config.alignment_base_url,
-                            config.alignment_model,
-                            query,
-                            [texts[i] for i in chunk_idx],
-                            timeout=config.alignment_timeout_seconds,
-                        )
-                        if chunk_scores is None:
-                            return None
-                        for idx, score in zip(chunk_idx, chunk_scores):
-                            cache[keys[idx]] = float(np.clip(score, 0.0, 1.0))
+                    for text in texts:
+                        key = _cache_key(config.alignment_model, profile_text, block, previous, text)
+                        if key in cache or key in pending_seen:
+                            continue
+                        pending_seen.add(key)
+                        pending.append((key, query, text))
+
+        chunks = [
+            pending[start : start + config.alignment_batch_size]
+            for start in range(0, len(pending), config.alignment_batch_size)
+        ]
+        total_chunks = len(chunks)
+        total_pairs = len(pending)
+        start_time = time.perf_counter()
+        checkpoint_every = config.alignment_checkpoint_every
+
+        def _apply_chunk_scores(chunk: list[tuple[str, str, str]], chunk_scores: list[float]) -> None:
+            for (key, _query, _text), score in zip(chunk, chunk_scores):
+                cache[key] = float(np.clip(score, 0.0, 1.0))
+
+        def _report_progress(done_chunks: int, done_pairs: int) -> None:
+            if checkpoint_every <= 0 or done_chunks % checkpoint_every != 0:
+                return
+            elapsed = time.perf_counter() - start_time
+            rate = done_pairs / elapsed if elapsed > 0 else 0.0
+            print(
+                f"Activity alignment: {done_chunks}/{total_chunks} batches, "
+                f"{done_pairs}/{total_pairs} pairs, {rate:.0f} pairs/sec, "
+                f"{elapsed:.1f}s elapsed",
+                flush=True,
+            )
+            if cache_path is not None:
+                _save_cache(cache_path, cache)
+
+        if config.alignment_concurrency <= 1:
+            done_pairs = 0
+            for done_chunks, chunk in enumerate(chunks, start=1):
+                chunk_scores = _score_chunk_with_retries(
+                    config.alignment_base_url,
+                    config.alignment_model,
+                    [(query, text) for _key, query, text in chunk],
+                    timeout=config.alignment_timeout_seconds,
+                    retries=config.alignment_retries,
+                )
+                _apply_chunk_scores(chunk, chunk_scores)
+                done_pairs += len(chunk)
+                _report_progress(done_chunks, done_pairs)
+        else:
+            done_pairs = 0
+            with ThreadPoolExecutor(max_workers=config.alignment_concurrency) as executor:
+                futures = {
+                    executor.submit(
+                        _score_chunk_with_retries,
+                        config.alignment_base_url,
+                        config.alignment_model,
+                        [(query, text) for _key, query, text in chunk],
+                        timeout=config.alignment_timeout_seconds,
+                        retries=config.alignment_retries,
+                    ): chunk
+                    for chunk in chunks
+                }
+                for done_chunks, future in enumerate(as_completed(futures), start=1):
+                    chunk = futures[future]
+                    chunk_scores = future.result()
+                    _apply_chunk_scores(chunk, chunk_scores)
+                    done_pairs += len(chunk)
+                    _report_progress(done_chunks, done_pairs)
+
+        for cluster_id, profile_text in enumerate(cluster_narratives):
+            for block, eligible, previous_candidates in zip(
+                blocks, block_eligible, block_previous_candidates
+            ):
+                if not eligible or not should_score(cluster_id, block):
+                    continue
+                texts = [_activity_text(catalog[idx]) for idx in eligible]
+                for previous in previous_candidates:
+                    prev_pos = 0 if previous == START_PREVIOUS_ACTIVITY else previous + 1
                     for local_idx, activity_idx in enumerate(eligible):
-                        score = float(cache[keys[local_idx]])
+                        key = _cache_key(config.alignment_model, profile_text, block, previous, texts[local_idx])
+                        score = float(cache[key])
                         scores[cluster_id, block.block_id, prev_pos, activity_idx] = score
                         rows.append(
                             {

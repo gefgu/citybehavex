@@ -69,11 +69,11 @@ def _run(
     starts = np.array([0], dtype=np.int64)
     ends = np.array([len(diary_ts)], dtype=np.int64)
     rels = np.ones(len(lats), dtype=float) if relevances is None else np.asarray(relevances, dtype=float)
-    # Returns a 3-tuple of tuples: (10 trip arrays), (7 path arrays), (6 activity arrays).
+    # Returns a 3-tuple of tuples: (10 trip arrays), (7 path arrays), (7 activity arrays).
     # Trip: agents, loc_id, arrival, departure, duration,
     #       enc_agent, enc_contact, enc_tile, enc_ts, stop_abstract_loc
     # Paths: stop_id, path_agent, path_stop_id, path_seq, path_lat, path_lng, path_t
-    # Activities: act_agent, act_stop_id, act_seq, act_activity, act_arrival, act_departure
+    # Activities: act_agent, act_stop_id, act_seq, act_activity, act_arrival, act_departure, act_block_id
     return core.simulation_core_simulate_agents(
         latitudes=np.asarray(lats, dtype=float),
         longitudes=np.asarray(lngs, dtype=float),
@@ -355,7 +355,7 @@ def test_same_physical_location_still_samples_multiple_activities():
     ag = trip[0]
     assert len(ag) == 1  # still one physical stop
 
-    act_agent, act_stop_id, act_seq, act_activity, act_arrival, act_departure = (
+    act_agent, act_stop_id, act_seq, act_activity, act_arrival, act_departure, _act_block_id = (
         np.asarray(a) for a in acts
     )
     assert len(act_agent) >= 4
@@ -652,7 +652,7 @@ def test_activities_chain_until_macro_departure_deadline():
     assert arr[1] == 7 * 3600 - 900
     assert dur[1] == 0
 
-    act_agent, act_stop_id, act_seq, act_activity, act_arrival, act_departure = (
+    act_agent, act_stop_id, act_seq, act_activity, act_arrival, act_departure, _act_block_id = (
         np.asarray(a) for a in acts
     )
     first_stop = act_stop_id == 0
@@ -714,6 +714,77 @@ def test_contextual_activity_alignment_uses_previous_activity_with_separate_micr
 
     first_stop = activities[activities["stop_id"] == 0]["activity"].tolist()
     assert first_stop[:2] == [cleanetc, foodprep]
+
+
+def test_block_id_refreshes_across_same_abstract_location_boundary():
+    """Regression test for a bug where the block id driving contextual
+    alignment lookups only refreshed on an abstract-location change, so two
+    consecutive episodes sharing a purpose code (e.g. HOME -> HOME, the
+    common case across a day boundary) silently kept scoring the whole new
+    episode against the *previous* episode's block. Two agents share the
+    same starting abstract-location (HOME) but come from diary segments
+    with different real starting blocks (0 and 2) -- each agent's block_id
+    column must reflect its own diary the whole time, not bleed into the
+    other's or get stuck at the initial value."""
+    tess = pd.DataFrame(
+        {
+            "tile_id": [0, 1],
+            "lat": [48.8566, 48.8580],
+            "lng": [2.3522, 2.3540],
+            "relevance": [1.0, 1.0],
+        }
+    )
+    # Agent 0: HOME (block 0) until 2h, then WORK (block 1).
+    # Agent 1: HOME (block 2) until 2h, then WORK (block 3).
+    diary_timestamps = np.array([0, 2 * 3600, 0, 2 * 3600], dtype=np.int64)
+    diary_abs_locs = np.array([0, 1, 0, 1], dtype=np.int32)
+    diary_block_ids = np.array([0, 1, 2, 3], dtype=np.int32)
+    diary_arrays = (
+        diary_timestamps,
+        diary_abs_locs,
+        np.array([0, 2], dtype=np.int64),
+        np.array([2, 4], dtype=np.int64),
+        diary_block_ids,
+    )
+    ten_min_hours = 10 / 60
+    act_dur_mu = np.log(np.full(N_ACTIVITIES, ten_min_hours, dtype=np.float64))
+    act_dur_sigma = np.zeros(N_ACTIVITIES, dtype=np.float64)
+    purpose_act_starts, purpose_acts = build_eligibility_csr()
+
+    _df, _encounters, _moving, activities = simulate_agents(
+        tess,
+        "relevance",
+        diary_arrays,
+        start_ts=0,
+        end_ts=3 * 3600,
+        slot_seconds=_SLOT,
+        car_speed_kmh=_SPEED,
+        n_agents=2,
+        random_state=42,
+        act_dur_mu=act_dur_mu,
+        act_dur_sigma=act_dur_sigma,
+        purpose_act_starts=purpose_act_starts,
+        purpose_acts=purpose_acts,
+    )
+
+    # Real trip departures are travel-time-buffered slightly before the exact
+    # diary boundary (see test_simulation_core_long_trip_is_centered_on_slot_
+    # boundary), so assert on the block_id sequence itself rather than a
+    # wall-clock cutoff: each agent's own HOME run of block ids, then exactly
+    # one switch to its own WORK block id -- never the other agent's blocks,
+    # never stuck at a stale/initial value.
+    block_seq_0 = activities[activities["uid"] == 1].sort_values("arrival")["block_id"].tolist()
+    block_seq_1 = activities[activities["uid"] == 2].sort_values("arrival")["block_id"].tolist()
+
+    assert block_seq_0[0] == 0
+    assert block_seq_0[-1] == 1
+    assert set(block_seq_0) == {0, 1}
+    assert block_seq_0 == sorted(block_seq_0)  # monotonic: all 0s then all 1s
+
+    assert block_seq_1[0] == 2
+    assert block_seq_1[-1] == 3
+    assert set(block_seq_1) == {2, 3}
+    assert block_seq_1 == sorted(block_seq_1)  # monotonic: all 2s then all 3s
 
 
 def test_home_anchors_are_appended_and_profiles_use_only_home_pool(tmp_path):
@@ -1353,7 +1424,8 @@ def test_on_trip_day_flush_chunks_plus_tail_reproduce_the_no_callback_trip():
 
 
 def test_on_activity_day_flush_chunks_plus_tail_reproduce_the_no_callback_activities():
-    # activities tuple: act_agent, act_stop_id, act_seq, act_activity, act_arrival, act_departure
+    # activities tuple: act_agent, act_stop_id, act_seq, act_activity, act_arrival,
+    #                    act_departure, act_block_id
     # Same unordered-multiset comparison as trips, for the same reason.
     _, _, baseline_acts = _run_multi_agent_multi_day(with_activities=True)
 
@@ -1370,7 +1442,7 @@ def test_on_activity_day_flush_chunks_plus_tail_reproduce_the_no_callback_activi
     streamed_tail = [np.asarray(col) for col in streamed_acts]
     reconstructed_cols = [
         np.concatenate([chunk[col_idx] for chunk in chunks] + [streamed_tail[col_idx]])
-        for col_idx in range(6)
+        for col_idx in range(7)
     ]
     reconstructed_rows = sorted(zip(*reconstructed_cols))
     baseline_rows = sorted(zip(*(np.asarray(col) for col in baseline_acts)))

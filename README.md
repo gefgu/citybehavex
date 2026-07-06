@@ -108,6 +108,7 @@ uv run --extra finetuning python scripts/train_modernbert_activity_aligner.py \
   --dataset-output data/llm_diaries_gparis/activity_alignment_scores.parquet \
   --output-model-path models/modernbert-activity-aligner \
   --sample-size 5000 \
+  --llm-concurrency 8 \
   --epochs 1 \
   --batch-size 8 \
   --learning-rate 2e-5
@@ -115,16 +116,37 @@ uv run --extra finetuning python scripts/train_modernbert_activity_aligner.py \
 
 The script scores only activity categories valid for each HOME/WORK/OTHER
 schedule block and includes previous-activity context in the training query.
+`--llm-concurrency` controls how many labeling requests are in flight at once;
+raise it when the vLLM server has batching headroom, and lower it if requests
+start timing out.
 To use the trained scorer for micro-activity CRP alignment, serve the saved
 model with the same rerank-compatible server and set:
+
+```bash
+PYTHONPATH=/home/gustavo/vllm/.venv/lib/python3.12/site-packages \
+  .venv/bin/python scripts/serve_schedule_aligner.py \
+  --model-path models/modernbert-activity-aligner \
+  --port 8083 \
+  --device cuda \
+  --predict-batch-size 128
+```
+
+On this RTX 5090 workstation, keep the vLLM environment's CUDA 13 / PyTorch
+build first on `PYTHONPATH` when serving rerankers on GPU; the project
+environment's older CUDA 12.4 PyTorch build cannot run sm_120 kernels.
 
 ```yaml
 activities:
   enabled: true
   alignment_backend: rerank
-  alignment_base_url: http://localhost:8082
+  alignment_base_url: http://localhost:8083
   alignment_model: models/modernbert-activity-aligner
+  alignment_batch_size: 512
   alignment_cache_path: data/llm_diaries_gparis/activity_alignment_cache.npz
+  alignment_concurrency: 4
+  alignment_retries: 2
+  alignment_checkpoint_every: 20
+  prune_to_reachable: false  # set true to run the cheap reachability probe first and skip unvisited (cluster, block) pairs
 ```
 
 ## Web app

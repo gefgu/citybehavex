@@ -79,8 +79,8 @@ embedding:
 schedule:
   temperature_beta_a: 2.0
   temperature_beta_b: 5.0
-  alpha_beta_a: 2.0
-  alpha_beta_b: 5.0
+  alpha_beta_a: 1.0
+  alpha_beta_b: 6.0
   similarity_backend: alignment_model
   alignment_base_url: http://localhost:8082
   alignment_model: models/modernbert-schedule-aligner
@@ -94,6 +94,7 @@ activities:
   alignment_backend: rerank
   alignment_base_url: http://localhost:8083
   alignment_model: models/modernbert-activity-aligner
+  alignment_batch_size: 512
   alignment_cache_path: data/llm_diaries_shanghai/activity_alignment_cache.npz
 
 profiles:

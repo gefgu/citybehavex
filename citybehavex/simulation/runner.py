@@ -883,11 +883,85 @@ def _save_crp_artifact(
     df.to_parquet(path, index=False)
 
 
+def _probe_visited_activity_blocks(
+    config: CityBehavExConfig,
+    tessellation_df: pd.DataFrame,
+    relevance_column: str,
+    start_date: pd.Timestamp,
+    end_date: pd.Timestamp,
+    diary_arrays: tuple,
+    profiles: Optional[list[AgentProfile]],
+    profile_embeddings: Optional[np.ndarray],
+    profile_clusters: ProfileClusters,
+    act_dur_mu: np.ndarray,
+    act_dur_sigma: np.ndarray,
+    purpose_act_starts: np.ndarray,
+    purpose_acts: np.ndarray,
+) -> set[tuple[int, int]]:
+    """Run a cheap, disposable simulation pass to discover which (cluster,
+    block) pairs the diary/CRP structure actually sends agents through, so
+    the real alignment precompute only scores those.
+
+    No contextual alignment (``activity_alignment_scores=None`` forces the
+    base-rate/embedding fallback), no road/rail routing, no streaming, no
+    encounters/social graph -- block visitation is driven entirely by the
+    diary schedule (already fixed in ``diary_arrays``), not by which
+    micro-activity gets sampled within a block, so none of that machinery is
+    needed here. Reuses the same ``random_state`` as the real run so the
+    diary/CRP choices this probe sees are byte-identical to what the final
+    run will use.
+    """
+    granularity = config.simulation.granularity_minutes
+    home_tiles = (
+        np.array([p.home_tile for p in profiles], dtype=np.int64) if profiles is not None else None
+    )
+    work_tiles = (
+        np.array([p.work_tile for p in profiles], dtype=np.int64) if profiles is not None else None
+    )
+    _traj, _encounters, _moving, activities = simulate_agents(
+        tessellation_df,
+        relevance_column,
+        diary_arrays,
+        start_ts=int(start_date.timestamp()),
+        end_ts=int(end_date.timestamp()),
+        slot_seconds=granularity * 60,
+        car_speed_kmh=config.simulation.car_speed_kmh,
+        n_agents=config.simulation.agents,
+        random_state=config.simulation.random_state,
+        rho=config.simulation.rho,
+        gamma=config.simulation.gamma,
+        alpha=config.simulation.alpha,
+        dt_update_mob_sim_hours=config.simulation.dt_update_mob_sim_hours,
+        indipendency_window_hours=config.simulation.indipendency_window_hours,
+        gravity_deterrence_exponent=config.simulation.gravity_deterrence_exponent,
+        gravity_origin_exponent=config.simulation.gravity_origin_exponent,
+        gravity_destination_exponent=config.simulation.gravity_destination_exponent,
+        starting_locs=home_tiles,
+        work_tiles=work_tiles,
+        profile_embeddings=profile_embeddings,
+        act_dur_mu=act_dur_mu,
+        act_dur_sigma=act_dur_sigma,
+        purpose_act_starts=purpose_act_starts,
+        purpose_acts=purpose_acts,
+        act_kappa=config.activities.kappa,
+        act_temp=config.activities.temperature,
+    )
+    if activities.empty or "block_id" not in activities.columns:
+        return set()
+    cluster_labels = np.asarray(profile_clusters.labels)
+    uid = activities["uid"].to_numpy(dtype=np.int64) - 1  # uid is 1-indexed (agent_idx + 1)
+    block_id = activities["block_id"].to_numpy(dtype=np.int64)
+    valid = (uid >= 0) & (uid < len(cluster_labels)) & (block_id >= 0)
+    clusters = cluster_labels[uid[valid]]
+    return set(zip(clusters.tolist(), block_id[valid].tolist()))
+
+
 def _build_activity_data(
     config: CityBehavExConfig,
     bank: Optional[DiaryBank] = None,
     profile_clusters: Optional[ProfileClusters] = None,
     output_path: Optional[str] = None,
+    visited_pairs: Optional[set[tuple[int, int]]] = None,
 ) -> tuple[
     Optional[np.ndarray],
     Optional[np.ndarray],
@@ -925,6 +999,7 @@ def _build_activity_data(
             profile_clusters.narratives,
             bank.diaries,
             config.activities,
+            visited_pairs=visited_pairs,
         )
         if aligned is not None:
             activity_alignment_scores, _blocks, metadata = aligned
@@ -1008,6 +1083,41 @@ def _run_simulation_core(
         if profiles is not None
         else None
     )
+    visited_pairs: Optional[set[tuple[int, int]]] = None
+    if (
+        config.activities.enabled
+        and config.activities.prune_to_reachable
+        and config.activities.alignment_backend == "rerank"
+        and bank is not None
+        and profile_clusters is not None
+    ):
+        probe_act_dur_mu, probe_act_dur_sigma = activity_duration_arrays()
+        if config.activities.act_dur_scale != 1.0:
+            probe_act_dur_mu = probe_act_dur_mu + np.log(config.activities.act_dur_scale)
+        if config.activities.act_dur_sigma_scale != 1.0:
+            probe_act_dur_sigma = probe_act_dur_sigma * config.activities.act_dur_sigma_scale
+        probe_purpose_act_starts, probe_purpose_acts = build_eligibility_csr()
+        visited_pairs = _probe_visited_activity_blocks(
+            config,
+            tessellation_df,
+            relevance_column,
+            start_date,
+            end_date,
+            diary_arrays,
+            profiles,
+            profile_embeddings,
+            profile_clusters,
+            probe_act_dur_mu,
+            probe_act_dur_sigma,
+            probe_purpose_act_starts,
+            probe_purpose_acts,
+        )
+        n_blocks = sum(len(diary.episodes) for diary in bank.diaries)
+        typer.echo(
+            f"Reachability probe: {len(visited_pairs)} (cluster, block) pairs visited "
+            f"out of {len(profile_clusters.narratives) * n_blocks} possible"
+        )
+
     (
         act_embs,
         act_dur_mu,
@@ -1016,7 +1126,13 @@ def _run_simulation_core(
         purpose_acts,
         activity_alignment_scores,
         activity_cluster_labels,
-    ) = _build_activity_data(config, bank=bank, profile_clusters=profile_clusters, output_path=output_path)
+    ) = _build_activity_data(
+        config,
+        bank=bank,
+        profile_clusters=profile_clusters,
+        output_path=output_path,
+        visited_pairs=visited_pairs,
+    )
 
     road_kwargs: dict = {}
     rn = config.road_network
