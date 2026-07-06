@@ -13,6 +13,8 @@ class AgentProfilesConfig(BaseModel):
     enabled: bool = False
     profiles_path: Optional[str] = None
     output: str = "agent_profiles.parquet"
+    # When true, education/health/household/job weights below are recalibrated by
+    # the configured LLM from `diaries.city_profile` before profiles are generated.
     llm_override: bool = False
     home_anchors_path: Optional[str] = None
     home_anchors_output: Optional[str] = None

@@ -38,6 +38,12 @@ road_network:
   edges_output: data/shanghai/shanghai_road_graph_edges.parquet
   snap_output: data/shanghai/shanghai_road_graph_snap.parquet
 
+rail_network:
+  enabled: true
+  nodes_output: data/shanghai/shanghai_rail_graph_nodes.parquet
+  edges_output: data/shanghai/shanghai_rail_graph_edges.parquet
+  snap_output: data/shanghai/shanghai_rail_graph_snap.parquet
+
 llm:
   base_url: "http://localhost:8081"
   api_key: "none"
@@ -85,9 +91,14 @@ activities:
   kappa: 1.0
   temperature: 0.5
   embed_activities: false
+  alignment_backend: rerank
+  alignment_base_url: http://localhost:8083
+  alignment_model: models/modernbert-activity-aligner
+  alignment_cache_path: data/llm_diaries_shanghai/activity_alignment_cache.npz
 
 profiles:
   enabled: true
+  llm_override: true
   output: data/shanghai/shanghai_agent_profiles.parquet
   overture_feature_h3_resolution: 9
   overture_building_features_output: data/shanghai/shanghai_overture_buildings_h3r9.parquet
