@@ -5,8 +5,9 @@ import types
 import numpy as np
 import pandas as pd
 import pytest
+from pydantic import ValidationError
 
-from citybehavex.activities import ProfileClusters, activity_duration_arrays, build_eligibility_csr
+from citybehavex.activities import ProfileClusters, activity_duration_arrays, build_catalog, build_eligibility_csr
 from citybehavex.config.root import CityBehavExConfig
 from citybehavex.simulation.runner import _build_activity_data, _probe_visited_activity_blocks
 
@@ -34,6 +35,60 @@ def test_act_dur_sigma_scale_leaves_mu_untouched() -> None:
     base_mu, base_sigma = activity_duration_arrays()
     assert np.array_equal(act_dur_mu, base_mu)
     assert np.allclose(act_dur_sigma, base_sigma * 1.5)
+
+
+def test_per_activity_duration_scale_shifts_only_named_activity() -> None:
+    config = CityBehavExConfig(
+        activities={
+            "enabled": True,
+            "durations": {
+                "sleep": {"scale": 2.0},
+            },
+        }
+    )
+
+    _, act_dur_mu, act_dur_sigma, *_ = _build_activity_data(config)
+
+    base_mu, base_sigma = activity_duration_arrays()
+    sleep_idx = {activity.name: activity.idx for activity in build_catalog()}["sleep"]
+    expected_mu = base_mu.copy()
+    expected_mu[sleep_idx] += np.log(2.0)
+    assert np.allclose(act_dur_mu, expected_mu)
+    assert np.array_equal(act_dur_sigma, base_sigma)
+
+
+def test_per_activity_mu_replacement_is_then_scaled() -> None:
+    config = CityBehavExConfig(
+        activities={
+            "enabled": True,
+            "durations": {
+                "sleep": {"mu_ln": 1.0, "scale": 2.0, "sigma_ln": 0.2, "sigma_scale": 1.5},
+            },
+        }
+    )
+
+    _, act_dur_mu, act_dur_sigma, *_ = _build_activity_data(config)
+
+    base_mu, base_sigma = activity_duration_arrays()
+    sleep_idx = {activity.name: activity.idx for activity in build_catalog()}["sleep"]
+    expected_mu = base_mu.copy()
+    expected_sigma = base_sigma.copy()
+    expected_mu[sleep_idx] = 1.0 + np.log(2.0)
+    expected_sigma[sleep_idx] = 0.2 * 1.5
+    assert np.allclose(act_dur_mu, expected_mu)
+    assert np.allclose(act_dur_sigma, expected_sigma)
+
+
+def test_unknown_activity_duration_override_is_rejected() -> None:
+    with pytest.raises(ValidationError, match="unknown activity name"):
+        CityBehavExConfig(
+            activities={
+                "enabled": True,
+                "durations": {
+                    "napquest": {"scale": 2.0},
+                },
+            }
+        )
 
 
 def test_build_activity_data_passes_visited_pairs_through(monkeypatch):

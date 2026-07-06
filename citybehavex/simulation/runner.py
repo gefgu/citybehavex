@@ -17,9 +17,11 @@ import typer
 from skmob2.models import DensityEPR
 
 from citybehavex.activities import (
+    ActivitiesConfig,
     ProfileClusters,
     activity_descriptions,
     activity_duration_arrays,
+    build_catalog,
     build_eligibility_csr,
     cluster_profile_embeddings,
     expand_cluster_scores,
@@ -945,6 +947,7 @@ def _probe_visited_activity_blocks(
         purpose_acts=purpose_acts,
         act_kappa=config.activities.kappa,
         act_temp=config.activities.temperature,
+        materialize_travel=config.activities.materialize_travel,
     )
     if activities.empty or "block_id" not in activities.columns:
         return set()
@@ -954,6 +957,30 @@ def _probe_visited_activity_blocks(
     valid = (uid >= 0) & (uid < len(cluster_labels)) & (block_id >= 0)
     clusters = cluster_labels[uid[valid]]
     return set(zip(clusters.tolist(), block_id[valid].tolist()))
+
+
+def _configured_activity_duration_arrays(config: ActivitiesConfig) -> tuple[np.ndarray, np.ndarray]:
+    act_dur_mu, act_dur_sigma = activity_duration_arrays()
+    if config.act_dur_scale != 1.0:
+        act_dur_mu = act_dur_mu + np.log(config.act_dur_scale)
+    if config.act_dur_sigma_scale != 1.0:
+        act_dur_sigma = act_dur_sigma * config.act_dur_sigma_scale
+
+    if not config.durations:
+        return act_dur_mu, act_dur_sigma
+
+    activity_idx = {activity.name: activity.idx for activity in build_catalog()}
+    for name, override in config.durations.items():
+        idx = activity_idx[name]
+        if override.mu_ln is not None:
+            act_dur_mu[idx] = override.mu_ln
+        if override.scale is not None:
+            act_dur_mu[idx] = act_dur_mu[idx] + np.log(override.scale)
+        if override.sigma_ln is not None:
+            act_dur_sigma[idx] = override.sigma_ln
+        if override.sigma_scale is not None:
+            act_dur_sigma[idx] = act_dur_sigma[idx] * override.sigma_scale
+    return act_dur_mu, act_dur_sigma
 
 
 def _build_activity_data(
@@ -974,11 +1001,7 @@ def _build_activity_data(
     """Return activity arrays, plus optional contextual alignment tensor."""
     if not config.activities.enabled:
         return None, None, None, None, None, None, None
-    act_dur_mu, act_dur_sigma = activity_duration_arrays()
-    if config.activities.act_dur_scale != 1.0:
-        act_dur_mu = act_dur_mu + np.log(config.activities.act_dur_scale)
-    if config.activities.act_dur_sigma_scale != 1.0:
-        act_dur_sigma = act_dur_sigma * config.activities.act_dur_sigma_scale
+    act_dur_mu, act_dur_sigma = _configured_activity_duration_arrays(config.activities)
     purpose_act_starts, purpose_acts = build_eligibility_csr()
     act_embs = None
     if config.activities.embed_activities:
@@ -1091,11 +1114,7 @@ def _run_simulation_core(
         and bank is not None
         and profile_clusters is not None
     ):
-        probe_act_dur_mu, probe_act_dur_sigma = activity_duration_arrays()
-        if config.activities.act_dur_scale != 1.0:
-            probe_act_dur_mu = probe_act_dur_mu + np.log(config.activities.act_dur_scale)
-        if config.activities.act_dur_sigma_scale != 1.0:
-            probe_act_dur_sigma = probe_act_dur_sigma * config.activities.act_dur_sigma_scale
+        probe_act_dur_mu, probe_act_dur_sigma = _configured_activity_duration_arrays(config.activities)
         probe_purpose_act_starts, probe_purpose_acts = build_eligibility_csr()
         visited_pairs = _probe_visited_activity_blocks(
             config,
@@ -1281,6 +1300,7 @@ def _run_simulation_core(
         activity_alignment_scores=activity_alignment_scores,
         activity_cluster_labels=activity_cluster_labels,
         activity_history_weight=config.activities.history_weight,
+        materialize_travel=config.activities.materialize_travel,
         return_social_graph=True,
         social_node_profiles=profile_types,
         has_car=has_car,

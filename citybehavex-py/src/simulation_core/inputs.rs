@@ -96,6 +96,7 @@ pub(crate) struct ActivityInputs<'a> {
     pub(crate) emb_dim: usize,
     pub(crate) kappa: f64,
     pub(crate) temperature: f64,
+    pub(crate) materialize_travel: bool,
 }
 
 impl ActivityInputs<'_> {

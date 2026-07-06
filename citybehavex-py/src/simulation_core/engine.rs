@@ -5,7 +5,9 @@ use skmob2_core::models::od::{CachedGravityOdRows, validate_equal_lengths};
 use skmob2_core::models::shared::derive_agent_seed;
 use skmob2_core::utils::haversine::haversine_km;
 
-use crate::simulation_core::activity::sample_activity_and_duration;
+use crate::simulation_core::activity::{
+    COMMUTE_ACTIVITY_IDX, TRAVEL_ACTIVITY_IDX, sample_activity_and_duration,
+};
 use crate::simulation_core::inputs::{
     ActivityInputs, CoreInputs, DiaryInputs, InitialLocationInputs, LocationInputs,
     RoadNetworkInputs, SimulationParams, SocialGraphInputs,
@@ -378,9 +380,9 @@ fn push_path_waypoints(
 /// Close out the agent's current stop and open a new one at `ctx.next_loc`.
 /// Only called for real relocations (`ctx.next_loc != cur_loc`) — same-
 /// location abstract-location churn never reaches this function, so it
-/// always routes a real trip. Returns `(departure, arrival)`: `departure` is
-/// when the old stop/activity closed, `arrival` is when the new stop opened
-/// (and thus when its first micro-activity, if any, starts).
+/// always routes a real trip. Returns `(departure, arrival, stop_id)`:
+/// `departure` is when the old stop/activity closed, `arrival` is when the
+/// new stop opened (and thus when its first micro-activity, if any, starts).
 fn append_trip_record(
     ctx: TripAppendContext,
     dur_s: i64,
@@ -391,13 +393,13 @@ fn append_trip_record(
     agents: &mut [AgentState],
     paths: &mut RoadPathOutputBuffers,
     next_stop_id: &mut u32,
-) -> (i64, i64) {
+) -> (i64, i64, u32) {
     let (departure, arrival, stop_id) = push_stop_record(&ctx, dur_s, output, agents, next_stop_id);
     push_path_waypoints(
         &ctx, stop_id, departure, dur_s, wp_lats, wp_lngs, wp_cum_ds, paths,
     );
 
-    (departure, arrival)
+    (departure, arrival, stop_id)
 }
 
 fn validate_locations(locations: &LocationInputs<'_>) -> Result<usize, String> {
@@ -906,6 +908,41 @@ fn fill_activities_until(
     }
 }
 
+fn can_materialize_travel_activity(inputs: &ActivityInputs<'_>) -> bool {
+    inputs.materialize_travel && inputs.act_dur_mu.len() > TRAVEL_ACTIVITY_IDX
+}
+
+fn materialize_travel_activity(
+    a: usize,
+    stop_id: u32,
+    abstract_loc: i32,
+    block_id: i32,
+    departure: i64,
+    arrival: i64,
+    par_data: &mut [AgentParData],
+    activities: &mut ActivityOutputBuffers,
+) {
+    if arrival <= departure {
+        return;
+    }
+    let act_idx = if abstract_loc == WORK_CODE {
+        COMMUTE_ACTIVITY_IDX
+    } else {
+        TRAVEL_ACTIVITY_IDX
+    };
+    let seq = par_data[a].activity_seq;
+    par_data[a].activity_seq += 1;
+    if act_idx >= par_data[a].activity_counts.len() {
+        par_data[a].activity_counts.resize(act_idx + 1, 0);
+    }
+    par_data[a].activity_counts[act_idx] += 1;
+    par_data[a].last_activity = act_idx as i32;
+    par_data[a].pending_departure = 0;
+    let idx = activities.push(a, stop_id, seq, departure, block_id);
+    activities.activity[idx] = act_idx as u16;
+    activities.departure[idx] = arrival as i32;
+}
+
 /// Commits a single sorted move: either a real relocation (routes a trip,
 /// opens a new stop) or a same-location abstract-location boundary (no
 /// travel, just a departure/arrival split), then samples the next
@@ -997,7 +1034,7 @@ fn commit_one_move(
         } else {
             resolve_departure(0, prev_arrival, ts, inputs.params.slot_seconds, dur_s)
         };
-        let (_, arrival) = append_trip_record(
+        let (_, arrival, stop_id) = append_trip_record(
             TripAppendContext {
                 agent_idx: a,
                 next_loc: loc,
@@ -1017,6 +1054,18 @@ fn commit_one_move(
         );
         par_data[a].activity_seq = 0;
         if activities_on {
+            if can_materialize_travel_activity(&inputs.activities) {
+                materialize_travel_activity(
+                    a,
+                    stop_id,
+                    abstract_loc,
+                    block_id,
+                    departure,
+                    arrival,
+                    par_data,
+                    activities,
+                );
+            }
             par_data[a].active_block_id = block_id;
             start_activity_sample(
                 a,

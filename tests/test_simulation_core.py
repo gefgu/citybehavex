@@ -621,6 +621,133 @@ def test_activity_column_present_when_enabled():
     assert set(activities["stop_id"]).issubset(set(range(len(df))))
 
 
+def test_real_work_trip_materializes_commute_activity():
+    tess = pd.DataFrame({
+        "tile_id": [0, 1],
+        "lat": [48.8566, 48.95],
+        "lng": [2.3522, 2.55],
+        "relevance": [1.0, 1.0],
+    })
+    diary_arrays = _diary_arrays_single([0, 1], [0, 8 * 3600])
+    act_dur_mu, act_dur_sigma = activity_duration_arrays()
+    purpose_act_starts, purpose_acts = build_eligibility_csr()
+
+    df, _, _, activities = simulate_agents(
+        tess, "relevance", diary_arrays,
+        start_ts=0, end_ts=12 * 3600,
+        slot_seconds=_SLOT, car_speed_kmh=_SPEED,
+        n_agents=1, random_state=42,
+        act_dur_mu=act_dur_mu,
+        act_dur_sigma=act_dur_sigma,
+        purpose_act_starts=purpose_act_starts,
+        purpose_acts=purpose_acts,
+        starting_locs=np.array([0], dtype=np.int64),
+        work_tiles=np.array([1], dtype=np.int64),
+    )
+
+    commute_id = {activity.name: activity.idx for activity in build_catalog()}["commute"]
+    home_stop = df[df["stop_id"] == 0].iloc[0]
+    work_stop = df[df["stop_id"] == 1].iloc[0]
+    commute = activities[(activities["stop_id"] == 1) & (activities["seq"] == 0)].iloc[0]
+
+    assert commute["activity"] == commute_id
+    assert commute["arrival"] == home_stop["departure"]
+    assert commute["departure"] == work_stop["arrival"]
+
+
+def test_real_non_work_trip_materializes_travel_activity():
+    tess = pd.DataFrame({
+        "tile_id": [0, 1],
+        "lat": [48.8566, 48.95],
+        "lng": [2.3522, 2.55],
+        "relevance": [1.0, 1.0],
+    })
+    diary_arrays = _diary_arrays_single([0, 2], [0, 8 * 3600])
+    act_dur_mu, act_dur_sigma = activity_duration_arrays()
+    purpose_act_starts, purpose_acts = build_eligibility_csr()
+
+    df, _, _, activities = simulate_agents(
+        tess, "relevance", diary_arrays,
+        start_ts=0, end_ts=12 * 3600,
+        slot_seconds=_SLOT, car_speed_kmh=_SPEED,
+        n_agents=1, random_state=42,
+        act_dur_mu=act_dur_mu,
+        act_dur_sigma=act_dur_sigma,
+        purpose_act_starts=purpose_act_starts,
+        purpose_acts=purpose_acts,
+    )
+
+    travel_id = {activity.name: activity.idx for activity in build_catalog()}["travel"]
+    home_stop = df[df["stop_id"] == 0].iloc[0]
+    other_stop = df[df["stop_id"] == 1].iloc[0]
+    travel = activities[(activities["stop_id"] == 1) & (activities["seq"] == 0)].iloc[0]
+
+    assert travel["activity"] == travel_id
+    assert travel["arrival"] == home_stop["departure"]
+    assert travel["departure"] == other_stop["arrival"]
+
+
+def test_activity_intervals_cover_full_day_with_materialized_travel():
+    tess = pd.DataFrame({
+        "tile_id": [0, 1],
+        "lat": [48.8566, 48.95],
+        "lng": [2.3522, 2.55],
+        "relevance": [1.0, 1.0],
+    })
+    diary_arrays = _diary_arrays_single([0, 1, 0], [0, 8 * 3600, 18 * 3600])
+    act_dur_mu, act_dur_sigma = activity_duration_arrays()
+    purpose_act_starts, purpose_acts = build_eligibility_csr()
+
+    _df, _, _, activities = simulate_agents(
+        tess, "relevance", diary_arrays,
+        start_ts=0, end_ts=86400,
+        slot_seconds=_SLOT, car_speed_kmh=_SPEED,
+        n_agents=1, random_state=42,
+        act_dur_mu=act_dur_mu,
+        act_dur_sigma=act_dur_sigma,
+        purpose_act_starts=purpose_act_starts,
+        purpose_acts=purpose_acts,
+    )
+
+    durations = (activities["departure"] - activities["arrival"]).dt.total_seconds()
+    assert durations.sum() == 86400
+    assert (durations >= 0).all()
+
+
+def test_materialize_travel_false_does_not_emit_trip_interval_activity():
+    tess = pd.DataFrame({
+        "tile_id": [0, 1],
+        "lat": [48.8566, 48.95],
+        "lng": [2.3522, 2.55],
+        "relevance": [1.0, 1.0],
+    })
+    diary_arrays = _diary_arrays_single([0, 1], [0, 8 * 3600])
+    act_dur_mu, act_dur_sigma = activity_duration_arrays()
+    purpose_act_starts, purpose_acts = build_eligibility_csr()
+
+    df, _, _, activities = simulate_agents(
+        tess, "relevance", diary_arrays,
+        start_ts=0, end_ts=12 * 3600,
+        slot_seconds=_SLOT, car_speed_kmh=_SPEED,
+        n_agents=1, random_state=42,
+        act_dur_mu=act_dur_mu,
+        act_dur_sigma=act_dur_sigma,
+        purpose_act_starts=purpose_act_starts,
+        purpose_acts=purpose_acts,
+        starting_locs=np.array([0], dtype=np.int64),
+        work_tiles=np.array([1], dtype=np.int64),
+        materialize_travel=False,
+    )
+
+    home_stop = df[df["stop_id"] == 0].iloc[0]
+    work_stop = df[df["stop_id"] == 1].iloc[0]
+    matching_trip_interval = activities[
+        (activities["arrival"] == home_stop["departure"])
+        & (activities["departure"] == work_stop["arrival"])
+    ]
+    assert matching_trip_interval.empty
+
+
 def test_activities_chain_until_macro_departure_deadline():
     lats = [48.8566, 48.8566]
     lngs = [2.3522, 2.3522]

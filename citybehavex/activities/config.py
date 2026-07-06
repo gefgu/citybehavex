@@ -2,7 +2,16 @@ from __future__ import annotations
 
 from typing import Literal, Optional
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+
+class ActivityDurationOverride(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    mu_ln: Optional[float] = None
+    sigma_ln: Optional[float] = Field(default=None, gt=0)
+    scale: Optional[float] = Field(default=None, gt=0)
+    sigma_scale: Optional[float] = Field(default=None, gt=0)
 
 
 class ActivitiesConfig(BaseModel):
@@ -23,6 +32,7 @@ class ActivitiesConfig(BaseModel):
     alignment_checkpoint_every: int = Field(default=20, ge=1)
     profile_cluster_similarity_threshold: float = Field(default=0.94, ge=-1.0, le=1.0)
     history_weight: float = Field(default=1.0, ge=0.0)
+    materialize_travel: bool = True
     # When true, run a cheap disposable simulation pass first (no contextual
     # alignment, no road/rail routing) to discover which (cluster, block)
     # pairs are actually reachable, and only score those through the
@@ -40,3 +50,19 @@ class ActivitiesConfig(BaseModel):
     # by the same factor regardless of its mu_ln's sign.
     act_dur_scale: float = Field(default=1.0, gt=0)
     act_dur_sigma_scale: float = Field(default=1.0, gt=0)
+    durations: dict[str, ActivityDurationOverride] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def validate_duration_activity_names(self) -> ActivitiesConfig:
+        if not self.durations:
+            return self
+        from citybehavex.activities.catalog import build_catalog
+
+        known = {activity.name for activity in build_catalog()}
+        unknown = sorted(set(self.durations) - known)
+        if unknown:
+            raise ValueError(
+                "activities.durations contains unknown activity name(s): "
+                + ", ".join(unknown)
+            )
+        return self

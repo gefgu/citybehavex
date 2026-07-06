@@ -16,6 +16,7 @@ class ScheduleConfig(BaseModel):
     alignment_timeout_seconds: float = Field(default=120.0, gt=0)
     alignment_batch_size: int = Field(default=32, gt=0)
     alignment_cache_path: Optional[str] = None
+    alignment_checkpoint_every: int = Field(default=5, ge=1)
     temperature_beta_a: float = Field(default=2.0, gt=0)
     temperature_beta_b: float = Field(default=5.0, gt=0)
     alpha_beta_a: float = Field(default=2.0, gt=0)
