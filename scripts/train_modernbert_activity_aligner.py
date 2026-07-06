@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import json
 import math
 import os
@@ -244,12 +245,14 @@ def label_pairs(
     api_key: str | None,
     timeout: float,
     retries: int,
+    concurrency: int,
+    progress_interval: int,
 ) -> pd.DataFrame:
     headers = {"Content-Type": "application/json"}
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
-    rows: list[dict[str, Any]] = []
-    for pair in pairs:
+
+    def score_pair(pair: TrainingPair) -> dict[str, Any]:
         last_error: Exception | None = None
         for _attempt in range(max(1, retries)):
             try:
@@ -272,16 +275,38 @@ def label_pairs(
                 )
                 resp.raise_for_status()
                 score = parse_alignment_payload(_parse_chat_json(resp.json()))
-                rows.append(_pair_row(pair, score))
-                break
+                return _pair_row(pair, score)
             except Exception as exc:  # noqa: BLE001 - retry with final failure.
                 last_error = exc
-        else:
-            raise RuntimeError(
-                "failed to label "
-                f"profile={pair.profile_uid} diary={pair.diary_id} "
-                f"block={pair.block_index} activity={pair.activity}: {last_error}"
-            ) from last_error
+        raise RuntimeError(
+            "failed to label "
+            f"profile={pair.profile_uid} diary={pair.diary_id} "
+            f"block={pair.block_index} activity={pair.activity}: {last_error}"
+        ) from last_error
+
+    if concurrency <= 1:
+        rows = []
+        for idx, pair in enumerate(pairs, start=1):
+            rows.append(score_pair(pair))
+            if progress_interval > 0 and idx % progress_interval == 0:
+                print(f"Labeled {idx}/{len(pairs)} pairs", flush=True)
+        return pd.DataFrame(rows)
+
+    rows: list[dict[str, Any] | None] = [None] * len(pairs)
+    completed = 0
+    with ThreadPoolExecutor(max_workers=concurrency) as executor:
+        futures = {
+            executor.submit(score_pair, pair): idx
+            for idx, pair in enumerate(pairs)
+        }
+        for future in as_completed(futures):
+            idx = futures[future]
+            rows[idx] = future.result()
+            completed += 1
+            if progress_interval > 0 and completed % progress_interval == 0:
+                print(f"Labeled {completed}/{len(pairs)} pairs", flush=True)
+    if any(row is None for row in rows):
+        raise RuntimeError("labeling finished with missing rows")
     return pd.DataFrame(rows)
 
 
@@ -349,6 +374,18 @@ def parse_args(argv: Iterable[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--llm-api-key")
     parser.add_argument("--llm-timeout-seconds", type=float, default=120.0)
     parser.add_argument("--llm-retries", type=int, default=3)
+    parser.add_argument(
+        "--llm-concurrency",
+        type=int,
+        default=8,
+        help="Concurrent LLM labeling requests. Increase when the serving backend has batching headroom.",
+    )
+    parser.add_argument(
+        "--llm-progress-interval",
+        type=int,
+        default=100,
+        help="Print labeling progress every N completed pairs. Set to 0 to disable.",
+    )
     parser.add_argument("--dataset-output", default="data/activity_alignment_scores.parquet")
     parser.add_argument("--output-model-path", default="models/modernbert-activity-aligner")
     parser.add_argument("--sample-size", type=int, default=5000)
@@ -391,6 +428,8 @@ def main(argv: Iterable[str] | None = None) -> None:
             api_key=args.llm_api_key,
             timeout=args.llm_timeout_seconds,
             retries=args.llm_retries,
+            concurrency=args.llm_concurrency,
+            progress_interval=args.llm_progress_interval,
         )
         _write_dataset(dataset, dataset_path)
     if args.label_only:

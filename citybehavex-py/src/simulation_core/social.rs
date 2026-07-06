@@ -1,22 +1,22 @@
 use rand::Rng;
+use rustc_hash::FxHashMap;
 use skmob2_core::models::od::CachedGravityOdRows;
 use skmob2_core::models::shared::cdf_choice;
-use std::collections::HashMap;
 
 use crate::simulation_core::inputs::{LocationInputs, SimulationParams};
 use crate::simulation_core::types::{
-    AgentState, DiaryState, Encounter, Scratch, SocialMode, GRAVITY_REJECTION_ATTEMPTS, WORK_CODE,
+    AgentState, DiaryState, Encounter, GRAVITY_REJECTION_ATTEMPTS, Scratch, SocialMode, WORK_CODE,
 };
 
-fn count_at(counts: &HashMap<usize, u32>, loc: usize) -> u32 {
+fn count_at(counts: &FxHashMap<usize, u32>, loc: usize) -> u32 {
     counts.get(&loc).copied().unwrap_or(0)
 }
 
 fn cosine_similarity_sparse(
     a_locs: &[usize],
-    a_counts: &HashMap<usize, u32>,
+    a_counts: &FxHashMap<usize, u32>,
     norm_a_sq: f64,
-    b_counts: &HashMap<usize, u32>,
+    b_counts: &FxHashMap<usize, u32>,
     norm_b_sq: f64,
 ) -> f64 {
     if norm_a_sq == 0.0 || norm_b_sq == 0.0 {

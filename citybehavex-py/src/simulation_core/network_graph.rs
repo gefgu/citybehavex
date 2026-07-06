@@ -17,8 +17,8 @@
 //!   days).
 
 use rayon::prelude::*;
+use rustc_hash::FxHashMap;
 use std::cmp::Ordering;
-use std::collections::HashMap;
 
 /// Groups `(day, location, node)` rows by `(day, location)`, emits every
 /// pair within each group up to `max_group_size` (groups larger than that
@@ -36,7 +36,7 @@ pub(crate) fn build_co_presence_edges(
     max_group_size: usize,
     time_steps: usize,
 ) -> (Vec<u32>, Vec<u32>, Vec<f64>, u64, u64) {
-    let mut groups: HashMap<(i64, i64), Vec<u32>> = HashMap::new();
+    let mut groups: FxHashMap<(i64, i64), Vec<u32>> = FxHashMap::default();
     for i in 0..nodes.len() {
         groups
             .entry((day_codes[i], location_codes[i]))
@@ -87,7 +87,13 @@ pub(crate) fn build_co_presence_edges(
         persistence.push((idx - start) as f64 / time_steps.max(1) as f64);
     }
 
-    (edge_from, edge_to, persistence, skipped_groups, skipped_rows)
+    (
+        edge_from,
+        edge_to,
+        persistence,
+        skipped_groups,
+        skipped_rows,
+    )
 }
 
 /// Sorted, deduplicated adjacency list per node, built from an edge list
@@ -98,7 +104,10 @@ fn build_adjacency(node_count: usize, edge_from: &[u32], edge_to: &[u32]) -> Vec
         degree[edge_from[i] as usize] += 1;
         degree[edge_to[i] as usize] += 1;
     }
-    let mut adjacency: Vec<Vec<u32>> = degree.iter().map(|&d| Vec::with_capacity(d as usize)).collect();
+    let mut adjacency: Vec<Vec<u32>> = degree
+        .iter()
+        .map(|&d| Vec::with_capacity(d as usize))
+        .collect();
     for i in 0..edge_from.len() {
         let (u, v) = (edge_from[i], edge_to[i]);
         adjacency[u as usize].push(v);
@@ -166,7 +175,11 @@ pub(crate) struct GraphMetrics {
 /// complexity as the naive approach for a graph this dense, but with a
 /// vastly better constant factor (no per-check Python/hash overhead) and
 /// rayon parallelism across cores.
-pub(crate) fn compute_graph_metrics(node_count: usize, edge_from: &[u32], edge_to: &[u32]) -> GraphMetrics {
+pub(crate) fn compute_graph_metrics(
+    node_count: usize,
+    edge_from: &[u32],
+    edge_to: &[u32],
+) -> GraphMetrics {
     let adjacency = build_adjacency(node_count, edge_from, edge_to);
 
     let clustering_coefficient: Vec<f64> = (0..node_count)
@@ -304,7 +317,7 @@ mod tests {
         // edge (1,2): inter({0,2},{0,1,3}) = {0} -> 1; union = 2+3-1 = 4 -> 1/4
         // edge (2,3): inter({0,1,3},{2}) = {} -> 0; union = 3+1-0 = 4 -> 0
         // edge (0,2): inter({1,2},{0,1,3}) = {1} -> 1; union = 2+3-1 = 4 -> 1/4
-        let mut by_edge: HashMap<(u32, u32), f64> = HashMap::new();
+        let mut by_edge: FxHashMap<(u32, u32), f64> = FxHashMap::default();
         for i in 0..edge_from.len() {
             by_edge.insert((edge_from[i], edge_to[i]), metrics.topological_overlap[i]);
         }

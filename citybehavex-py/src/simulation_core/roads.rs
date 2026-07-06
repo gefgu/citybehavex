@@ -3,14 +3,13 @@
 //! then every trip's shortest path is a fast bidirectional search instead of
 //! a fresh Dijkstra.
 
-use std::collections::HashMap;
-
 use rayon::prelude::*;
+use rustc_hash::FxHashMap;
 
 pub(crate) struct RoadGraph {
     fast_graph: fast_paths::FastGraph,
-    edge_weight_ds: HashMap<(usize, usize), i64>,
-    edge_length_m: HashMap<(usize, usize), f64>,
+    edge_weight_ds: FxHashMap<(usize, usize), i64>,
+    edge_length_m: FxHashMap<(usize, usize), f64>,
 }
 
 impl RoadGraph {
@@ -34,8 +33,8 @@ impl RoadGraph {
         edge_weight_ds: &[usize],
         edge_length_m: &[f64],
     ) -> Self {
-        let mut deduped: HashMap<(usize, usize), (usize, f64)> =
-            HashMap::with_capacity(edge_from.len());
+        let mut deduped: FxHashMap<(usize, usize), (usize, f64)> =
+            FxHashMap::with_capacity_and_hasher(edge_from.len(), Default::default());
         for i in 0..edge_from.len() {
             let (from, to) = (edge_from[i], edge_to[i]);
             if from == to {
@@ -60,8 +59,10 @@ impl RoadGraph {
         input_graph.freeze();
         let fast_graph = fast_paths::prepare(&input_graph);
 
-        let mut edge_weight_ds = HashMap::with_capacity(deduped.len());
-        let mut edge_length_m = HashMap::with_capacity(deduped.len());
+        let mut edge_weight_ds =
+            FxHashMap::with_capacity_and_hasher(deduped.len(), Default::default());
+        let mut edge_length_m =
+            FxHashMap::with_capacity_and_hasher(deduped.len(), Default::default());
         for ((from, to), (w, len)) in deduped {
             edge_weight_ds.insert((from, to), w as i64);
             edge_length_m.insert((from, to), len);
@@ -255,8 +256,7 @@ mod tests {
         let edge_weight = vec![10, 10, 10, 10];
         let edge_length = vec![100.0, 200.0, 300.0, 400.0];
         let graph = RoadGraph::build_with_length(&edge_from, &edge_to, &edge_weight, &edge_length);
-        let (distances, connected) =
-            batch_road_distances(&graph, &[0, 0, -1, 4], &[3, 5, 2, 5]);
+        let (distances, connected) = batch_road_distances(&graph, &[0, 0, -1, 4], &[3, 5, 2, 5]);
         assert_eq!(connected, vec![true, false, false, true]);
         assert_eq!(distances, vec![600.0, 0.0, 0.0, 400.0]);
     }
