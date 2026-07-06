@@ -1248,6 +1248,11 @@ def maybe_build_profiles(
 def run_simulation(config: CityBehavExConfig) -> skmob2.TrajDataFrame:
     ts = datetime.now().strftime("%Y%m%dT%H%M%S")
     stamped_output = _stamp_path(config.simulation.output, ts)
+    # All of this run's sidecar artifacts (CRP state, social network, encounters,
+    # activities, etc.) are written next to stamped_output -- create its
+    # directory once, up front, rather than relying on write-order for it to
+    # already exist by the time each sidecar is saved.
+    Path(stamped_output).parent.mkdir(parents=True, exist_ok=True)
 
     tessellation_df, relevance_column, home_tile_pool = load_or_build_tessellation(config)
     start_date, end_date = simulation_dates(config)
