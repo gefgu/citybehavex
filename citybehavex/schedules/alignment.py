@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import os
 from pathlib import Path
 from typing import Any, Optional, Sequence
 
@@ -30,10 +31,20 @@ def _load_cache(path: Path) -> dict[str, float]:
 
 
 def _save_cache(path: Path, cache: dict[str, float]) -> None:
+    """Write the cache atomically: a crash or interrupt mid-write must never
+    leave `path` holding a truncated/corrupt ``.npz``, since it's reused
+    across runs -- only entries missing from it get re-sent to the reranker."""
     path.parent.mkdir(parents=True, exist_ok=True)
     keys = np.array(list(cache.keys()))
     scores = np.array([cache[k] for k in cache], dtype=np.float32)
-    np.savez(path, keys=keys, scores=scores)
+    tmp_path = path.parent / (path.name + ".tmp")
+    try:
+        with open(tmp_path, "wb") as fh:
+            np.savez(fh, keys=keys, scores=scores)
+        os.replace(tmp_path, path)
+    except BaseException:
+        tmp_path.unlink(missing_ok=True)
+        raise
 
 
 def _extract_scores(payload: Any, expected: int) -> Optional[list[float]]:
@@ -136,11 +147,18 @@ def score_alignment_matrix(
                     timeout=config.alignment_timeout_seconds,
                 )
                 if scores is None:
+                    if cache_path is not None:
+                        _save_cache(cache_path, cache)
                     return None
                 for idx, score in zip(chunk_idx, scores):
                     cache[keys[idx]] = float(np.clip(score, 0.0, 1.0))
             matrix[row] = [cache[key] for key in keys]
+            checkpoint_every = config.alignment_checkpoint_every
+            if cache_path is not None and checkpoint_every > 0 and (row + 1) % checkpoint_every == 0:
+                _save_cache(cache_path, cache)
     except Exception:  # noqa: BLE001 - callers intentionally fall back.
+        if cache_path is not None:
+            _save_cache(cache_path, cache)
         return None
 
     if cache_path is not None:

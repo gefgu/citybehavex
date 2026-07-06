@@ -91,6 +91,7 @@ fn opt_i64_as_usize_vec(v: &Option<PyReadonlyArray1<'_, i64>>) -> PyResult<Optio
     activity_alignment_scores=None, activity_cluster_labels=None,
     activity_alignment_clusters=0usize, activity_alignment_blocks=0usize,
     activity_alignment_previous=0usize, activity_history_weight=1.0f64,
+    materialize_travel=true,
     road_edge_from=None, road_edge_to=None, road_edge_weight_ds=None,
     road_node_lats=None, road_node_lngs=None, location_road_node=None,
     max_leg_waypoints=16usize,
@@ -150,6 +151,7 @@ pub fn simulation_core_simulate_agents<'py>(
     activity_alignment_blocks: usize,
     activity_alignment_previous: usize,
     activity_history_weight: f64,
+    materialize_travel: bool,
     road_edge_from: Option<PyReadonlyArray1<'py, i64>>,
     road_edge_to: Option<PyReadonlyArray1<'py, i64>>,
     road_edge_weight_ds: Option<PyReadonlyArray1<'py, i64>>,
@@ -451,6 +453,7 @@ pub fn simulation_core_simulate_agents<'py>(
                 emb_dim,
                 kappa: act_kappa,
                 temperature: act_temp,
+                materialize_travel,
             },
             road_network: RoadNetworkInputs {
                 edge_from: &road_edge_from_v,

@@ -19,6 +19,16 @@ from citybehavex.llm_diaries import Diary
 START_PREVIOUS_ACTIVITY = -1
 
 
+def _format_duration(seconds: float) -> str:
+    if not np.isfinite(seconds):
+        return "unknown"
+    if seconds < 60:
+        return f"{seconds:.0f}s"
+    if seconds < 3600:
+        return f"{seconds / 60:.1f}min"
+    return f"{seconds / 3600:.1f}h"
+
+
 @dataclass(frozen=True)
 class ActivityBlock:
     block_id: int
@@ -427,10 +437,12 @@ def score_activity_alignment(
                 return
             elapsed = time.perf_counter() - start_time
             rate = done_pairs / elapsed if elapsed > 0 else 0.0
+            remaining_pairs = total_pairs - done_pairs
+            eta = remaining_pairs / rate if rate > 0 else float("nan")
             print(
                 f"Activity alignment: {done_chunks}/{total_chunks} batches, "
                 f"{done_pairs}/{total_pairs} pairs, {rate:.0f} pairs/sec, "
-                f"{elapsed:.1f}s elapsed",
+                f"{elapsed:.1f}s elapsed, ETA {_format_duration(eta)}",
                 flush=True,
             )
             if cache_path is not None:

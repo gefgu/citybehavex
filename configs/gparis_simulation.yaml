@@ -98,8 +98,19 @@ schedule:
 
 activities:
   enabled: true
-  kappa: 1.0
-  temperature: 0.5
+  # Duration overrides layer over the MTUS catalog's log-normal duration
+  # parameters (ln-hours). Tune these against
+  # notebooks/00_ile_de_france_exploration/04_mtus_comparision.ipynb.
+  materialize_travel: true
+  # Lowered from 1.0/0.5: sleep was losing the very first activity draw of
+  # the night to other HOME-eligible activities too often (its duration
+  # scale alone doesn't help if it isn't chosen at all), cutting simulated
+  # sleep to roughly half of MTUS. Lower kappa reduces the flat weight every
+  # never-tried activity gets regardless of fit; lower temperature sharpens
+  # the contextual reranker's preference for whichever activity actually
+  # fits a given block, instead of nearly flattening it out.
+  kappa: 0.3
+  temperature: 0.25
   embed_activities: true
   alignment_backend: rerank
   alignment_base_url: http://localhost:8083
@@ -110,6 +121,30 @@ activities:
   alignment_retries: 2
   alignment_checkpoint_every: 20
   prune_to_reachable: true
+  durations:
+    sleep:
+      scale: 2.4
+      sigma_scale: 0.8
+    eatdrink:
+      scale: 0.75
+    selfcare:
+      scale: 0.75
+    foodprep:
+      scale: 0.6
+    cleanetc:
+      scale: 0.6
+    maintain:
+      scale: 0.6
+    garden:
+      scale: 0.6
+    petcare:
+      scale: 0.6
+    eldcare:
+      scale: 0.6
+    pkidcare:
+      scale: 0.6
+    ikidcare:
+      scale: 0.6
 
 profiles:
   enabled: true

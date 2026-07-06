@@ -3,6 +3,9 @@ use rand::Rng;
 use crate::simulation_core::inputs::ActivityInputs;
 use crate::simulation_core::types::Scratch;
 
+pub(crate) const COMMUTE_ACTIVITY_IDX: usize = 16;
+pub(crate) const TRAVEL_ACTIVITY_IDX: usize = 17;
+
 fn sample_standard_normal(rng: &mut impl Rng) -> f64 {
     let u1: f64 = rng.gen_range(f64::MIN_POSITIVE..1.0);
     let u2: f64 = rng.gen_range(0.0..1.0);
@@ -156,6 +159,9 @@ pub(crate) fn sample_activity_and_duration(
     scratch.act_cdf.clear();
     let mut cumsum = 0.0_f64;
     for &a in eligible {
+        if inputs.materialize_travel && (a == COMMUTE_ACTIVITY_IDX || a == TRAVEL_ACTIVITY_IDX) {
+            continue;
+        }
         let count = if a < activity_counts.len() {
             activity_counts[a]
         } else {
@@ -177,13 +183,28 @@ pub(crate) fn sample_activity_and_duration(
         cumsum += w;
         scratch.act_cdf.push(cumsum);
     }
+    if scratch.act_cdf.is_empty() || cumsum <= 0.0 {
+        return (
+            eligible[0] as i64,
+            sample_duration(eligible[0], inputs, rng),
+        );
+    }
 
     let threshold = rng.gen_range(0.0..1.0) * cumsum;
     let idx = scratch
         .act_cdf
         .partition_point(|&v| v <= threshold)
         .min(eligible.len() - 1);
-    let chosen = eligible[idx];
+    let chosen = if inputs.materialize_travel {
+        eligible
+            .iter()
+            .copied()
+            .filter(|&a| a != COMMUTE_ACTIVITY_IDX && a != TRAVEL_ACTIVITY_IDX)
+            .nth(idx)
+            .unwrap_or(eligible[0])
+    } else {
+        eligible[idx]
+    };
 
     if chosen >= activity_counts.len() {
         activity_counts.resize(chosen + 1, 0);
