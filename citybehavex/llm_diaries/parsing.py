@@ -17,7 +17,7 @@ def parse_chat_completion_response(payload: Any) -> ChatCompletionResponse:
 
 def parse_diary_content(content: str) -> DiaryBatch:
     try:
-        payload = _loads_model_json(content)
+        payload = loads_model_json(content)
     except json.JSONDecodeError as exc:
         raise DiaryValidationError(f"diary content is not valid JSON: {exc}") from exc
     try:
@@ -33,7 +33,7 @@ def parse_diary_response(payload: Any) -> DiaryBatch:
 
 def parse_single_diary_content(content: str) -> Diary:
     try:
-        payload = _loads_model_json(content)
+        payload = loads_model_json(content)
     except json.JSONDecodeError as exc:
         raise DiaryValidationError(f"diary content is not valid JSON: {exc}") from exc
     if isinstance(payload, dict) and "diary" in payload:
@@ -58,7 +58,7 @@ def diary_schema() -> dict[str, Any]:
     return DiaryBatch.model_json_schema()
 
 
-def _loads_model_json(content: str) -> Any:
+def loads_model_json(content: str) -> Any:
     text = content.strip()
     if text.startswith("```"):
         lines = text.splitlines()

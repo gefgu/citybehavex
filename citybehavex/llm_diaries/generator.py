@@ -1,16 +1,14 @@
 from __future__ import annotations
 
-import contextlib
-import subprocess
-import time
 from pathlib import Path
-from typing import Iterator, Optional
+from typing import Optional
 
 import numpy as np
 import requests
 from pydantic import ValidationError
 
 from citybehavex.llm.config import LLMConfig
+from citybehavex.llm.server import resolve_llm_server
 from citybehavex.math import allocate_location_counts
 
 from .cache import apply_variant, cache_path, load_cache_with_fallback, save_validated_diary_cache
@@ -18,62 +16,6 @@ from .models import Diary, DiaryBatch, DiaryValidationError, LLMStats, LocationC
 from .motifs import MOTIF_EXCURSION_PATTERNS, build_motif_rule, sample_motif
 from .parsing import parse_single_diary_response
 from .prompts import build_single_diary_prompt
-
-
-def _server_reachable(base_url: str, timeout: float) -> bool:
-    for path in ("/health", "/v1/models"):
-        try:
-            resp = requests.get(base_url.rstrip("/") + path, timeout=timeout)
-            if resp.ok:
-                return True
-        except Exception:  # noqa: BLE001
-            continue
-    return False
-
-
-@contextlib.contextmanager
-def _vllm_llm_server(config: LLMConfig) -> Iterator[str]:
-    """Spawn a local vLLM chat-completions server, yield its base_url, then shut it down."""
-    port = config.vllm_port
-    base_url = f"http://127.0.0.1:{port}"
-    log_dir = Path(config.cache_dir)
-    log_dir.mkdir(parents=True, exist_ok=True)
-    log_path = log_dir / "vllm_llm.log"
-
-    cmd = [
-        "vllm",
-        "serve",
-        config.model,
-        "--trust-remote-code",
-        "--port",
-        str(port),
-        *config.vllm_extra_args,
-    ]
-    with open(log_path, "w", encoding="utf-8") as log_file:
-        proc = subprocess.Popen(cmd, stdout=log_file, stderr=subprocess.STDOUT)
-        try:
-            deadline = time.monotonic() + config.vllm_startup_timeout_seconds
-            while time.monotonic() < deadline:
-                if proc.poll() is not None:
-                    raise RuntimeError(
-                        f"vllm exited early (code {proc.returncode}); see {log_path}"
-                    )
-                if _server_reachable(base_url, timeout=2.0):
-                    break
-                time.sleep(2.0)
-            else:
-                raise TimeoutError(
-                    f"vllm did not become ready within "
-                    f"{config.vllm_startup_timeout_seconds:.0f}s; see {log_path}"
-                )
-            yield base_url
-        finally:
-            proc.terminate()
-            try:
-                proc.wait(timeout=30)
-            except subprocess.TimeoutExpired:
-                proc.kill()
-                proc.wait(timeout=10)
 
 
 def fetch_diary_batch(
@@ -138,16 +80,7 @@ def fetch_diary_batch(
         except DiaryValidationError:
             pass  # No usable cache (missing or config changed) -> generate below.
 
-    use_auto = config.auto_launch and not (
-        config.base_url and _server_reachable(config.base_url, timeout=5.0)
-    )
-    server_cm: contextlib.AbstractContextManager[str] = (
-        _vllm_llm_server(config)
-        if use_auto
-        else contextlib.nullcontext(config.base_url or "")
-    )
-
-    with server_cm as effective_url:
+    with resolve_llm_server(config, log_dir=config.cache_dir) as effective_url:
         from citybehavex.llm import OpenAICompatibleDiaryClient
 
         client = OpenAICompatibleDiaryClient(

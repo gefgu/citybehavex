@@ -1,0 +1,132 @@
+tessellation:
+  min_lon: 1.6
+  min_lat: 48.5
+  max_lon: 2.975
+  max_lat: 49.16
+  poi_tessellation: true
+  overture_release: "2026-05-20.0"
+  min_poi_count: 1
+  relevance_column: relevance
+  output: data/gparis/results/gparis_poi_tessellation.parquet
+
+simulation:
+  agents: 500
+  days: 7
+  output: data/gparis/results/gparis_simulation_core_trajectories.parquet
+  random_state: 42
+  relevance_column: relevance
+  granularity_minutes: 15   # schedule slot length (5, 15, or 60)
+  car_speed_kmh: 50.0       # fallback speed when road routing is disabled/unsnapped
+  # EPR mobility model: p_explore = rho * S^-gamma (S = distinct locations visited so far).
+  rho: 0.6
+  gamma: 0.21
+  alpha: 0.2                # social vs. individual location-choice mix
+  dt_update_mob_sim_hours: 168.0
+  indipendency_window_hours: 0.5
+  # Gravity/OD destination-choice model: T_ij ~ O_i^origin * D_j^dest * distance_km^deterrence.
+  gravity_deterrence_exponent: -2.5
+  gravity_origin_exponent: 1.0
+  gravity_destination_exponent: 1.0
+
+road_network:
+  enabled: true
+  nodes_output: data/gparis/results/gparis_road_graph_nodes.parquet
+  edges_output: data/gparis/results/gparis_road_graph_edges.parquet
+  snap_output: data/gparis/results/gparis_road_graph_snap.parquet
+  max_leg_waypoints: 256
+
+rail_network:
+  enabled: true
+  nodes_output: data/gparis/results/gparis_rail_graph_nodes.parquet
+  edges_output: data/gparis/results/gparis_rail_graph_edges.parquet
+  snap_output: data/gparis/results/gparis_rail_graph_snap.parquet
+  max_leg_waypoints: 256
+
+llm:
+  base_url: "http://localhost:8081"
+  api_key: "none"
+  model: "Qwen/Qwen2.5-32B-Instruct-AWQ"
+  diary_count: 30
+  max_tokens: 768
+  cache_dir: data/llm_diaries_gparis
+  validated_diaries_path: data/llm_diaries_gparis/validated_diaries.json
+
+diaries:
+  city_profile: "Greater Paris metropolitan region, urban mobility with commuting, errands, leisure, healthcare, studies, and home routines."
+  city_profile_weekday: "Greater Paris weekday routines: commuting to work or studies, midday errands, evening leisure, and home."
+  city_profile_weekend: "Greater Paris weekend routines: later mornings at home, leisure, shopping, social visits, fewer work/study trips."
+  representative_day: "2026-01-01"
+  # Truncated rounded log-normal distribution of distinct daily locations,
+  # including HOME.
+  location_count_mu: 1
+  location_count_sigma: 0.75
+  max_locations: 6
+  motif_exploration_rate: 0.5
+
+embedding:
+  # Diary embeddings drive the ddCRP schedule selector. With auto_launch, a local
+  # vLLM server is spawned only when uncached diaries need embedding, then stopped;
+  # vectors are cached to cache_path so it rarely runs. Set base_url to reuse a
+  # running server, or enabled: false to fall back to identity similarity.
+  enabled: true
+  model: "nomic-ai/nomic-embed-text-v1.5"
+  base_url: "http://localhost:8001"   # reuse an already-running vLLM embed server
+  task_prefix: "clustering: "
+  dimensions: 768
+  auto_launch: true
+  vllm_executable: /home/gustavo/vllm/.venv/bin/vllm
+  vllm_port: 8001
+  # The persistent diary-generation vLLM server (port 8081) already holds ~90%
+  # of GPU memory, so the on-demand embed server must fit in the remainder.
+  vllm_extra_args: ["--gpu-memory-utilization", "0.08", "--enforce-eager", "--max-model-len", "512"]
+  cache_dir: data/llm_diaries_gparis
+  cache_path: data/llm_diaries_gparis/diary_embeddings.npz
+
+schedule:
+  # Profile-driven CRP: w_k = count_k * exp(s_k / T) where s_k is
+  # cosine(profile_embedding, diary_embedding). T and alpha are drawn per-agent
+  # from Beta distributions to produce heterogeneous schedule preferences.
+  similarity_backend: alignment_model
+  alignment_base_url: http://localhost:8082
+  alignment_model: models/modernbert-schedule-aligner
+  alignment_batch_size: 32
+  alignment_cache_path: data/llm_diaries_gparis/schedule_alignment_scores_cache.npz
+  temperature_beta_a: 3.0   # Beta shape a for per-agent temperature T
+  temperature_beta_b: 4.0   # Beta shape b for per-agent temperature T
+  alpha_beta_a: 4.0         # Beta shape a for per-agent exploration alpha
+  alpha_beta_b: 4.0         # Beta shape b for per-agent exploration alpha
+
+activities:
+  enabled: true
+  kappa: 1.0
+  temperature: 0.5
+  embed_activities: true
+  alignment_backend: rerank
+  alignment_base_url: http://localhost:8083
+  alignment_model: models/modernbert-activity-aligner
+  alignment_cache_path: data/llm_diaries_gparis/activity_alignment_cache.npz
+
+profiles:
+  enabled: true
+  llm_override: true
+  output: data/gparis/results/gparis_agent_profiles.parquet
+  home_building_weight: 1.0
+  home_poi_inverse_weight: 0.5
+  work_building_weight: 1.0
+  work_poi_weight: 0.75
+  work_distance_model: exponential
+  work_distance_exponential_lambda: 0.3
+  work_distance_max_km: 60.0
+  work_distance_min_km: 0.25
+  work_distance_fallback: expand
+  work_distance_density_correction_power: 1.0
+  work_from_home_probability: 0.02
+
+comparison:
+  path: data/gparis/gparis_visitation_df.parquet
+  label: gparis
+  # WIP: road-network-based jump_lengths/radius_of_gyration is implemented
+  # (citybehavex/metrics/road_distance.py) but disabled by default pending
+  # further performance validation on large real datasets. Set true to use
+  # road-network distance instead of straight-line Haversine.
+  road_network_distance: false

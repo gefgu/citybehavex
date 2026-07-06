@@ -27,8 +27,24 @@ from citybehavex.activities import (
 )
 from citybehavex.config import CityBehavExConfig
 from citybehavex.embedding import embed_profiles, embed_texts
-from citybehavex.llm_diaries import DiaryBatch, LLMStats, allocate_location_counts, fetch_diary_batch
-from citybehavex.profiles import AgentProfile, generate_profiles, load_profiles, profile_to_narrative, profiles_to_frame
+from citybehavex.llm.config import LLMConfig
+from citybehavex.llm_diaries import (
+    DiariesConfig,
+    DiaryBatch,
+    DiaryValidationError,
+    LLMStats,
+    allocate_location_counts,
+    fetch_diary_batch,
+)
+from citybehavex.profiles import (
+    AgentProfile,
+    AgentProfilesConfig,
+    calibrate_demographic_weights,
+    generate_profiles,
+    load_profiles,
+    profile_to_narrative,
+    profiles_to_frame,
+)
 from citybehavex.roads import build_rail_graph, build_road_graph, snap_locations_to_graph
 from citybehavex.schedules import (
     DdcrpAgentInfo,
@@ -1216,6 +1232,33 @@ def _run_simulation_core(
     return traj, "purpose", trip_writer is not None
 
 
+def resolve_calibrated_profiles_config(
+    pc: AgentProfilesConfig, llm_config: LLMConfig, diaries_config: DiariesConfig
+) -> AgentProfilesConfig:
+    """Apply LLM-calibrated demographic weights to ``pc`` when ``llm_override`` is set.
+
+    Falls back to ``pc``'s existing (default or configured) weights, with a
+    warning, if calibration fails after its internal retries — a transient LLM
+    outage should not abort the whole simulation run.
+    """
+    if not pc.llm_override:
+        return pc
+    city_profile = (
+        diaries_config.city_profile
+        or diaries_config.city_profile_weekday
+        or diaries_config.city_profile_weekend
+    )
+    try:
+        weights = calibrate_demographic_weights(llm_config, city_profile=city_profile)
+    except DiaryValidationError as exc:
+        typer.echo(f"Warning: LLM weight calibration failed, using default weights: {exc}")
+        return pc
+    if weights is None:
+        return pc
+    typer.echo("Calibrated demographic weights via LLM from city profile")
+    return pc.model_copy(update=weights)
+
+
 def maybe_build_profiles(
     config: CityBehavExConfig,
     tessellation_df: pd.DataFrame,
@@ -1233,6 +1276,7 @@ def maybe_build_profiles(
             typer.echo(f"Loaded {len(loaded)} agent profiles from {pc.profiles_path}")
             return loaded
         typer.echo(f"Warning: profiles_path {pc.profiles_path!r} not usable — generating")
+    pc = resolve_calibrated_profiles_config(pc, config.llm, config.diaries)
     rng = np.random.default_rng(config.simulation.random_state)
     profiles = generate_profiles(n, pc, rng, tessellation_df, relevance_column, home_tile_pool=home_tile_pool)
     typer.echo(f"Generated {len(profiles)} agent profiles")

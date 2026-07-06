@@ -33,6 +33,7 @@ from .models import (
 )
 from .parsing import (
     diary_schema,
+    loads_model_json,
     parse_chat_completion_response,
     parse_diary_content,
     parse_diary_response,
@@ -82,6 +83,7 @@ __all__ = [
     "diary_schema",
     "fetch_diary_batch",
     "load_validated_diary_cache",
+    "loads_model_json",
     "lognormal_location_probabilities",
     "parse_chat_completion_response",
     "parse_clock_minutes",
