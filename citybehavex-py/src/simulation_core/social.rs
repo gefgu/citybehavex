@@ -5,7 +5,7 @@ use std::collections::HashMap;
 
 use crate::simulation_core::inputs::{LocationInputs, SimulationParams};
 use crate::simulation_core::types::{
-    AgentState, DiaryState, Encounter, GRAVITY_REJECTION_ATTEMPTS, Scratch, SocialMode, WORK_CODE,
+    AgentState, DiaryState, Encounter, Scratch, SocialMode, GRAVITY_REJECTION_ATTEMPTS, WORK_CODE,
 };
 
 fn count_at(counts: &HashMap<usize, u32>, loc: usize) -> u32 {
@@ -24,9 +24,27 @@ fn cosine_similarity_sparse(
     }
     let dot: f64 = a_locs
         .iter()
-        .map(|&l| (count_at(a_counts, l) as f64) * (count_at(b_counts, l) as f64))
+        .filter_map(|&l| {
+            b_counts
+                .get(&l)
+                .map(|&b| (a_counts[&l] as f64) * (b as f64))
+        })
         .sum();
     dot / (norm_a_sq.sqrt() * norm_b_sq.sqrt())
+}
+
+fn populate_scratchpad(scratch: &mut Scratch, items: impl Iterator<Item = (usize, f64)>) {
+    scratch.candidates.clear();
+    scratch.cdf.clear();
+    let mut cumsum = 0.0_f64;
+
+    for (loc, weight) in items {
+        if weight > 0.0 {
+            scratch.candidates.push(loc);
+            cumsum += weight;
+            scratch.cdf.push(cumsum);
+        }
+    }
 }
 
 fn cdf_sample(rng: &mut impl Rng, candidates: &[usize], cdf: &[f64]) -> usize {
@@ -45,15 +63,13 @@ fn make_individual_return(
     scratch: &mut Scratch,
 ) -> Option<usize> {
     let a = &agents[agent];
-    scratch.candidates.clear();
-    scratch.cdf.clear();
-    let mut cumsum = 0.0_f64;
-    for &loc in &a.visited_locs {
-        cumsum += count_at(&a.visit_counts, loc) as f64;
-        scratch.candidates.push(loc);
-        scratch.cdf.push(cumsum);
-    }
-    if scratch.candidates.is_empty() || cumsum <= 0.0 {
+    populate_scratchpad(
+        scratch,
+        a.visited_locs
+            .iter()
+            .map(|&loc| (loc, count_at(&a.visit_counts, loc) as f64)),
+    );
+    if scratch.candidates.is_empty() {
         None
     } else {
         Some(cdf_sample(rng, &scratch.candidates, &scratch.cdf))
@@ -96,24 +112,22 @@ fn social_exploration(
             // agents this exhausted available RAM long before the memory
             // used by any output buffer. Recomputing this scan is pure CPU
             // cost with no correctness or memory downside.
-            scratch.candidates.clear();
-            scratch.cdf.clear();
-            let mut prev = 0.0_f64;
-            let mut cumsum = 0.0_f64;
-            for (j, &value) in row.iter().enumerate() {
-                let weight = value - prev;
-                prev = value;
-                if !visit_counts.contains_key(&j)
-                    && j != src
-                    && j != home
-                    && weight.is_finite()
-                    && weight > 0.0
-                {
-                    scratch.candidates.push(j);
-                    cumsum += weight;
-                    scratch.cdf.push(cumsum);
-                }
-            }
+            populate_scratchpad(
+                scratch,
+                row.iter()
+                    .enumerate()
+                    .scan(0.0_f64, |prev, (j, &value)| {
+                        let weight = value - *prev;
+                        *prev = value;
+                        Some((j, weight))
+                    })
+                    .filter(|&(j, weight)| {
+                        !visit_counts.contains_key(&j)
+                            && j != src
+                            && j != home
+                            && weight.is_finite()
+                    }),
+            );
             if scratch.candidates.is_empty() {
                 return None;
             }
@@ -210,33 +224,23 @@ fn make_social_action_local<R: Rng>(ctx: SocialActionContext<'_, R>) -> Option<(
     let contact_locs = &ctx.agents[contact].visited_locs;
     let agent_locs = &ctx.agents[ctx.agent].visited_locs;
 
-    ctx.scratch.candidates.clear();
-    ctx.scratch.cdf.clear();
     match ctx.mode {
-        SocialMode::Exploration => {
-            let mut cumsum = 0.0_f64;
-            for &loc in contact_locs {
-                if !agent_counts.contains_key(&loc) {
-                    ctx.scratch.candidates.push(loc);
-                    cumsum += count_at(contact_counts, loc) as f64;
-                    ctx.scratch.cdf.push(cumsum);
-                }
-            }
-        }
-        SocialMode::Return => {
-            let mut cumsum = 0.0_f64;
-            for &loc in agent_locs {
-                let w = count_at(contact_counts, loc) as f64;
-                if w > 0.0 {
-                    ctx.scratch.candidates.push(loc);
-                    cumsum += w;
-                    ctx.scratch.cdf.push(cumsum);
-                }
-            }
-        }
+        SocialMode::Exploration => populate_scratchpad(
+            ctx.scratch,
+            contact_locs
+                .iter()
+                .filter(|&&loc| !agent_counts.contains_key(&loc))
+                .map(|&loc| (loc, count_at(contact_counts, loc) as f64)),
+        ),
+        SocialMode::Return => populate_scratchpad(
+            ctx.scratch,
+            agent_locs
+                .iter()
+                .map(|&loc| (loc, count_at(contact_counts, loc) as f64)),
+        ),
     }
 
-    if ctx.scratch.candidates.is_empty() || ctx.scratch.cdf.last().copied().unwrap_or(0.0) <= 0.0 {
+    if ctx.scratch.candidates.is_empty() {
         None
     } else {
         let loc = cdf_sample(ctx.rng, &ctx.scratch.candidates, &ctx.scratch.cdf);
@@ -315,39 +319,20 @@ pub(crate) fn choose_location_local<R: Rng>(mut ctx: LocationChoiceContext<'_, R
     let explore = ctx.rng.gen_range(0.0_f64..1.0) < p_explore;
     let social = ctx.rng.gen_range(0.0_f64..1.0) < ctx.params.alpha;
 
-    let mut location = if explore {
-        if social {
-            social_action_for_choice(&mut ctx, SocialMode::Exploration)
-        } else {
-            exploration_for_choice(&mut ctx)
-        }
-    } else if social {
-        social_action_for_choice(&mut ctx, SocialMode::Return)
-    } else {
-        return_for_choice(&mut ctx)
+    let location = match (explore, social) {
+        (true, true) => social_action_for_choice(&mut ctx, SocialMode::Exploration)
+            .or_else(|| exploration_for_choice(&mut ctx))
+            .or_else(|| return_for_choice(&mut ctx)),
+        (true, false) => exploration_for_choice(&mut ctx)
+            .or_else(|| social_action_for_choice(&mut ctx, SocialMode::Exploration))
+            .or_else(|| return_for_choice(&mut ctx)),
+        (false, true) => social_action_for_choice(&mut ctx, SocialMode::Return)
+            .or_else(|| return_for_choice(&mut ctx))
+            .or_else(|| exploration_for_choice(&mut ctx)),
+        (false, false) => return_for_choice(&mut ctx)
+            .or_else(|| social_action_for_choice(&mut ctx, SocialMode::Return))
+            .or_else(|| exploration_for_choice(&mut ctx)),
     };
-
-    if location.is_none() {
-        location = if explore {
-            if social {
-                exploration_for_choice(&mut ctx)
-            } else {
-                social_action_for_choice(&mut ctx, SocialMode::Exploration)
-            }
-        } else if social {
-            return_for_choice(&mut ctx)
-        } else {
-            social_action_for_choice(&mut ctx, SocialMode::Return)
-        };
-    }
-
-    if location.is_none() {
-        location = if explore {
-            return_for_choice(&mut ctx)
-        } else {
-            exploration_for_choice(&mut ctx)
-        };
-    }
 
     location.unwrap_or(ctx.agents[ctx.agent].current_location)
 }
