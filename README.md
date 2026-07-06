@@ -93,6 +93,40 @@ schedule:
   alignment_model: models/modernbert-schedule-aligner
 ```
 
+### Fine-tuning the ModernBERT activity aligner
+
+To label sampled profile/block/activity pairs with the same running LLM server
+and fine-tune the micro-activity alignment scorer, run:
+
+```bash
+uv run --extra finetuning python scripts/train_modernbert_activity_aligner.py \
+  --profiles-path data/gparis/results/gparis_agent_profiles.parquet \
+  --diary-path data/llm_diaries_gparis/validated_diaries_weekday.json \
+  --diary-path data/llm_diaries_gparis/validated_diaries_weekend.json \
+  --llm-base-url http://localhost:8081 \
+  --llm-model Qwen/Qwen2.5-32B-Instruct-AWQ \
+  --dataset-output data/llm_diaries_gparis/activity_alignment_scores.parquet \
+  --output-model-path models/modernbert-activity-aligner \
+  --sample-size 5000 \
+  --epochs 1 \
+  --batch-size 8 \
+  --learning-rate 2e-5
+```
+
+The script scores only activity categories valid for each HOME/WORK/OTHER
+schedule block and includes previous-activity context in the training query.
+To use the trained scorer for micro-activity CRP alignment, serve the saved
+model with the same rerank-compatible server and set:
+
+```yaml
+activities:
+  enabled: true
+  alignment_backend: rerank
+  alignment_base_url: http://localhost:8082
+  alignment_model: models/modernbert-activity-aligner
+  alignment_cache_path: data/llm_diaries_gparis/activity_alignment_cache.npz
+```
+
 ## Web app
 
 `web/` is the supported comparison UI: a FastAPI backend serves comparison and
