@@ -570,6 +570,22 @@ fn new_agent_states(n_agents: usize) -> Vec<AgentState> {
     (0..n_agents).map(|_| AgentState::new()).collect()
 }
 
+/// Each agent's diary slot 0 (index `starts[i]`) is never revisited by
+/// `resolve_agent_moves` -- `DiaryState::diary_idx` starts at 1, so slot 0 is
+/// only ever consulted here, to seed the agent's true starting
+/// abstract-location/block rather than a hardcoded placeholder.
+fn initial_diary_state(inputs: &CoreInputs<'_>, agent: usize) -> (i32, i32) {
+    let idx = inputs.diary.starts[agent];
+    let abstract_loc = inputs
+        .diary
+        .abstract_locations
+        .get(idx)
+        .copied()
+        .unwrap_or(0);
+    let block_id = inputs.diary.block_ids.get(idx).copied().unwrap_or(-1);
+    (abstract_loc, block_id)
+}
+
 fn new_agent_par_data(inputs: &CoreInputs<'_>, master_seed: u64) -> Vec<AgentParData> {
     let init_ts_edges = vec![inputs.params.start_ts; inputs.social_graph.neighbors.len()];
     (0..inputs.params.n_agents)
@@ -584,6 +600,7 @@ fn new_agent_par_data(inputs: &CoreInputs<'_>, master_seed: u64) -> Vec<AgentPar
             } else {
                 vec![0.0_f64; n_edges]
             };
+            let (initial_abs_loc, initial_block_id) = initial_diary_state(inputs, i);
             AgentParData {
                 rng: Xoshiro256PlusPlus::seed_from_u64(derive_agent_seed(master_seed, i, 0)),
                 diary: DiaryState {
@@ -594,8 +611,12 @@ fn new_agent_par_data(inputs: &CoreInputs<'_>, master_seed: u64) -> Vec<AgentPar
                 scratch: Scratch::new(),
                 moves: Vec::with_capacity(32),
                 active_day: 0,
-                active_abs_loc: 0,
-                active_block_id: 0,
+                // Mirrors the real diary slot 0 state that
+                // `sample_initial_activities` seeds below, so the first
+                // comparison in `resolve_agent_moves` (at diary slot 1)
+                // correctly detects whether anything actually changed.
+                active_abs_loc: initial_abs_loc,
+                active_block_id: initial_block_id,
                 neighbor_indices: inputs.social_graph.neighbors[edge_start..edge_end].to_vec(),
                 edge_sim: initial_edge_sim,
                 edge_upd: init_ts_edges[edge_start..edge_end].to_vec(),
@@ -643,10 +664,11 @@ fn sample_initial_activities(
     activities: &mut ActivityOutputBuffers,
 ) {
     for i in 0..par_data.len() {
+        let (abstract_loc, block_id) = initial_diary_state(inputs, i);
         start_activity_sample(
             i,
-            0,
-            0,
+            abstract_loc,
+            block_id,
             inputs.params.start_ts,
             output,
             par_data,
@@ -695,6 +717,22 @@ fn resolve_agent_moves(
     od_rows: Option<&CachedGravityOdRows<'_>>,
     window_end: i64,
 ) {
+    // Tracks this agent's physical location across the whole call, since
+    // `agents[a].current_location` only reflects the last *committed* move
+    // and several moves can be queued here before the sequential commit
+    // phase catches up.
+    let mut known_location = agents[a].current_location;
+    // Tracked locally rather than through `data.active_block_id`: that field
+    // is read by `commit_one_move` to learn the *pre-transition* block id,
+    // used to correctly close out `fill_activities_until`'s chain before
+    // switching to the new block, and is only ever written there (after that
+    // read). Updating it here instead -- before the sequential commit phase
+    // has run -- would feed `fill_activities_until` the *new* block id
+    // instead of the old one, corrupting every activity sampled up to the
+    // transition. `pending_block_id` lets this loop still correctly detect
+    // more than one block transition within a single window without
+    // touching the field commit_one_move depends on.
+    let mut pending_block_id = data.active_block_id;
     while let Some(ts) = data.diary.current_ts(inputs.diary.timestamps) {
         if ts >= window_end {
             break;
@@ -710,30 +748,46 @@ fn resolve_agent_moves(
         let abstract_loc = data
             .diary
             .current_abstract_location(inputs.diary.abstract_locations);
-        if abstract_loc != data.active_abs_loc {
-            let loc = match abstract_loc {
-                0 => agents[a].home_location,
-                WORK_CODE => agents[a].work_location,
-                _ => choose_location_local(LocationChoiceContext {
-                    agent: a,
-                    agents,
-                    diary: &data.diary,
-                    neighbor_indices: &data.neighbor_indices,
-                    edge_sim: &data.edge_sim,
-                    rng: &mut data.rng,
-                    params: &inputs.params,
-                    n_locations,
-                    current_ts: ts,
-                    locations: &inputs.locations,
-                    od_rows,
-                    diary_abs_locs: inputs.diary.abstract_locations,
-                    scratch: &mut data.scratch,
-                    encounters: &mut data.encounters,
-                }),
+        let block_id = data.diary.current_block_id(inputs.diary.block_ids);
+        let abs_loc_changed = abstract_loc != data.active_abs_loc;
+        // A block boundary without an abstract-location change (e.g. two
+        // HOME episodes back to back, commonly across a day boundary when
+        // the new day's diary also opens at HOME) still needs a fresh move
+        // recorded: `active_block_id` drives the contextual alignment
+        // lookup in `sample_activity_and_duration`, and without this check
+        // it would silently keep scoring the whole new episode against the
+        // *previous* episode's block id.
+        let block_changed = block_id != pending_block_id;
+        if abs_loc_changed || block_changed {
+            let loc = if abs_loc_changed {
+                match abstract_loc {
+                    0 => agents[a].home_location,
+                    WORK_CODE => agents[a].work_location,
+                    _ => choose_location_local(LocationChoiceContext {
+                        agent: a,
+                        agents,
+                        diary: &data.diary,
+                        neighbor_indices: &data.neighbor_indices,
+                        edge_sim: &data.edge_sim,
+                        rng: &mut data.rng,
+                        params: &inputs.params,
+                        n_locations,
+                        current_ts: ts,
+                        locations: &inputs.locations,
+                        od_rows,
+                        diary_abs_locs: inputs.diary.abstract_locations,
+                        scratch: &mut data.scratch,
+                        encounters: &mut data.encounters,
+                    }),
+                }
+            } else {
+                // Same abstract purpose, just a new block -- no real travel.
+                known_location
             };
-            let block_id = data.diary.current_block_id(inputs.diary.block_ids);
             data.active_abs_loc = abstract_loc;
+            pending_block_id = block_id;
             data.moves.push((loc, ts, abstract_loc, block_id));
+            known_location = loc;
         }
         data.diary
             .advance(inputs.diary.timestamps, inputs.params.end_ts);
@@ -808,7 +862,7 @@ fn start_activity_sample(
         scratch,
     );
     *last_activity = act_idx as i32;
-    let new_idx = activities.push(a, current_stop_id, seq, arrival);
+    let new_idx = activities.push(a, current_stop_id, seq, arrival, block_id);
     activities.activity[new_idx] = act_idx as u16;
     *pending_departure = arrival + dur;
 }

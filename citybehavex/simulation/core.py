@@ -203,11 +203,18 @@ def _build_activity_frame(
     activity: np.ndarray,
     arrival: np.ndarray,
     departure: np.ndarray,
+    block_id: np.ndarray,
 ) -> pd.DataFrame:
     """Build the one-row-per-micro-activity `activities` frame from the raw
     arrays the Rust core returns -- shared by the final one-shot build and
     the per-day streaming callback so both produce identically-shaped
-    chunks."""
+    chunks.
+
+    ``block_id`` is the diary block that drove this activity's contextual
+    alignment lookup (see ``citybehavex.activities.alignment``); it's exposed
+    here purely so Python-side reachability analysis can tell which
+    (cluster, block) pairs a run actually visited.
+    """
     arrival_arr = np.asarray(arrival, dtype=np.int64)
     departure_arr = np.asarray(departure, dtype=np.int64)
     return pd.DataFrame(
@@ -218,6 +225,7 @@ def _build_activity_frame(
             "activity": np.asarray(activity, dtype=np.int64),
             "arrival": arrival_arr.astype("datetime64[s]"),
             "departure": departure_arr.astype("datetime64[s]"),
+            "block_id": np.asarray(block_id, dtype=np.int64),
         }
     )
 
@@ -572,9 +580,9 @@ def simulate_agents(
     rust_on_activity_day_flush = None
     if on_activity_day_flush is not None:
 
-        def rust_on_activity_day_flush(agent, stop_id, seq, activity, arrival, departure):
+        def rust_on_activity_day_flush(agent, stop_id, seq, activity, arrival, departure, block_id):
             on_activity_day_flush(
-                _build_activity_frame(agent, stop_id, seq, activity, arrival, departure)
+                _build_activity_frame(agent, stop_id, seq, activity, arrival, departure, block_id)
             )
 
     start = time.perf_counter()
@@ -587,7 +595,7 @@ def simulate_agents(
             stop_id, path_agent, path_stop_id, path_seq, path_lat, path_lng, path_t, path_mode,
         ),
         (
-            act_agent, act_stop_id, act_seq, act_activity, act_arrival, act_departure,
+            act_agent, act_stop_id, act_seq, act_activity, act_arrival, act_departure, act_block_id,
         ),
     ) = _cbx_core.simulation_core_simulate_agents(
         lats,
@@ -673,7 +681,7 @@ def simulate_agents(
     moving = _build_moving_frame(path_agent, path_stop_id, path_seq, path_lat, path_lng, path_t, path_mode)
 
     activities = _build_activity_frame(
-        act_agent, act_stop_id, act_seq, act_activity, act_arrival, act_departure
+        act_agent, act_stop_id, act_seq, act_activity, act_arrival, act_departure, act_block_id
     )
 
     if social_graph_artifact is not None:

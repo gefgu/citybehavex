@@ -207,6 +207,7 @@ pub fn simulation_core_simulate_agents<'py>(
         Bound<'py, PyArray1<u16>>,
         Bound<'py, PyArray1<i32>>,
         Bound<'py, PyArray1<i32>>,
+        Bound<'py, PyArray1<i32>>,
     ),
 )> {
     let lats = latitudes.as_slice()?;
@@ -376,8 +377,12 @@ pub fn simulation_core_simulate_agents<'py>(
             let activity = chunk.activity.into_pyarray(py);
             let arrival = chunk.arrival.into_pyarray(py);
             let departure = chunk.departure.into_pyarray(py);
+            let block_id = chunk.block_id.into_pyarray(py);
             callback
-                .call1(py, (agent, stop_id, seq, activity, arrival, departure))
+                .call1(
+                    py,
+                    (agent, stop_id, seq, activity, arrival, departure, block_id),
+                )
                 .map(|_| ())
                 .map_err(|e| e.to_string())
         }
@@ -509,6 +514,7 @@ pub fn simulation_core_simulate_agents<'py>(
             output.act_activity.into_pyarray(py),
             output.act_arrival.into_pyarray(py),
             output.act_departure.into_pyarray(py),
+            output.act_block_id.into_pyarray(py),
         ),
     ))
 }

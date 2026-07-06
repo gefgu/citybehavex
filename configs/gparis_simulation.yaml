@@ -93,8 +93,8 @@ schedule:
   alignment_cache_path: data/llm_diaries_gparis/schedule_alignment_scores_cache.npz
   temperature_beta_a: 3.0   # Beta shape a for per-agent temperature T
   temperature_beta_b: 4.0   # Beta shape b for per-agent temperature T
-  alpha_beta_a: 4.0         # Beta shape a for per-agent exploration alpha
-  alpha_beta_b: 4.0         # Beta shape b for per-agent exploration alpha
+  alpha_beta_a: 1.0         # Beta shape a for per-agent exploration alpha
+  alpha_beta_b: 6.0         # Beta shape b for per-agent exploration alpha (lower mean -> stronger preferential return to already-used diaries)
 
 activities:
   enabled: true
@@ -104,7 +104,12 @@ activities:
   alignment_backend: rerank
   alignment_base_url: http://localhost:8083
   alignment_model: models/modernbert-activity-aligner
+  alignment_batch_size: 512
   alignment_cache_path: data/llm_diaries_gparis/activity_alignment_cache.npz
+  alignment_concurrency: 4
+  alignment_retries: 2
+  alignment_checkpoint_every: 20
+  prune_to_reachable: true
 
 profiles:
   enabled: true

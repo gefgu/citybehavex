@@ -137,6 +137,8 @@ def test_label_pairs_does_not_persist_reason(monkeypatch):
         api_key=None,
         timeout=1.0,
         retries=1,
+        concurrency=1,
+        progress_interval=1,
     )
 
     assert "reason" not in df.columns

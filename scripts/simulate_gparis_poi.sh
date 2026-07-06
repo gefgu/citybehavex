@@ -4,7 +4,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(dirname "$SCRIPT_DIR")"
 
-"$REPO_ROOT/.venv/bin/python" -m citybehavex simulate \
+"$REPO_ROOT/.venv/bin/python" -u -m citybehavex simulate \
   --min-lon 1.6 \
   --min-lat 48.5 \
   --max-lon 2.975 \
