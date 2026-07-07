@@ -10,8 +10,14 @@ from .agents import (
     load_profiles,
     profile_to_narrative,
     profiles_to_frame,
+    reroll_profile_demographics,
 )
 from .calibration import WEIGHT_GROUPS, calibrate_demographic_weights
+from .coherence_alignment import (
+    COHERENCE_CANDIDATE_TEXT,
+    expand_coherence_scores,
+    score_profile_coherence_alignment,
+)
 from .config import AgentProfilesConfig
 from .metrics import PROFILE_METRICS, compute_profiles
 from .ownership_alignment import (
@@ -35,6 +41,10 @@ __all__ = [
     "load_profiles",
     "profile_to_narrative",
     "profiles_to_frame",
+    "reroll_profile_demographics",
+    "COHERENCE_CANDIDATE_TEXT",
+    "expand_coherence_scores",
+    "score_profile_coherence_alignment",
     "VEHICLE_CANDIDATES",
     "expand_vehicle_scores",
     "score_vehicle_ownership_alignment",

@@ -161,6 +161,14 @@ profiles:
   work_distance_fallback: expand
   work_distance_density_correction_power: 1.0
   work_from_home_probability: 0.02
+  coherence_alignment_backend: none
+  coherence_alignment_base_url: http://localhost:8085
+  coherence_alignment_model: models/modernbert-profile-coherence-aligner
+  coherence_alignment_batch_size: 256
+  coherence_alignment_cache_path: data/llm_diaries_gparis/profile_coherence_alignment_cache.npz
+  coherence_alignment_concurrency: 4
+  coherence_rerun_rounds: 3
+  coherence_rerun_threshold: 0.6
   ownership_alignment_backend: rerank
   ownership_alignment_base_url: http://localhost:8084
   ownership_alignment_model: models/modernbert-vehicle-ownership-aligner
