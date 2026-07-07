@@ -321,6 +321,57 @@ def generate_profiles(
     return profiles
 
 
+def reroll_profile_demographics(
+    profiles: list[AgentProfile],
+    indices: np.ndarray | list[int],
+    config: AgentProfilesConfig,
+    rng: np.random.Generator,
+) -> list[AgentProfile]:
+    """Resample demographic attributes for selected profiles.
+
+    Spatial anchors and transport ownership are intentionally preserved so this
+    can be used as a coherence repair step before vehicle ownership alignment.
+    """
+    selected = np.asarray(indices, dtype=np.int64)
+    if len(selected) == 0:
+        return profiles
+
+    n = len(selected)
+    genders = rng.integers(0, 2, size=n)
+    ages = sample_beta_scaled_ints(
+        config.age_beta_a,
+        config.age_beta_b,
+        config.age_min,
+        config.age_max,
+        n,
+        rng,
+    )
+    educations = [sample_multinomial_index(config.education_weights, rng) for _ in range(n)]
+    healths = [sample_multinomial_index(config.health_weights, rng) for _ in range(n)]
+    households = [sample_multinomial_index(config.household_weights, rng) for _ in range(n)]
+    jobs = [sample_multinomial_index(config.job_weights, rng) for _ in range(n)]
+    male_pool = config.male_names or ["Alex"]
+    female_pool = config.female_names or ["Alex"]
+
+    updated = list(profiles)
+    for local_idx, profile_idx in enumerate(selected):
+        profile = updated[int(profile_idx)]
+        is_male = bool(genders[local_idx])
+        pool = male_pool if is_male else female_pool
+        updated[int(profile_idx)] = profile.model_copy(
+            update={
+                "gender": "male" if is_male else "female",
+                "name": pool[int(rng.integers(0, len(pool)))],
+                "age": int(ages[local_idx]),
+                "education": EDUCATION_LEVELS[educations[local_idx]],
+                "health": HEALTH_LEVELS[healths[local_idx]],
+                "household": HOUSEHOLD_TYPES[households[local_idx]],
+                "job": ILOSTAT_JOBS[jobs[local_idx]],
+            }
+        )
+    return updated
+
+
 def load_profiles(path: str, n: int) -> Optional[list[AgentProfile]]:
     """Load hand-authored profiles from a JSON or parquet file.
 

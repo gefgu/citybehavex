@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import pytest
+from pathlib import Path
 
 from citybehavex.config import apply_overrides, load_config
 from citybehavex.llm import LLMConfig
@@ -10,6 +11,9 @@ from citybehavex.profiles.config import AgentProfilesConfig
 from citybehavex.schedules import ScheduleConfig
 from citybehavex.simulation import SimulationConfig
 from citybehavex.social.config import SocialNetworkConfig
+
+
+ROOT = Path(__file__).resolve().parents[1]
 
 
 def test_load_config_expands_environment(monkeypatch, tmp_path):
@@ -31,6 +35,12 @@ llm:
     config = load_config(str(path))
     assert config.simulation.output == "configured.parquet"
     assert config.llm.api_key == "secret"
+
+
+def test_repo_simulator_yaml_configs_validate():
+    for path in sorted((ROOT / "configs").glob("*.yaml")):
+        config = load_config(str(path))
+        assert config.profiles.coherence_alignment_backend in {"none", "rerank"}
 
 
 def test_cli_overrides_config_defaults():
@@ -104,6 +114,11 @@ def test_profiles_default_to_poi_building_location_inference():
     assert config.work_distance_max_km == 60.0
     assert config.work_distance_density_correction_power == 1.0
     assert config.work_from_home_probability == 0.05
+    assert config.coherence_alignment_backend == "none"
+    assert config.coherence_alignment_base_url is None
+    assert config.coherence_profile_cluster_similarity_threshold == 0.94
+    assert config.coherence_rerun_rounds == 3
+    assert config.coherence_rerun_threshold == 0.6
     assert config.ownership_alignment_backend == "none"
     assert config.ownership_alignment_base_url is None
     assert config.ownership_profile_cluster_similarity_threshold == 0.94

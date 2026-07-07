@@ -143,6 +143,56 @@ At runtime, the car and bike scores are treated as Bernoulli probabilities.
 The sampled booleans still populate `has_car` and `has_bike`, and the numeric
 scores are saved as `car_ownership_score` and `bike_ownership_score`.
 
+### Fine-tuning the ModernBERT profile coherence aligner
+
+To repair incoherent demographic combinations before vehicle ownership
+alignment, first run a simulation once so `profiles.output` exists, or point the
+script at another generated profile parquet. Then label real profiles plus
+synthetic inconsistent variants and fine-tune the scorer:
+
+```bash
+uv run --extra finetuning python scripts/train_modernbert_profile_coherence_aligner.py \
+  --profiles-path data/gparis/results/gparis_agent_profiles.parquet \
+  --city-profile "Greater Paris metropolitan region, urban mobility with commuting, errands, leisure, healthcare, studies, and home routines." \
+  --llm-base-url http://localhost:8081 \
+  --llm-model Qwen/Qwen2.5-32B-Instruct-AWQ \
+  --dataset-output data/llm_diaries_gparis/profile_coherence_scores.parquet \
+  --output-model-path models/modernbert-profile-coherence-aligner \
+  --sample-size 2000 \
+  --mutation-ratio 0.5 \
+  --llm-concurrency 8 \
+  --device cuda
+```
+
+Serve the saved model with the rerank-compatible server on a free port:
+
+```bash
+PYTHONPATH=/home/gustavo/vllm/.venv/lib/python3.12/site-packages \
+  .venv/bin/python scripts/serve_schedule_aligner.py \
+  --model-path models/modernbert-profile-coherence-aligner \
+  --port 8085 \
+  --device cuda \
+  --predict-batch-size 128
+```
+
+Then enable it under `profiles`:
+
+```yaml
+profiles:
+  coherence_alignment_backend: rerank
+  coherence_alignment_base_url: http://localhost:8085
+  coherence_alignment_model: models/modernbert-profile-coherence-aligner
+  coherence_alignment_batch_size: 256
+  coherence_alignment_cache_path: data/llm_diaries_gparis/profile_coherence_alignment_cache.npz
+  coherence_alignment_concurrency: 4
+  coherence_rerun_rounds: 3
+  coherence_rerun_threshold: 0.6
+```
+
+Each round scores profile clusters, reruns demographics for invalid agents, and
+preserves `uid`, `home_tile`, `work_tile`, `has_car`, and `has_bike`. If the
+scorer is disabled or unavailable, profile generation continues unchanged.
+
 ### Fine-tuning the ModernBERT activity aligner
 
 To label sampled profile/block/activity pairs with the same running LLM server

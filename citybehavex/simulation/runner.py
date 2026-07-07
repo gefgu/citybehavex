@@ -42,11 +42,14 @@ from citybehavex.profiles import (
     AgentProfile,
     AgentProfilesConfig,
     calibrate_demographic_weights,
+    expand_coherence_scores,
     expand_vehicle_scores,
     generate_profiles,
     load_profiles,
     profile_to_narrative,
     profiles_to_frame,
+    reroll_profile_demographics,
+    score_profile_coherence_alignment,
     score_vehicle_ownership_alignment,
 )
 from citybehavex.roads import build_rail_graph, build_road_graph, snap_locations_to_graph
@@ -1474,6 +1477,86 @@ def _apply_vehicle_ownership_alignment(
     return updated
 
 
+def _coherence_rerun_indices(scores: np.ndarray, threshold: float, rng: np.random.Generator) -> np.ndarray:
+    clipped = np.clip(np.asarray(scores, dtype=np.float64), 0.0, 1.0)
+    forced = clipped < float(threshold)
+    probabilistic = rng.random(len(clipped)) < (1.0 - clipped)
+    return np.flatnonzero(forced | probabilistic)
+
+
+def _apply_profile_coherence_alignment(
+    profiles: list[AgentProfile],
+    config: CityBehavExConfig,
+) -> list[AgentProfile]:
+    pc = config.profiles
+    if (
+        not profiles
+        or pc.coherence_alignment_backend != "rerank"
+        or not pc.coherence_alignment_base_url
+        or pc.coherence_rerun_rounds <= 0
+    ):
+        return profiles
+
+    city_profile = _profile_city_context(config.diaries)
+    rng = np.random.default_rng(config.simulation.random_state + 29)
+    repaired = list(profiles)
+    metadata_frames: list[pd.DataFrame] = []
+
+    for round_idx in range(1, pc.coherence_rerun_rounds + 1):
+        narratives = [profile_to_narrative(p, include_transport=False) for p in repaired]
+        profile_embeddings = embed_profiles(narratives, config.embedding)
+        if profile_embeddings is not None:
+            clusters = cluster_profile_embeddings(
+                narratives,
+                profile_embeddings,
+                pc.coherence_profile_cluster_similarity_threshold,
+            )
+        else:
+            typer.echo(
+                "Profile embeddings unavailable for coherence alignment — "
+                "scoring profiles individually"
+            )
+            clusters = cluster_profile_embeddings(narratives, None, 1.0)
+
+        scored = score_profile_coherence_alignment(
+            clusters.narratives,
+            pc,
+            city_profile=city_profile,
+        )
+        if scored is None:
+            typer.echo("Profile coherence scorer unavailable — keeping generated profiles")
+            return repaired
+
+        cluster_scores, metadata = scored
+        agent_scores = expand_coherence_scores(cluster_scores, clusters)
+        rerun_indices = _coherence_rerun_indices(
+            agent_scores,
+            pc.coherence_rerun_threshold,
+            rng,
+        )
+        metadata = metadata.copy()
+        metadata["round"] = round_idx
+        metadata_frames.append(metadata)
+        typer.echo(
+            "Profile coherence alignment round "
+            f"{round_idx}/{pc.coherence_rerun_rounds}: "
+            f"{len(clusters.narratives)} clusters for {len(repaired)} profiles; "
+            f"mean={float(agent_scores.mean()):.3f}; rerun={len(rerun_indices)}"
+        )
+        if len(rerun_indices) == 0:
+            break
+        repaired = reroll_profile_demographics(repaired, rerun_indices, pc, rng)
+
+    if metadata_frames and pc.output:
+        alignment_path = Path(pc.output).with_name(
+            f"{Path(pc.output).stem}_coherence_alignment.parquet"
+        )
+        alignment_path.parent.mkdir(parents=True, exist_ok=True)
+        pd.concat(metadata_frames, ignore_index=True).to_parquet(alignment_path, index=False)
+        typer.echo(f"Saved profile coherence alignment scores -> {alignment_path}")
+    return repaired
+
+
 def maybe_build_profiles(
     config: CityBehavExConfig,
     tessellation_df: pd.DataFrame,
@@ -1489,6 +1572,7 @@ def maybe_build_profiles(
         loaded = load_profiles(pc.profiles_path, n)
         if loaded is not None:
             typer.echo(f"Loaded {len(loaded)} agent profiles from {pc.profiles_path}")
+            loaded = _apply_profile_coherence_alignment(loaded, config)
             loaded = _apply_vehicle_ownership_alignment(loaded, config)
             if pc.output:
                 out = Path(pc.output)
@@ -1501,6 +1585,7 @@ def maybe_build_profiles(
     config = config.model_copy(update={"profiles": pc})
     rng = np.random.default_rng(config.simulation.random_state)
     profiles = generate_profiles(n, pc, rng, tessellation_df, relevance_column, home_tile_pool=home_tile_pool)
+    profiles = _apply_profile_coherence_alignment(profiles, config)
     profiles = _apply_vehicle_ownership_alignment(profiles, config)
     typer.echo(f"Generated {len(profiles)} agent profiles")
     if pc.output:
