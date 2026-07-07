@@ -1,0 +1,16 @@
+semantic_cluster,n_categories,sleep,eatdrink,selfcare,paidwork,educatn,foodprep,cleanetc,maintain,shopserv,garden,petcare,eldcare,pkidcare,ikidcare,religion,volorgwk,commute,travel,sportex,tvradio,read,compint,goout,leisure
+auto_mobility,28,False,False,False,False,False,False,False,True,True,False,False,False,False,False,False,False,False,False,False,False,True,True,False,False
+care_family,10,False,False,False,False,False,False,False,False,True,False,True,True,True,True,False,False,False,False,False,False,False,False,False,True
+culture_events,35,False,True,False,False,False,False,False,False,False,False,False,False,False,False,False,False,False,False,False,False,True,False,True,True
+education,33,False,True,False,False,True,False,False,False,False,False,False,False,False,False,False,False,False,False,False,False,True,True,False,False
+food_drink,188,False,True,False,False,False,False,False,False,True,False,False,False,False,False,False,False,False,False,False,False,True,True,True,True
+health_care,31,False,False,True,False,False,False,False,False,True,False,False,True,True,False,False,False,False,False,False,False,False,False,False,False
+home_residential,15,True,True,True,True,False,True,True,True,False,True,True,True,True,True,False,False,False,False,False,True,True,True,False,True
+other_mixed,338,False,True,False,False,False,False,False,False,True,False,False,False,False,False,False,False,False,False,False,False,False,False,True,True
+parks_outdoors,27,False,True,False,False,False,False,False,False,False,True,True,False,True,True,False,False,False,False,True,False,False,False,False,True
+personal_services,140,False,False,True,False,False,False,False,True,True,False,False,False,False,False,False,False,False,False,False,False,False,False,False,False
+religion_civic,18,False,False,False,False,False,False,False,False,False,False,False,False,False,False,True,True,False,False,False,False,False,False,False,True
+retail_shopping,121,False,True,False,False,False,False,False,False,True,False,False,False,False,False,False,False,False,False,False,False,False,False,False,True
+sports_fitness,45,False,True,True,False,False,False,False,False,False,False,False,False,False,False,False,False,False,False,True,False,False,False,True,True
+transport_travel,31,False,True,False,False,False,False,False,False,True,False,False,False,False,False,False,False,False,False,False,False,True,True,False,False
+work_industry,54,False,True,True,True,False,False,False,False,False,False,False,False,False,False,False,False,False,False,False,False,False,True,False,True

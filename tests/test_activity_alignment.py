@@ -11,7 +11,9 @@ from citybehavex.activities.alignment import (
     cluster_profile_embeddings,
     expand_cluster_scores,
     score_activity_alignment,
+    score_poi_semantic_alignment,
 )
+from citybehavex.activities.poi_semantic import build_poi_semantic_activity_data
 from citybehavex.activities.config import ActivitiesConfig
 from citybehavex.llm_diaries import Diary
 
@@ -24,6 +26,19 @@ def _diary(diary_id: str = "schedule-030") -> Diary:
                 {"start": "00:00", "end": "08:00", "purpose": "HOME"},
                 {"start": "08:00", "end": "17:00", "purpose": "WORK"},
                 {"start": "17:00", "end": "24:00", "purpose": "HOME"},
+            ],
+        }
+    )
+
+
+def _diary_with_other(diary_id: str = "schedule-031") -> Diary:
+    return Diary.model_validate(
+        {
+            "diary_id": diary_id,
+            "episodes": [
+                {"start": "00:00", "end": "08:00", "purpose": "HOME"},
+                {"start": "08:00", "end": "17:00", "purpose": "OTHER"},
+                {"start": "17:00", "end": "24:00", "purpose": "WORK"},
             ],
         }
     )
@@ -86,6 +101,81 @@ def test_activity_alignment_scores_only_valid_block_activities(monkeypatch):
     assert set(work_rows["activity"]).issubset({"eatdrink", "paidwork", "commute"})
     assert "sleep" not in set(work_rows["activity"])
     assert calls[0]["model"] == "activity-aligner"
+
+
+def test_activity_alignment_skips_other_blocks(monkeypatch):
+    calls = []
+
+    class Response:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return [{"index": i, "score": 0.5} for i in range(len(calls[-1]["pairs"]))]
+
+    def fake_post(url, headers, json, timeout):
+        calls.append(json)
+        return Response()
+
+    monkeypatch.setattr("citybehavex.activities.alignment.requests.post", fake_post)
+
+    result = score_activity_alignment(
+        ["profile cluster"],
+        [_diary_with_other()],
+        ActivitiesConfig(
+            enabled=True,
+            alignment_backend="rerank",
+            alignment_base_url="http://tei.local",
+            alignment_model="activity-aligner",
+            alignment_batch_size=100,
+        ),
+    )
+
+    assert result is not None
+    scores, blocks, metadata = result
+    other_block = next(block for block in blocks if block.purpose == "OTHER")
+    assert not np.any(scores[:, other_block.block_id])
+    assert "OTHER" not in set(metadata["purpose"])
+
+
+def test_poi_semantic_alignment_scores_only_masked_activities(monkeypatch):
+    calls = []
+
+    class Response:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return [{"index": i, "score": 0.5} for i in range(len(calls[-1]["pairs"]))]
+
+    def fake_post(url, headers, json, timeout):
+        calls.append(json)
+        return Response()
+
+    monkeypatch.setattr("citybehavex.activities.alignment.requests.post", fake_post)
+
+    poi_data = build_poi_semantic_activity_data()
+    result = score_poi_semantic_alignment(
+        ["profile cluster"],
+        ActivitiesConfig(
+            enabled=True,
+            alignment_backend="rerank",
+            alignment_base_url="http://tei.local",
+            alignment_model="activity-aligner",
+            alignment_batch_size=10_000,
+        ),
+        poi_data,
+    )
+
+    assert result is not None
+    scores, metadata = result
+    assert scores.shape == (1, len(poi_data.semantic_clusters), 25)
+    food_id = poi_data.cluster_to_id["food_drink"]
+    food = metadata[metadata["semantic_cluster"] == "food_drink"]
+    assert set(food["activity"]) == {"eatdrink", "shopserv", "read", "compint", "goout", "leisure"}
+    assert not np.any(scores[0, food_id, [0, 3, 16, 17]])
+    all_texts = [text for call in calls for _query, text in call["pairs"]]
+    assert not any(text.startswith("travel:") or text.startswith("commute:") for text in all_texts)
 
 
 def test_activity_alignment_visited_pairs_prunes_unreachable_cluster_block_combos(monkeypatch):

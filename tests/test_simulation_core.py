@@ -8,6 +8,7 @@ import citybehavex._core as core
 from citybehavex.activities import (
     N_ACTIVITIES,
     activity_duration_arrays,
+    build_poi_semantic_activity_data,
     build_catalog,
     build_eligibility_csr,
 )
@@ -841,6 +842,60 @@ def test_contextual_activity_alignment_uses_previous_activity_with_separate_micr
 
     first_stop = activities[activities["stop_id"] == 0]["activity"].tolist()
     assert first_stop[:2] == [cleanetc, foodprep]
+
+
+def test_other_poi_uses_semantic_cluster_mask_and_scores():
+    tess = pd.DataFrame({
+        "tile_id": [0, 1],
+        "lat": [48.8566, 48.8580],
+        "lng": [2.3522, 2.3540],
+        "relevance": [0.0, 1.0],
+    })
+    diary_arrays = (
+        np.array([0, 3600], dtype=np.int64),
+        np.array([0, 2], dtype=np.int32),
+        np.array([0], dtype=np.int64),
+        np.array([2], dtype=np.int64),
+        np.array([0, 1], dtype=np.int32),
+    )
+    ten_min_hours = 10 / 60
+    act_dur_mu = np.log(np.full(N_ACTIVITIES, ten_min_hours, dtype=np.float64))
+    act_dur_sigma = np.zeros(N_ACTIVITIES, dtype=np.float64)
+    purpose_act_starts, purpose_acts = build_eligibility_csr()
+    poi_data = build_poi_semantic_activity_data()
+    food_id = poi_data.cluster_to_id["food_drink"]
+    compint = {activity.name: activity.idx for activity in build_catalog()}["compint"]
+    poi_scores = np.zeros((1, len(poi_data.semantic_clusters), N_ACTIVITIES), dtype=np.float64)
+    poi_scores[0, food_id, compint] = 1.0
+
+    _df, _encounters, _moving, activities = simulate_agents(
+        tess,
+        "relevance",
+        diary_arrays,
+        start_ts=0,
+        end_ts=7200,
+        slot_seconds=_SLOT,
+        car_speed_kmh=_SPEED,
+        n_agents=1,
+        random_state=42,
+        rho=0.0,
+        act_dur_mu=act_dur_mu,
+        act_dur_sigma=act_dur_sigma,
+        purpose_act_starts=purpose_act_starts,
+        purpose_acts=purpose_acts,
+        act_temp=0.01,
+        poi_semantic_scores=poi_scores,
+        location_semantic_cluster_ids=np.array([0, food_id], dtype=np.int64),
+        poi_mask_starts=poi_data.mask_starts,
+        poi_mask_activities=poi_data.mask_activities,
+        activity_cluster_labels=np.array([0], dtype=np.int64),
+        materialize_travel=False,
+        starting_locs=np.array([1], dtype=np.int64),
+    )
+
+    other_block = activities[activities["block_id"] == 1]["activity"].tolist()
+    assert other_block
+    assert set(other_block) == {compint}
 
 
 def test_block_id_refreshes_across_same_abstract_location_boundary():

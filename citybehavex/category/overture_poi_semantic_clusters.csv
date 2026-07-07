@@ -1,0 +1,1115 @@
+primary_category,purpose,category_text,source,gparis_poi_tessellation,local_observed_count,cluster_id,semantic_cluster
+auto_customization,OTHER,auto customization,citybehavex/category/unique_categories.csv,56,56,1,auto_mobility
+auto_detailing,PURCHASE,auto detailing,citybehavex/category/unique_categories.csv,136,136,1,auto_mobility
+auto_loan_provider,OTHER,auto loan provider,citybehavex/category/unique_categories.csv,2,2,1,auto_mobility
+auto_upholstery,PURCHASE,auto upholstery,citybehavex/category/unique_categories.csv,1,1,1,auto_mobility
+automobile_leasing,PURCHASE,automobile leasing,citybehavex/category/unique_categories.csv,16,16,1,auto_mobility
+automotive,PURCHASE,automotive,citybehavex/category/unique_categories.csv,298,298,1,auto_mobility
+automotive_consultant,WORK,automotive consultant,citybehavex/category/unique_categories.csv,34,34,1,auto_mobility
+automotive_dealer,PURCHASE,automotive dealer,citybehavex/category/unique_categories.csv,336,336,1,auto_mobility
+automotive_storage_facility,WORK,automotive storage facility,citybehavex/category/unique_categories.csv,6,6,1,auto_mobility
+boat_dealer,PURCHASE,boat dealer,citybehavex/category/unique_categories.csv,12,12,1,auto_mobility
+car_dealer,PURCHASE,car dealer,citybehavex/category/unique_categories.csv,2453,2453,1,auto_mobility
+car_wash,PURCHASE,car wash,citybehavex/category/unique_categories.csv,309,309,1,auto_mobility
+car_window_tinting,PURCHASE,car window tinting,citybehavex/category/unique_categories.csv,27,27,1,auto_mobility
+cardiologist,HEALTH,cardiologist,citybehavex/category/unique_categories.csv,29,29,0,auto_mobility
+career_counseling,HEALTH,career counseling,citybehavex/category/unique_categories.csv,80,80,1,auto_mobility
+carpenter,PURCHASE,carpenter,citybehavex/category/unique_categories.csv,641,641,0,auto_mobility
+carpet_cleaning,PURCHASE,carpet cleaning,citybehavex/category/unique_categories.csv,15,15,1,auto_mobility
+child_care_and_day_care,OTHER,child care and day care,citybehavex/category/unique_categories.csv,577,577,1,auto_mobility
+commercial_vehicle_dealer,PURCHASE,commercial vehicle dealer,citybehavex/category/unique_categories.csv,11,11,1,auto_mobility
+department_of_motor_vehicles,OTHER,department of motor vehicles,citybehavex/category/unique_categories.csv,17,17,1,auto_mobility
+mobile_home_dealer,PURCHASE,mobile home dealer,citybehavex/category/unique_categories.csv,4,4,1,auto_mobility
+motorcycle_dealer,PURCHASE,motorcycle dealer,citybehavex/category/unique_categories.csv,374,374,1,auto_mobility
+prenatal_perinatal_care,OTHER,prenatal perinatal care,citybehavex/category/unique_categories.csv,27,27,1,auto_mobility
+retirement_home,OTHER,retirement home,citybehavex/category/unique_categories.csv,866,866,1,auto_mobility
+skin_care,PURCHASE,skin care,citybehavex/category/unique_categories.csv,209,209,1,auto_mobility
+truck_dealer,PURCHASE,truck dealer,citybehavex/category/unique_categories.csv,24,24,1,auto_mobility
+used_car_dealer,PURCHASE,used car dealer,citybehavex/category/unique_categories.csv,182,182,1,auto_mobility
+vehicle_shipping,PURCHASE,vehicle shipping,citybehavex/category/unique_categories.csv,14,14,1,auto_mobility
+animal_shelter,OTHER,animal shelter,citybehavex/category/unique_categories.csv,42,42,1,care_family
+divorce_and_family_law,OTHER,divorce and family law,citybehavex/category/unique_categories.csv,76,76,1,care_family
+family_counselor,HEALTH,family counselor,citybehavex/category/unique_categories.csv,23,23,1,care_family
+family_practice,HEALTH,family practice,citybehavex/category/unique_categories.csv,113,113,1,care_family
+pet_adoption,OTHER,pet adoption,citybehavex/category/unique_categories.csv,4,4,1,care_family
+pet_boarding,PURCHASE,pet boarding,citybehavex/category/unique_categories.csv,10,10,1,care_family
+pet_breeder,PURCHASE,pet breeder,citybehavex/category/unique_categories.csv,75,75,1,care_family
+pet_groomer,PURCHASE,pet groomer,citybehavex/category/unique_categories.csv,248,248,1,care_family
+pet_sitting,PURCHASE,pet sitting,citybehavex/category/unique_categories.csv,62,62,1,care_family
+pets,PURCHASE,pets,citybehavex/category/unique_categories.csv,2,2,0,care_family
+adult_entertainment,LEISURE,adult entertainment,citybehavex/category/unique_categories.csv,66,66,1,culture_events
+arcade,LEISURE,arcade,citybehavex/category/unique_categories.csv,64,64,0,culture_events
+art_gallery,LEISURE,art gallery,citybehavex/category/unique_categories.csv,2166,2166,1,culture_events
+art_museum,LEISURE,art museum,citybehavex/category/unique_categories.csv,212,212,1,culture_events
+arts_and_crafts,OTHER,arts and crafts,citybehavex/category/unique_categories.csv,709,709,1,culture_events
+arts_and_entertainment,LEISURE,arts and entertainment,citybehavex/category/unique_categories.csv,1349,1349,1,culture_events
+asian_art_museum,LEISURE,asian art museum,citybehavex/category/unique_categories.csv,4,4,1,culture_events
+auditorium,LEISURE,auditorium,citybehavex/category/unique_categories.csv,65,65,0,culture_events
+automotive_parts_and_accessories,OTHER,automotive parts and accessories,citybehavex/category/unique_categories.csv,470,470,1,culture_events
+aviation_museum,LEISURE,aviation museum,citybehavex/category/unique_categories.csv,2,2,1,culture_events
+boat_parts_and_accessories,OTHER,boat parts and accessories,citybehavex/category/unique_categories.csv,6,6,1,culture_events
+casino,LEISURE,casino,citybehavex/category/unique_categories.csv,56,56,0,culture_events
+childrens_museum,LEISURE,childrens museum,citybehavex/category/unique_categories.csv,4,4,1,culture_events
+cinema,LEISURE,cinema,citybehavex/category/unique_categories.csv,677,677,0,culture_events
+civilization_museum,LEISURE,civilization museum,citybehavex/category/unique_categories.csv,4,4,1,culture_events
+community_museum,LEISURE,community museum,citybehavex/category/unique_categories.csv,13,13,1,culture_events
+computer_museum,LEISURE,computer museum,citybehavex/category/unique_categories.csv,2,2,1,culture_events
+contemporary_art_museum,LEISURE,contemporary art museum,citybehavex/category/unique_categories.csv,27,27,1,culture_events
+decorative_arts_museum,LEISURE,decorative arts museum,citybehavex/category/unique_categories.csv,3,3,1,culture_events
+drive_in_theater,LEISURE,drive in theater,citybehavex/category/unique_categories.csv,15,15,1,culture_events
+event_photography,OTHER,event photography,citybehavex/category/unique_categories.csv,979,979,1,culture_events
+event_planning,PURCHASE,event planning,citybehavex/category/unique_categories.csv,2892,2892,1,culture_events
+history_museum,LEISURE,history museum,citybehavex/category/unique_categories.csv,112,112,1,culture_events
+modern_art_museum,LEISURE,modern art museum,citybehavex/category/unique_categories.csv,11,11,1,culture_events
+movie_television_studio,WORK,movie television studio,citybehavex/category/unique_categories.csv,165,165,1,culture_events
+museum,LEISURE,museum,citybehavex/category/unique_categories.csv,591,591,1,culture_events
+music_production,WORK,music production,citybehavex/category/unique_categories.csv,571,571,1,culture_events
+music_venue,LEISURE,music venue,citybehavex/category/unique_categories.csv,380,380,1,culture_events
+party_and_event_planning,PURCHASE,party and event planning,citybehavex/category/unique_categories.csv,24,24,1,culture_events
+performing_arts,LEISURE,performing arts,citybehavex/category/unique_categories.csv,184,184,1,culture_events
+photography_museum,LEISURE,photography museum,citybehavex/category/unique_categories.csv,6,6,1,culture_events
+science_museum,LEISURE,science museum,citybehavex/category/unique_categories.csv,15,15,1,culture_events
+textile_museum,LEISURE,textile museum,citybehavex/category/unique_categories.csv,1,1,1,culture_events
+theaters_and_performance_venues,LEISURE,theaters and performance venues,citybehavex/category/unique_categories.csv,5,5,1,culture_events
+topic_concert_venue,LEISURE,topic concert venue,citybehavex/category/unique_categories.csv,637,637,1,culture_events
+adult_education,STUDIES,adult education,citybehavex/category/unique_categories.csv,279,279,1,education
+art_school,STUDIES,art school,citybehavex/category/unique_categories.csv,295,295,1,education
+boxing_class,STUDIES,boxing class,citybehavex/category/unique_categories.csv,117,117,0,education
+circus_school,STUDIES,circus school,citybehavex/category/unique_categories.csv,1,1,1,education
+college_university,STUDIES,college university,citybehavex/category/unique_categories.csv,1679,1679,0,education
+cooking_school,STUDIES,cooking school,citybehavex/category/unique_categories.csv,100,100,1,education
+cosmetology_school,STUDIES,cosmetology school,citybehavex/category/unique_categories.csv,66,66,1,education
+cycling_classes,STUDIES,cycling classes,citybehavex/category/unique_categories.csv,21,21,0,education
+dance_school,STUDIES,dance school,citybehavex/category/unique_categories.csv,739,739,1,education
+day_care_preschool,STUDIES,day care preschool,citybehavex/category/unique_categories.csv,317,317,1,education
+driving_school,STUDIES,driving school,citybehavex/category/unique_categories.csv,1535,1535,1,education
+education,STUDIES,education,citybehavex/category/unique_categories.csv,1723,1723,1,education
+educational_camp,STUDIES,educational camp,citybehavex/category/unique_categories.csv,7,7,1,education
+educational_research_institute,STUDIES,educational research institute,citybehavex/category/unique_categories.csv,69,69,1,education
+elementary_school,STUDIES,elementary school,citybehavex/category/unique_categories.csv,1957,1957,1,education
+first_aid_class,STUDIES,first aid class,citybehavex/category/unique_categories.csv,12,12,0,education
+flight_school,STUDIES,flight school,citybehavex/category/unique_categories.csv,74,74,1,education
+high_school,STUDIES,high school,citybehavex/category/unique_categories.csv,775,775,1,education
+language_school,STUDIES,language school,citybehavex/category/unique_categories.csv,480,480,1,education
+law_schools,STUDIES,law schools,citybehavex/category/unique_categories.csv,6,6,1,education
+library,STUDIES,library,citybehavex/category/unique_categories.csv,1222,1222,0,education
+middle_school,STUDIES,middle school,citybehavex/category/unique_categories.csv,618,618,1,education
+music_school,STUDIES,music school,citybehavex/category/unique_categories.csv,435,435,1,education
+preschool,STUDIES,preschool,citybehavex/category/unique_categories.csv,589,589,1,education
+private_school,STUDIES,private school,citybehavex/category/unique_categories.csv,426,426,1,education
+religious_school,STUDIES,religious school,citybehavex/category/unique_categories.csv,20,20,1,education
+school,STUDIES,school,citybehavex/category/unique_categories.csv,1737,1737,1,education
+school_sports_league,STUDIES,school sports league,citybehavex/category/unique_categories.csv,3,3,1,education
+ski_and_snowboard_school,STUDIES,ski and snowboard school,citybehavex/category/unique_categories.csv,2,2,1,education
+specialty_school,STUDIES,specialty school,citybehavex/category/unique_categories.csv,357,357,1,education
+traffic_school,STUDIES,traffic school,citybehavex/category/unique_categories.csv,16,16,1,education
+tutoring_center,STUDIES,tutoring center,citybehavex/category/unique_categories.csv,187,187,1,education
+vocational_and_technical_school,STUDIES,vocational and technical school,citybehavex/category/unique_categories.csv,249,249,1,education
+afghan_restaurant,LEISURE,afghan restaurant,citybehavex/category/unique_categories.csv,9,9,1,food_drink
+african_restaurant,LEISURE,african restaurant,citybehavex/category/unique_categories.csv,418,418,1,food_drink
+amateur_sports_team,LEISURE,amateur sports team,citybehavex/category/unique_categories.csv,278,278,1,food_drink
+american_restaurant,LEISURE,american restaurant,citybehavex/category/unique_categories.csv,126,126,1,food_drink
+arabian_restaurant,LEISURE,arabian restaurant,citybehavex/category/unique_categories.csv,12,12,1,food_drink
+argentine_restaurant,LEISURE,argentine restaurant,citybehavex/category/unique_categories.csv,44,44,1,food_drink
+armenian_restaurant,LEISURE,armenian restaurant,citybehavex/category/unique_categories.csv,10,10,1,food_drink
+asian_fusion_restaurant,LEISURE,asian fusion restaurant,citybehavex/category/unique_categories.csv,57,57,1,food_drink
+asian_restaurant,LEISURE,asian restaurant,citybehavex/category/unique_categories.csv,725,725,1,food_drink
+australian_restaurant,LEISURE,australian restaurant,citybehavex/category/unique_categories.csv,1,1,1,food_drink
+bakery,PURCHASE,bakery,citybehavex/category/unique_categories.csv,4304,4304,0,food_drink
+bangladeshi_restaurant,LEISURE,bangladeshi restaurant,citybehavex/category/unique_categories.csv,8,8,1,food_drink
+bar,LEISURE,bar,citybehavex/category/unique_categories.csv,2957,2957,1,food_drink
+bar_and_grill_restaurant,LEISURE,bar and grill restaurant,citybehavex/category/unique_categories.csv,130,130,1,food_drink
+barbecue_restaurant,LEISURE,barbecue restaurant,citybehavex/category/unique_categories.csv,86,86,1,food_drink
+barber,PURCHASE,barber,citybehavex/category/unique_categories.csv,525,525,0,food_drink
+bartender,LEISURE,bartender,citybehavex/category/unique_categories.csv,9,9,0,food_drink
+bartending_school,STUDIES,bartending school,citybehavex/category/unique_categories.csv,7,7,1,food_drink
+basque_restaurant,LEISURE,basque restaurant,citybehavex/category/unique_categories.csv,20,20,1,food_drink
+beach_bar,LEISURE,beach bar,citybehavex/category/unique_categories.csv,3,3,1,food_drink
+beer_bar,LEISURE,beer bar,citybehavex/category/unique_categories.csv,109,109,1,food_drink
+belgian_restaurant,LEISURE,belgian restaurant,citybehavex/category/unique_categories.csv,17,17,1,food_drink
+bistro,LEISURE,bistro,citybehavex/category/unique_categories.csv,192,192,0,food_drink
+brazilian_restaurant,LEISURE,brazilian restaurant,citybehavex/category/unique_categories.csv,51,51,1,food_drink
+breakfast_and_brunch_restaurant,LEISURE,breakfast and brunch restaurant,citybehavex/category/unique_categories.csv,107,107,1,food_drink
+brewery,LEISURE,brewery,citybehavex/category/unique_categories.csv,216,216,0,food_drink
+british_restaurant,LEISURE,british restaurant,citybehavex/category/unique_categories.csv,3,3,1,food_drink
+bubble_tea,LEISURE,bubble tea,citybehavex/category/unique_categories.csv,117,117,1,food_drink
+buffet_restaurant,LEISURE,buffet restaurant,citybehavex/category/unique_categories.csv,84,84,1,food_drink
+bulgarian_restaurant,LEISURE,bulgarian restaurant,citybehavex/category/unique_categories.csv,1,1,1,food_drink
+burger_restaurant,LEISURE,burger restaurant,citybehavex/category/unique_categories.csv,804,804,1,food_drink
+burmese_restaurant,LEISURE,burmese restaurant,citybehavex/category/unique_categories.csv,2,2,1,food_drink
+cafe,LEISURE,cafe,citybehavex/category/unique_categories.csv,2096,2096,1,food_drink
+cafeteria,LEISURE,cafeteria,citybehavex/category/unique_categories.csv,37,37,0,food_drink
+cambodian_restaurant,LEISURE,cambodian restaurant,citybehavex/category/unique_categories.csv,32,32,1,food_drink
+canadian_restaurant,LEISURE,canadian restaurant,citybehavex/category/unique_categories.csv,2,2,1,food_drink
+caribbean_restaurant,LEISURE,caribbean restaurant,citybehavex/category/unique_categories.csv,81,81,1,food_drink
+champagne_bar,LEISURE,champagne bar,citybehavex/category/unique_categories.csv,3,3,1,food_drink
+chicken_restaurant,LEISURE,chicken restaurant,citybehavex/category/unique_categories.csv,214,214,1,food_drink
+chilean_restaurant,LEISURE,chilean restaurant,citybehavex/category/unique_categories.csv,1,1,1,food_drink
+chinese_restaurant,LEISURE,chinese restaurant,citybehavex/category/unique_categories.csv,674,674,1,food_drink
+cocktail_bar,LEISURE,cocktail bar,citybehavex/category/unique_categories.csv,523,523,1,food_drink
+coffee_and_tea_supplies,PURCHASE,coffee and tea supplies,citybehavex/category/unique_categories.csv,12,12,1,food_drink
+coffee_roastery,OTHER,coffee roastery,citybehavex/category/unique_categories.csv,2,2,1,food_drink
+coffee_shop,LEISURE,coffee shop,citybehavex/category/unique_categories.csv,1035,1035,1,food_drink
+colombian_restaurant,LEISURE,colombian restaurant,citybehavex/category/unique_categories.csv,17,17,1,food_drink
+comfort_food_restaurant,LEISURE,comfort food restaurant,citybehavex/category/unique_categories.csv,11,11,1,food_drink
+cuban_restaurant,LEISURE,cuban restaurant,citybehavex/category/unique_categories.csv,12,12,1,food_drink
+desserts,LEISURE,desserts,citybehavex/category/unique_categories.csv,253,253,0,food_drink
+dim_sum_restaurant,LEISURE,dim sum restaurant,citybehavex/category/unique_categories.csv,16,16,1,food_drink
+diner,LEISURE,diner,citybehavex/category/unique_categories.csv,144,144,0,food_drink
+dive_bar,LEISURE,dive bar,citybehavex/category/unique_categories.csv,15,15,1,food_drink
+eastern_european_restaurant,LEISURE,eastern european restaurant,citybehavex/category/unique_categories.csv,16,16,1,food_drink
+eat_and_drink,LEISURE,eat and drink,citybehavex/category/unique_categories.csv,132,132,1,food_drink
+ecuadorian_restaurant,LEISURE,ecuadorian restaurant,citybehavex/category/unique_categories.csv,2,2,1,food_drink
+egyptian_restaurant,LEISURE,egyptian restaurant,citybehavex/category/unique_categories.csv,6,6,1,food_drink
+esports_team,LEISURE,esports team,citybehavex/category/unique_categories.csv,3,3,1,food_drink
+ethiopian_restaurant,LEISURE,ethiopian restaurant,citybehavex/category/unique_categories.csv,28,28,1,food_drink
+european_restaurant,LEISURE,european restaurant,citybehavex/category/unique_categories.csv,126,126,1,food_drink
+falafel_restaurant,LEISURE,falafel restaurant,citybehavex/category/unique_categories.csv,16,16,1,food_drink
+fast_food_restaurant,LEISURE,fast food restaurant,citybehavex/category/unique_categories.csv,2731,2731,1,food_drink
+filipino_restaurant,LEISURE,filipino restaurant,citybehavex/category/unique_categories.csv,6,6,1,food_drink
+fish_and_chips_restaurant,LEISURE,fish and chips restaurant,citybehavex/category/unique_categories.csv,9,9,1,food_drink
+fondue_restaurant,LEISURE,fondue restaurant,citybehavex/category/unique_categories.csv,16,16,1,food_drink
+food,LEISURE,food,citybehavex/category/unique_categories.csv,124,124,1,food_drink
+food_banks,OTHER,food banks,citybehavex/category/unique_categories.csv,4,4,1,food_drink
+food_beverage_service_distribution,WORK,food beverage service distribution,citybehavex/category/unique_categories.csv,249,249,1,food_drink
+food_consultant,WORK,food consultant,citybehavex/category/unique_categories.csv,18,18,1,food_drink
+food_court,LEISURE,food court,citybehavex/category/unique_categories.csv,14,14,1,food_drink
+food_delivery_service,PURCHASE,food delivery service,citybehavex/category/unique_categories.csv,144,144,1,food_drink
+food_stand,LEISURE,food stand,citybehavex/category/unique_categories.csv,25,25,1,food_drink
+food_tours,LEISURE,food tours,citybehavex/category/unique_categories.csv,8,8,1,food_drink
+food_truck,LEISURE,food truck,citybehavex/category/unique_categories.csv,99,99,1,food_drink
+french_restaurant,LEISURE,french restaurant,citybehavex/category/unique_categories.csv,7197,7197,1,food_drink
+frozen_foods,OTHER,frozen foods,citybehavex/category/unique_categories.csv,189,189,1,food_drink
+game_publisher,LEISURE,game publisher,citybehavex/category/unique_categories.csv,15,15,1,food_drink
+gastropub,LEISURE,gastropub,citybehavex/category/unique_categories.csv,52,52,0,food_drink
+gay_bar,LEISURE,gay bar,citybehavex/category/unique_categories.csv,53,53,1,food_drink
+georgian_restaurant,LEISURE,georgian restaurant,citybehavex/category/unique_categories.csv,9,9,1,food_drink
+german_restaurant,LEISURE,german restaurant,citybehavex/category/unique_categories.csv,9,9,1,food_drink
+gluten_free_restaurant,LEISURE,gluten free restaurant,citybehavex/category/unique_categories.csv,12,12,1,food_drink
+greek_restaurant,LEISURE,greek restaurant,citybehavex/category/unique_categories.csv,117,117,1,food_drink
+haitian_restaurant,LEISURE,haitian restaurant,citybehavex/category/unique_categories.csv,13,13,1,food_drink
+halal_restaurant,LEISURE,halal restaurant,citybehavex/category/unique_categories.csv,157,157,1,food_drink
+hawaiian_restaurant,LEISURE,hawaiian restaurant,citybehavex/category/unique_categories.csv,28,28,1,food_drink
+health_food_restaurant,LEISURE,health food restaurant,citybehavex/category/unique_categories.csv,30,30,1,food_drink
+health_food_store,PURCHASE,health food store,citybehavex/category/unique_categories.csv,326,326,1,food_drink
+himalayan_nepalese_restaurant,LEISURE,himalayan nepalese restaurant,citybehavex/category/unique_categories.csv,37,37,1,food_drink
+hong_kong_style_cafe,LEISURE,hong kong style cafe,citybehavex/category/unique_categories.csv,1,1,1,food_drink
+hookah_bar,LEISURE,hookah bar,citybehavex/category/unique_categories.csv,134,134,1,food_drink
+hot_dog_restaurant,LEISURE,hot dog restaurant,citybehavex/category/unique_categories.csv,13,13,1,food_drink
+hotel_bar,LEISURE,hotel bar,citybehavex/category/unique_categories.csv,50,50,1,food_drink
+hungarian_restaurant,LEISURE,hungarian restaurant,citybehavex/category/unique_categories.csv,1,1,1,food_drink
+iberian_restaurant,LEISURE,iberian restaurant,citybehavex/category/unique_categories.csv,1,1,1,food_drink
+ice_cream_shop,LEISURE,ice cream shop,citybehavex/category/unique_categories.csv,145,145,1,food_drink
+imported_food,OTHER,imported food,citybehavex/category/unique_categories.csv,1,1,1,food_drink
+indian_restaurant,LEISURE,indian restaurant,citybehavex/category/unique_categories.csv,748,748,1,food_drink
+indo_chinese_restaurant,LEISURE,indo chinese restaurant,citybehavex/category/unique_categories.csv,2,2,1,food_drink
+indonesian_restaurant,LEISURE,indonesian restaurant,citybehavex/category/unique_categories.csv,15,15,1,food_drink
+internet_cafe,LEISURE,internet cafe,citybehavex/category/unique_categories.csv,31,31,1,food_drink
+irish_pub,LEISURE,irish pub,citybehavex/category/unique_categories.csv,42,42,0,food_drink
+israeli_restaurant,LEISURE,israeli restaurant,citybehavex/category/unique_categories.csv,12,12,1,food_drink
+italian_restaurant,LEISURE,italian restaurant,citybehavex/category/unique_categories.csv,2366,2366,1,food_drink
+jamaican_restaurant,LEISURE,jamaican restaurant,citybehavex/category/unique_categories.csv,2,2,1,food_drink
+japanese_restaurant,LEISURE,japanese restaurant,citybehavex/category/unique_categories.csv,1241,1241,1,food_drink
+jewish_restaurant,LEISURE,jewish restaurant,citybehavex/category/unique_categories.csv,2,2,1,food_drink
+korean_restaurant,LEISURE,korean restaurant,citybehavex/category/unique_categories.csv,244,244,1,food_drink
+kosher_restaurant,LEISURE,kosher restaurant,citybehavex/category/unique_categories.csv,57,57,1,food_drink
+kurdish_restaurant,LEISURE,kurdish restaurant,citybehavex/category/unique_categories.csv,10,10,1,food_drink
+latin_american_restaurant,LEISURE,latin american restaurant,citybehavex/category/unique_categories.csv,58,58,1,food_drink
+lebanese_restaurant,LEISURE,lebanese restaurant,citybehavex/category/unique_categories.csv,384,384,1,food_drink
+live_and_raw_food_restaurant,LEISURE,live and raw food restaurant,citybehavex/category/unique_categories.csv,4,4,1,food_drink
+malaysian_restaurant,LEISURE,malaysian restaurant,citybehavex/category/unique_categories.csv,3,3,1,food_drink
+mediterranean_restaurant,LEISURE,mediterranean restaurant,citybehavex/category/unique_categories.csv,202,202,1,food_drink
+mexican_restaurant,LEISURE,mexican restaurant,citybehavex/category/unique_categories.csv,130,130,1,food_drink
+middle_eastern_restaurant,LEISURE,middle eastern restaurant,citybehavex/category/unique_categories.csv,105,105,1,food_drink
+molecular_gastronomy_restaurant,LEISURE,molecular gastronomy restaurant,citybehavex/category/unique_categories.csv,3,3,1,food_drink
+moroccan_restaurant,LEISURE,moroccan restaurant,citybehavex/category/unique_categories.csv,380,380,1,food_drink
+nigerian_restaurant,LEISURE,nigerian restaurant,citybehavex/category/unique_categories.csv,1,1,1,food_drink
+noodles_restaurant,LEISURE,noodles restaurant,citybehavex/category/unique_categories.csv,29,29,1,food_drink
+notary_public,OTHER,notary public,citybehavex/category/unique_categories.csv,405,405,1,food_drink
+pakistani_restaurant,LEISURE,pakistani restaurant,citybehavex/category/unique_categories.csv,15,15,1,food_drink
+panamanian_restaurant,LEISURE,panamanian restaurant,citybehavex/category/unique_categories.csv,1,1,1,food_drink
+persian_iranian_restaurant,LEISURE,persian iranian restaurant,citybehavex/category/unique_categories.csv,24,24,1,food_drink
+peruvian_restaurant,LEISURE,peruvian restaurant,citybehavex/category/unique_categories.csv,43,43,1,food_drink
+piano_bar,LEISURE,piano bar,citybehavex/category/unique_categories.csv,7,7,1,food_drink
+pizza_restaurant,LEISURE,pizza restaurant,citybehavex/category/unique_categories.csv,2701,2701,1,food_drink
+polish_restaurant,LEISURE,polish restaurant,citybehavex/category/unique_categories.csv,9,9,1,food_drink
+polynesian_restaurant,LEISURE,polynesian restaurant,citybehavex/category/unique_categories.csv,2,2,1,food_drink
+portuguese_restaurant,LEISURE,portuguese restaurant,citybehavex/category/unique_categories.csv,248,248,1,food_drink
+professional_sports_team,LEISURE,professional sports team,citybehavex/category/unique_categories.csv,19,19,1,food_drink
+pub,LEISURE,pub,citybehavex/category/unique_categories.csv,484,484,0,food_drink
+public_and_government_association,LEISURE,public and government association,citybehavex/category/unique_categories.csv,905,905,1,food_drink
+public_bath_houses,LEISURE,public bath houses,citybehavex/category/unique_categories.csv,1,1,1,food_drink
+public_health_clinic,HEALTH,public health clinic,citybehavex/category/unique_categories.csv,9,9,1,food_drink
+public_market,PURCHASE,public market,citybehavex/category/unique_categories.csv,17,17,1,food_drink
+public_plaza,LEISURE,public plaza,citybehavex/category/unique_categories.csv,820,820,1,food_drink
+public_relations,LEISURE,public relations,citybehavex/category/unique_categories.csv,289,289,1,food_drink
+public_school,STUDIES,public school,citybehavex/category/unique_categories.csv,32,32,1,food_drink
+public_service_and_government,OTHER,public service and government,citybehavex/category/unique_categories.csv,976,976,1,food_drink
+public_toilet,OTHER,public toilet,citybehavex/category/unique_categories.csv,10,10,1,food_drink
+public_utility_company,LEISURE,public utility company,citybehavex/category/unique_categories.csv,207,207,1,food_drink
+restaurant,LEISURE,restaurant,citybehavex/category/unique_categories.csv,6790,6790,1,food_drink
+restaurant_equipment_and_supply,PURCHASE,restaurant equipment and supply,citybehavex/category/unique_categories.csv,46,46,1,food_drink
+restaurant_wholesale,LEISURE,restaurant wholesale,citybehavex/category/unique_categories.csv,14,14,1,food_drink
+romanian_restaurant,LEISURE,romanian restaurant,citybehavex/category/unique_categories.csv,7,7,1,food_drink
+russian_restaurant,LEISURE,russian restaurant,citybehavex/category/unique_categories.csv,15,15,1,food_drink
+sake_bar,LEISURE,sake bar,citybehavex/category/unique_categories.csv,1,1,1,food_drink
+salad_bar,LEISURE,salad bar,citybehavex/category/unique_categories.csv,242,242,1,food_drink
+salvadoran_restaurant,LEISURE,salvadoran restaurant,citybehavex/category/unique_categories.csv,1,1,1,food_drink
+scandinavian_restaurant,LEISURE,scandinavian restaurant,citybehavex/category/unique_categories.csv,18,18,1,food_drink
+school_sports_team,STUDIES,school sports team,citybehavex/category/unique_categories.csv,1,1,1,food_drink
+seafood_market,PURCHASE,seafood market,citybehavex/category/unique_categories.csv,22,22,1,food_drink
+seafood_restaurant,LEISURE,seafood restaurant,citybehavex/category/unique_categories.csv,223,223,1,food_drink
+seafood_wholesaler,PURCHASE,seafood wholesaler,citybehavex/category/unique_categories.csv,6,6,1,food_drink
+senegalese_restaurant,LEISURE,senegalese restaurant,citybehavex/category/unique_categories.csv,20,20,1,food_drink
+smoothie_juice_bar,LEISURE,smoothie juice bar,citybehavex/category/unique_categories.csv,83,83,1,food_drink
+soul_food,LEISURE,soul food,citybehavex/category/unique_categories.csv,8,8,1,food_drink
+soup_restaurant,LEISURE,soup restaurant,citybehavex/category/unique_categories.csv,12,12,1,food_drink
+south_african_restaurant,LEISURE,south african restaurant,citybehavex/category/unique_categories.csv,2,2,1,food_drink
+southern_restaurant,LEISURE,southern restaurant,citybehavex/category/unique_categories.csv,4,4,1,food_drink
+spanish_restaurant,LEISURE,spanish restaurant,citybehavex/category/unique_categories.csv,55,55,1,food_drink
+sports_bar,LEISURE,sports bar,citybehavex/category/unique_categories.csv,37,37,1,food_drink
+sri_lankan_restaurant,LEISURE,sri lankan restaurant,citybehavex/category/unique_categories.csv,16,16,1,food_drink
+steakhouse,LEISURE,steakhouse,citybehavex/category/unique_categories.csv,239,239,0,food_drink
+sushi_restaurant,LEISURE,sushi restaurant,citybehavex/category/unique_categories.csv,1007,1007,1,food_drink
+swiss_restaurant,LEISURE,swiss restaurant,citybehavex/category/unique_categories.csv,5,5,1,food_drink
+syrian_restaurant,LEISURE,syrian restaurant,citybehavex/category/unique_categories.csv,19,19,1,food_drink
+taco_restaurant,LEISURE,taco restaurant,citybehavex/category/unique_categories.csv,128,128,1,food_drink
+taiwanese_restaurant,LEISURE,taiwanese restaurant,citybehavex/category/unique_categories.csv,10,10,1,food_drink
+tapas_bar,LEISURE,tapas bar,citybehavex/category/unique_categories.csv,191,191,1,food_drink
+tea_room,LEISURE,tea room,citybehavex/category/unique_categories.csv,400,400,1,food_drink
+texmex_restaurant,LEISURE,texmex restaurant,citybehavex/category/unique_categories.csv,19,19,1,food_drink
+thai_restaurant,LEISURE,thai restaurant,citybehavex/category/unique_categories.csv,597,597,1,food_drink
+theme_restaurant,LEISURE,theme restaurant,citybehavex/category/unique_categories.csv,58,58,1,food_drink
+tiki_bar,LEISURE,tiki bar,citybehavex/category/unique_categories.csv,2,2,1,food_drink
+topic_publisher,LEISURE,topic publisher,citybehavex/category/unique_categories.csv,808,808,1,food_drink
+turkish_restaurant,LEISURE,turkish restaurant,citybehavex/category/unique_categories.csv,314,314,1,food_drink
+ukrainian_restaurant,LEISURE,ukrainian restaurant,citybehavex/category/unique_categories.csv,6,6,1,food_drink
+uzbek_restaurant,LEISURE,uzbek restaurant,citybehavex/category/unique_categories.csv,2,2,1,food_drink
+vegan_restaurant,LEISURE,vegan restaurant,citybehavex/category/unique_categories.csv,73,73,1,food_drink
+vegetarian_restaurant,LEISURE,vegetarian restaurant,citybehavex/category/unique_categories.csv,126,126,1,food_drink
+venezuelan_restaurant,LEISURE,venezuelan restaurant,citybehavex/category/unique_categories.csv,9,9,1,food_drink
+vietnamese_restaurant,LEISURE,vietnamese restaurant,citybehavex/category/unique_categories.csv,521,521,1,food_drink
+waffle_restaurant,LEISURE,waffle restaurant,citybehavex/category/unique_categories.csv,15,15,1,food_drink
+whiskey_bar,LEISURE,whiskey bar,citybehavex/category/unique_categories.csv,3,3,1,food_drink
+wine_bar,LEISURE,wine bar,citybehavex/category/unique_categories.csv,449,449,1,food_drink
+winery,LEISURE,winery,citybehavex/category/unique_categories.csv,81,81,4,food_drink
+acupuncture,HEALTH,acupuncture,citybehavex/category/unique_categories.csv,45,45,0,health_care
+aromatherapy,HEALTH,aromatherapy,citybehavex/category/unique_categories.csv,13,13,0,health_care
+cannabis_clinic,HEALTH,cannabis clinic,citybehavex/category/unique_categories.csv,43,43,1,health_care
+childrens_hospital,HEALTH,childrens hospital,citybehavex/category/unique_categories.csv,10,10,1,health_care
+chiropractor,HEALTH,chiropractor,citybehavex/category/unique_categories.csv,178,178,0,health_care
+clinical_laboratories,HEALTH,clinical laboratories,citybehavex/category/unique_categories.csv,247,247,0,health_care
+cosmetic_dentist,HEALTH,cosmetic dentist,citybehavex/category/unique_categories.csv,24,24,1,health_care
+counseling_and_mental_health,HEALTH,counseling and mental health,citybehavex/category/unique_categories.csv,454,454,1,health_care
+dentist,HEALTH,dentist,citybehavex/category/unique_categories.csv,922,922,1,health_care
+dialysis_clinic,HEALTH,dialysis clinic,citybehavex/category/unique_categories.csv,7,7,1,health_care
+doctor,HEALTH,doctor,citybehavex/category/unique_categories.csv,1121,1121,0,health_care
+eye_care_clinic,HEALTH,eye care clinic,citybehavex/category/unique_categories.csv,134,134,1,health_care
+general_dentistry,HEALTH,general dentistry,citybehavex/category/unique_categories.csv,92,92,0,health_care
+health_and_medical,HEALTH,health and medical,citybehavex/category/unique_categories.csv,1137,1137,1,health_care
+health_and_wellness_club,OTHER,health and wellness club,citybehavex/category/unique_categories.csv,189,189,1,health_care
+health_department,OTHER,health department,citybehavex/category/unique_categories.csv,7,7,1,health_care
+home_health_care,OTHER,home health care,citybehavex/category/unique_categories.csv,324,324,1,health_care
+hospital,HEALTH,hospital,citybehavex/category/unique_categories.csv,1216,1216,1,health_care
+medical_center,HEALTH,medical center,citybehavex/category/unique_categories.csv,900,900,1,health_care
+medical_law,OTHER,medical law,citybehavex/category/unique_categories.csv,6,6,1,health_care
+medical_research_and_development,HEALTH,medical research and development,citybehavex/category/unique_categories.csv,222,222,1,health_care
+medical_school,STUDIES,medical school,citybehavex/category/unique_categories.csv,42,42,1,health_care
+medical_supply,PURCHASE,medical supply,citybehavex/category/unique_categories.csv,164,164,1,health_care
+nursing_school,STUDIES,nursing school,citybehavex/category/unique_categories.csv,9,9,1,health_care
+occupational_therapy,HEALTH,occupational therapy,citybehavex/category/unique_categories.csv,30,30,1,health_care
+optometrist,HEALTH,optometrist,citybehavex/category/unique_categories.csv,297,297,0,health_care
+pediatric_dentist,HEALTH,pediatric dentist,citybehavex/category/unique_categories.csv,10,10,1,health_care
+physical_therapy,HEALTH,physical therapy,citybehavex/category/unique_categories.csv,454,454,1,health_care
+urgent_care_clinic,HEALTH,urgent care clinic,citybehavex/category/unique_categories.csv,1,1,1,health_care
+veterinarian,HEALTH,veterinarian,citybehavex/category/unique_categories.csv,717,717,12,health_care
+womens_health_clinic,HEALTH,womens health clinic,citybehavex/category/unique_categories.csv,8,8,1,health_care
+apartments,OTHER,apartments,citybehavex/category/unique_categories.csv,2,2,1,home_residential
+assisted_living_facility,OTHER,assisted living facility,citybehavex/category/unique_categories.csv,145,145,1,home_residential
+commercial_real_estate,OTHER,commercial real estate,citybehavex/category/unique_categories.csv,86,86,1,home_residential
+home_cleaning,PURCHASE,home cleaning,citybehavex/category/unique_categories.csv,740,740,1,home_residential
+home_developer,OTHER,home developer,citybehavex/category/unique_categories.csv,202,202,1,home_residential
+home_inspector,OTHER,home inspector,citybehavex/category/unique_categories.csv,65,65,1,home_residential
+home_security,PURCHASE,home security,citybehavex/category/unique_categories.csv,202,202,1,home_residential
+home_staging,PURCHASE,home staging,citybehavex/category/unique_categories.csv,5,5,1,home_residential
+homeless_shelter,OTHER,homeless shelter,citybehavex/category/unique_categories.csv,35,35,1,home_residential
+housing_authorities,OTHER,housing authorities,citybehavex/category/unique_categories.csv,23,23,0,home_residential
+property_management,OTHER,property management,citybehavex/category/unique_categories.csv,442,442,1,home_residential
+real_estate,PURCHASE,real estate,citybehavex/category/unique_categories.csv,3619,3619,1,home_residential
+real_estate_agent,OTHER,real estate agent,citybehavex/category/unique_categories.csv,4277,4277,1,home_residential
+real_estate_investment,OTHER,real estate investment,citybehavex/category/unique_categories.csv,37,37,1,home_residential
+real_estate_law,OTHER,real estate law,citybehavex/category/unique_categories.csv,30,30,1,home_residential
+active_life,LEISURE,active life,citybehavex/category/unique_categories.csv,867,867,0,other_mixed
+agricultural_cooperatives,WORK,agricultural cooperatives,citybehavex/category/unique_categories.csv,57,57,1,other_mixed
+alternative_medicine,HEALTH,alternative medicine,citybehavex/category/unique_categories.csv,118,118,1,other_mixed
+anesthesiologist,HEALTH,anesthesiologist,citybehavex/category/unique_categories.csv,3,3,0,other_mixed
+animation_studio,WORK,animation studio,citybehavex/category/unique_categories.csv,37,37,1,other_mixed
+archery_range,LEISURE,archery range,citybehavex/category/unique_categories.csv,39,39,1,other_mixed
+architectural_designer,WORK,architectural designer,citybehavex/category/unique_categories.csv,1030,1030,3,other_mixed
+armed_forces_branch,WORK,armed forces branch,citybehavex/category/unique_categories.csv,73,73,0,other_mixed
+art_restoration,PURCHASE,art restoration,citybehavex/category/unique_categories.csv,75,75,1,other_mixed
+astrologer,LEISURE,astrologer,citybehavex/category/unique_categories.csv,55,55,0,other_mixed
+auction_house,OTHER,auction house,citybehavex/category/unique_categories.csv,109,109,1,other_mixed
+audiologist,HEALTH,audiologist,citybehavex/category/unique_categories.csv,273,273,0,other_mixed
+b2b_apparel,WORK,b2b apparel,citybehavex/category/unique_categories.csv,21,21,1,other_mixed
+b2b_electronic_equipment,WORK,b2b electronic equipment,citybehavex/category/unique_categories.csv,55,55,1,other_mixed
+b2b_jewelers,WORK,b2b jewelers,citybehavex/category/unique_categories.csv,59,59,1,other_mixed
+b2b_science_and_technology,WORK,b2b science and technology,citybehavex/category/unique_categories.csv,44,44,1,other_mixed
+b2b_textiles,WORK,b2b textiles,citybehavex/category/unique_categories.csv,115,115,1,other_mixed
+badminton_court,LEISURE,badminton court,citybehavex/category/unique_categories.csv,24,24,1,other_mixed
+baseball_field,LEISURE,baseball field,citybehavex/category/unique_categories.csv,13,13,1,other_mixed
+basketball_court,LEISURE,basketball court,citybehavex/category/unique_categories.csv,25,25,1,other_mixed
+bathroom_remodeling,PURCHASE,bathroom remodeling,citybehavex/category/unique_categories.csv,4,4,1,other_mixed
+bed_and_breakfast,LEISURE,bed and breakfast,citybehavex/category/unique_categories.csv,314,314,1,other_mixed
+beer_wine_and_spirits,OTHER,beer wine and spirits,citybehavex/category/unique_categories.csv,14,14,1,other_mixed
+betting_center,LEISURE,betting center,citybehavex/category/unique_categories.csv,11,11,1,other_mixed
+bingo_hall,LEISURE,bingo hall,citybehavex/category/unique_categories.csv,1,1,1,other_mixed
+blood_and_plasma_donation_center,HEALTH,blood and plasma donation center,citybehavex/category/unique_categories.csv,30,30,1,other_mixed
+boat_tours,LEISURE,boat tours,citybehavex/category/unique_categories.csv,31,31,1,other_mixed
+book_magazine_distribution,WORK,book magazine distribution,citybehavex/category/unique_categories.csv,28,28,1,other_mixed
+bowling_alley,LEISURE,bowling alley,citybehavex/category/unique_categories.csv,57,57,0,other_mixed
+brasserie,LEISURE,brasserie,citybehavex/category/unique_categories.csv,132,132,0,other_mixed
+bridge,OTHER,bridge,citybehavex/category/unique_categories.csv,207,207,0,other_mixed
+broadcasting_media_production,WORK,broadcasting media production,citybehavex/category/unique_categories.csv,471,471,1,other_mixed
+brokers,OTHER,brokers,citybehavex/category/unique_categories.csv,36,36,1,other_mixed
+cabin,OTHER,cabin,citybehavex/category/unique_categories.csv,8,8,0,other_mixed
+canal,LEISURE,canal,citybehavex/category/unique_categories.csv,17,17,0,other_mixed
+cannabis_dispensary,OTHER,cannabis dispensary,citybehavex/category/unique_categories.csv,7,7,1,other_mixed
+castle,LEISURE,castle,citybehavex/category/unique_categories.csv,169,169,0,other_mixed
+caterer,OTHER,caterer,citybehavex/category/unique_categories.csv,1114,1114,0,other_mixed
+cave,LEISURE,cave,citybehavex/category/unique_categories.csv,14,14,0,other_mixed
+cemeteries,OTHER,cemeteries,citybehavex/category/unique_categories.csv,29,29,1,other_mixed
+check_cashing_payday_loans,OTHER,check cashing payday loans,citybehavex/category/unique_categories.csv,4,4,0,other_mixed
+chimney_sweep,PURCHASE,chimney sweep,citybehavex/category/unique_categories.csv,23,23,0,other_mixed
+chocolatier,OTHER,chocolatier,citybehavex/category/unique_categories.csv,795,795,0,other_mixed
+choir,LEISURE,choir,citybehavex/category/unique_categories.csv,21,21,0,other_mixed
+circus,LEISURE,circus,citybehavex/category/unique_categories.csv,65,65,1,other_mixed
+collection_agencies,OTHER,collection agencies,citybehavex/category/unique_categories.csv,18,18,1,other_mixed
+comedy_club,LEISURE,comedy club,citybehavex/category/unique_categories.csv,151,151,1,other_mixed
+commercial_refrigeration,OTHER,commercial refrigeration,citybehavex/category/unique_categories.csv,17,17,1,other_mixed
+community_center,LEISURE,community center,citybehavex/category/unique_categories.csv,224,224,1,other_mixed
+computer_coaching,STUDIES,computer coaching,citybehavex/category/unique_categories.csv,215,215,1,other_mixed
+computer_wholesaler,PURCHASE,computer wholesaler,citybehavex/category/unique_categories.csv,6,6,1,other_mixed
+condominium,OTHER,condominium,citybehavex/category/unique_categories.csv,61,61,0,other_mixed
+contract_law,OTHER,contract law,citybehavex/category/unique_categories.csv,2,2,1,other_mixed
+convents_and_monasteries,OTHER,convents and monasteries,citybehavex/category/unique_categories.csv,27,27,1,other_mixed
+cottage,OTHER,cottage,citybehavex/category/unique_categories.csv,32,32,0,other_mixed
+countertop_installation,PURCHASE,countertop installation,citybehavex/category/unique_categories.csv,98,98,2,other_mixed
+credit_and_debt_counseling,HEALTH,credit and debt counseling,citybehavex/category/unique_categories.csv,41,41,1,other_mixed
+credit_union,OTHER,credit union,citybehavex/category/unique_categories.csv,35,35,1,other_mixed
+cricket_ground,OTHER,cricket ground,citybehavex/category/unique_categories.csv,2,2,0,other_mixed
+criminal_defense_law,OTHER,criminal defense law,citybehavex/category/unique_categories.csv,68,68,1,other_mixed
+cultural_center,OTHER,cultural center,citybehavex/category/unique_categories.csv,760,760,1,other_mixed
+currency_exchange,OTHER,currency exchange,citybehavex/category/unique_categories.csv,93,93,0,other_mixed
+damage_restoration,PURCHASE,damage restoration,citybehavex/category/unique_categories.csv,52,52,1,other_mixed
+delicatessen,LEISURE,delicatessen,citybehavex/category/unique_categories.csv,278,278,0,other_mixed
+dermatologist,HEALTH,dermatologist,citybehavex/category/unique_categories.csv,106,106,0,other_mixed
+distillery,LEISURE,distillery,citybehavex/category/unique_categories.csv,17,17,0,other_mixed
+diving_center,LEISURE,diving center,citybehavex/category/unique_categories.csv,6,6,1,other_mixed
+dog_walkers,PURCHASE,dog walkers,citybehavex/category/unique_categories.csv,19,19,1,other_mixed
+doner_kebab,LEISURE,doner kebab,citybehavex/category/unique_categories.csv,201,201,0,other_mixed
+donuts,LEISURE,donuts,citybehavex/category/unique_categories.csv,40,40,0,other_mixed
+driving_range,LEISURE,driving range,citybehavex/category/unique_categories.csv,7,7,1,other_mixed
+dry_cleaning,PURCHASE,dry cleaning,citybehavex/category/unique_categories.csv,393,393,1,other_mixed
+dui_law,OTHER,dui law,citybehavex/category/unique_categories.csv,2,2,1,other_mixed
+ear_nose_and_throat,OTHER,ear nose and throat,citybehavex/category/unique_categories.csv,17,17,1,other_mixed
+electric_utility_provider,OTHER,electric utility provider,citybehavex/category/unique_categories.csv,37,37,1,other_mixed
+electrical_wholesaler,PURCHASE,electrical wholesaler,citybehavex/category/unique_categories.csv,24,24,1,other_mixed
+electrician,PURCHASE,electrician,citybehavex/category/unique_categories.csv,659,659,0,other_mixed
+emergency_room,HEALTH,emergency room,citybehavex/category/unique_categories.csv,23,23,1,other_mixed
+emissions_inspection,PURCHASE,emissions inspection,citybehavex/category/unique_categories.csv,131,131,0,other_mixed
+employment_agencies,WORK,employment agencies,citybehavex/category/unique_categories.csv,1112,1112,1,other_mixed
+employment_law,OTHER,employment law,citybehavex/category/unique_categories.csv,56,56,1,other_mixed
+endocrinologist,HEALTH,endocrinologist,citybehavex/category/unique_categories.csv,1,1,0,other_mixed
+endodontist,HEALTH,endodontist,citybehavex/category/unique_categories.csv,10,10,0,other_mixed
+energy_equipment_and_solution,WORK,energy equipment and solution,citybehavex/category/unique_categories.csv,42,42,1,other_mixed
+environmental_conservation_and_ecological_organizations,WORK,environmental conservation and ecological organizations,citybehavex/category/unique_categories.csv,46,46,1,other_mixed
+environmental_conservation_organization,WORK,environmental conservation organization,citybehavex/category/unique_categories.csv,131,131,1,other_mixed
+equestrian_facility,LEISURE,equestrian facility,citybehavex/category/unique_categories.csv,273,273,1,other_mixed
+escape_rooms,LEISURE,escape rooms,citybehavex/category/unique_categories.csv,129,129,0,other_mixed
+eyewear_and_optician,OTHER,eyewear and optician,citybehavex/category/unique_categories.csv,3054,3054,1,other_mixed
+fair,LEISURE,fair,citybehavex/category/unique_categories.csv,13,13,0,other_mixed
+fashion,PURCHASE,fashion,citybehavex/category/unique_categories.csv,564,564,1,other_mixed
+fencing_club,OTHER,fencing club,citybehavex/category/unique_categories.csv,67,67,1,other_mixed
+fertility,HEALTH,fertility,citybehavex/category/unique_categories.csv,11,11,0,other_mixed
+financial_advising,OTHER,financial advising,citybehavex/category/unique_categories.csv,279,279,1,other_mixed
+fire_department,OTHER,fire department,citybehavex/category/unique_categories.csv,191,191,1,other_mixed
+fishing_charter,LEISURE,fishing charter,citybehavex/category/unique_categories.csv,4,4,1,other_mixed
+fishing_club,LEISURE,fishing club,citybehavex/category/unique_categories.csv,16,16,1,other_mixed
+fishmonger,OTHER,fishmonger,citybehavex/category/unique_categories.csv,130,130,0,other_mixed
+flyboarding_center,LEISURE,flyboarding center,citybehavex/category/unique_categories.csv,1,1,1,other_mixed
+fmcg_wholesaler,PURCHASE,fmcg wholesaler,citybehavex/category/unique_categories.csv,1,1,1,other_mixed
+football_club,OTHER,football club,citybehavex/category/unique_categories.csv,1,1,1,other_mixed
+forest,LEISURE,forest,citybehavex/category/unique_categories.csv,44,44,0,other_mixed
+fort,LEISURE,fort,citybehavex/category/unique_categories.csv,6,6,0,other_mixed
+fountain,LEISURE,fountain,citybehavex/category/unique_categories.csv,136,136,0,other_mixed
+fruits_and_vegetables,OTHER,fruits and vegetables,citybehavex/category/unique_categories.csv,391,391,1,other_mixed
+gastroenterologist,HEALTH,gastroenterologist,citybehavex/category/unique_categories.csv,7,7,0,other_mixed
+gelato,LEISURE,gelato,citybehavex/category/unique_categories.csv,51,51,0,other_mixed
+genealogists,PURCHASE,genealogists,citybehavex/category/unique_categories.csv,22,22,0,other_mixed
+gerontologist,HEALTH,gerontologist,citybehavex/category/unique_categories.csv,1,1,0,other_mixed
+glass_blowing,LEISURE,glass blowing,citybehavex/category/unique_categories.csv,14,14,1,other_mixed
+go_kart_club,OTHER,go kart club,citybehavex/category/unique_categories.csv,12,12,1,other_mixed
+go_kart_track,LEISURE,go kart track,citybehavex/category/unique_categories.csv,4,4,1,other_mixed
+graphic_designer,WORK,graphic designer,citybehavex/category/unique_categories.csv,439,439,3,other_mixed
+gun_and_ammo,OTHER,gun and ammo,citybehavex/category/unique_categories.csv,25,25,1,other_mixed
+hair_extensions,PURCHASE,hair extensions,citybehavex/category/unique_categories.csv,24,24,1,other_mixed
+hair_removal,PURCHASE,hair removal,citybehavex/category/unique_categories.csv,50,50,1,other_mixed
+hair_replacement,PURCHASE,hair replacement,citybehavex/category/unique_categories.csv,32,32,1,other_mixed
+halfway_house,OTHER,halfway house,citybehavex/category/unique_categories.csv,10,10,1,other_mixed
+handyman,PURCHASE,handyman,citybehavex/category/unique_categories.csv,32,32,0,other_mixed
+haunted_house,LEISURE,haunted house,citybehavex/category/unique_categories.csv,3,3,1,other_mixed
+hearing_aids,OTHER,hearing aids,citybehavex/category/unique_categories.csv,129,129,0,other_mixed
+heliports,OTHER,heliports,citybehavex/category/unique_categories.csv,4,4,0,other_mixed
+historical_tours,LEISURE,historical tours,citybehavex/category/unique_categories.csv,4,4,1,other_mixed
+hockey_field,LEISURE,hockey field,citybehavex/category/unique_categories.csv,1,1,1,other_mixed
+horse_boarding,PURCHASE,horse boarding,citybehavex/category/unique_categories.csv,89,89,1,other_mixed
+horse_riding,LEISURE,horse riding,citybehavex/category/unique_categories.csv,66,66,1,other_mixed
+hospice,HEALTH,hospice,citybehavex/category/unique_categories.csv,1,1,0,other_mixed
+hostel,OTHER,hostel,citybehavex/category/unique_categories.csv,93,93,0,other_mixed
+hot_air_balloons_tour,LEISURE,hot air balloons tour,citybehavex/category/unique_categories.csv,5,5,1,other_mixed
+house_sitting,PURCHASE,house sitting,citybehavex/category/unique_categories.csv,5,5,1,other_mixed
+hunting_and_fishing_supplies,LEISURE,hunting and fishing supplies,citybehavex/category/unique_categories.csv,23,23,1,other_mixed
+ice_skating_rink,LEISURE,ice skating rink,citybehavex/category/unique_categories.csv,23,23,1,other_mixed
+image_consultant,PURCHASE,image consultant,citybehavex/category/unique_categories.csv,33,33,1,other_mixed
+immigration_law,OTHER,immigration law,citybehavex/category/unique_categories.csv,33,33,1,other_mixed
+importer_and_exporter,WORK,importer and exporter,citybehavex/category/unique_categories.csv,44,44,1,other_mixed
+indoor_playcenter,LEISURE,indoor playcenter,citybehavex/category/unique_categories.csv,9,9,0,other_mixed
+inn,LEISURE,inn,citybehavex/category/unique_categories.csv,7,7,0,other_mixed
+installment_loans,OTHER,installment loans,citybehavex/category/unique_categories.csv,81,81,0,other_mixed
+interior_design,PURCHASE,interior design,citybehavex/category/unique_categories.csv,879,879,0,other_mixed
+investing,OTHER,investing,citybehavex/category/unique_categories.csv,271,271,0,other_mixed
+ip_and_internet_law,OTHER,ip and internet law,citybehavex/category/unique_categories.csv,19,19,1,other_mixed
+iron_and_steel_industry,WORK,iron and steel industry,citybehavex/category/unique_categories.csv,47,47,1,other_mixed
+island,LEISURE,island,citybehavex/category/unique_categories.csv,8,8,0,other_mixed
+it_consultant,WORK,it consultant,citybehavex/category/unique_categories.csv,1,1,1,other_mixed
+jail_and_prison,OTHER,jail and prison,citybehavex/category/unique_categories.csv,30,30,1,other_mixed
+jazz_and_blues,LEISURE,jazz and blues,citybehavex/category/unique_categories.csv,35,35,1,other_mixed
+jehovahs_witness_kingdom_hall,OTHER,jehovahs witness kingdom hall,citybehavex/category/unique_categories.csv,3,3,1,other_mixed
+junkyard,OTHER,junkyard,citybehavex/category/unique_categories.csv,17,17,0,other_mixed
+karaoke,LEISURE,karaoke,citybehavex/category/unique_categories.csv,46,46,0,other_mixed
+key_and_locksmith,PURCHASE,key and locksmith,citybehavex/category/unique_categories.csv,704,704,1,other_mixed
+kitchen_remodeling,PURCHASE,kitchen remodeling,citybehavex/category/unique_categories.csv,36,36,1,other_mixed
+kiteboarding,LEISURE,kiteboarding,citybehavex/category/unique_categories.csv,1,1,0,other_mixed
+knitting_supply,PURCHASE,knitting supply,citybehavex/category/unique_categories.csv,3,3,1,other_mixed
+labor_union,WORK,labor union,citybehavex/category/unique_categories.csv,551,551,1,other_mixed
+laboratory,WORK,laboratory,citybehavex/category/unique_categories.csv,287,287,1,other_mixed
+laboratory_testing,HEALTH,laboratory testing,citybehavex/category/unique_categories.csv,519,519,1,other_mixed
+lake,LEISURE,lake,citybehavex/category/unique_categories.csv,146,146,0,other_mixed
+land_surveying,OTHER,land surveying,citybehavex/category/unique_categories.csv,69,69,0,other_mixed
+landmark_and_historical_building,LEISURE,landmark and historical building,citybehavex/category/unique_categories.csv,2356,2356,1,other_mixed
+landscaping,PURCHASE,landscaping,citybehavex/category/unique_categories.csv,465,465,0,other_mixed
+laser_eye_surgery_lasik,HEALTH,laser eye surgery lasik,citybehavex/category/unique_categories.csv,3,3,1,other_mixed
+laser_hair_removal,PURCHASE,laser hair removal,citybehavex/category/unique_categories.csv,192,192,1,other_mixed
+laser_tag,LEISURE,laser tag,citybehavex/category/unique_categories.csv,32,32,1,other_mixed
+laundromat,OTHER,laundromat,citybehavex/category/unique_categories.csv,403,403,0,other_mixed
+law_enforcement,OTHER,law enforcement,citybehavex/category/unique_categories.csv,47,47,1,other_mixed
+leather_goods,OTHER,leather goods,citybehavex/category/unique_categories.csv,31,31,1,other_mixed
+life_coach,OTHER,life coach,citybehavex/category/unique_categories.csv,387,387,0,other_mixed
+lighthouse,LEISURE,lighthouse,citybehavex/category/unique_categories.csv,1,1,0,other_mixed
+linen,OTHER,linen,citybehavex/category/unique_categories.csv,101,101,0,other_mixed
+livestock_breeder,WORK,livestock breeder,citybehavex/category/unique_categories.csv,16,16,1,other_mixed
+lodge,OTHER,lodge,citybehavex/category/unique_categories.csv,18,18,0,other_mixed
+lottery_ticket,PURCHASE,lottery ticket,citybehavex/category/unique_categories.csv,3,3,1,other_mixed
+lounge,LEISURE,lounge,citybehavex/category/unique_categories.csv,238,238,0,other_mixed
+magician,OTHER,magician,citybehavex/category/unique_categories.csv,9,9,0,other_mixed
+makeup_artist,PURCHASE,makeup artist,citybehavex/category/unique_categories.csv,53,53,0,other_mixed
+marina,LEISURE,marina,citybehavex/category/unique_categories.csv,14,14,0,other_mixed
+marriage_or_relationship_counselor,HEALTH,marriage or relationship counselor,citybehavex/category/unique_categories.csv,6,6,1,other_mixed
+masonry_concrete,PURCHASE,masonry concrete,citybehavex/category/unique_categories.csv,131,131,0,other_mixed
+mass_media,WORK,mass media,citybehavex/category/unique_categories.csv,169,169,1,other_mixed
+maternity_centers,HEALTH,maternity centers,citybehavex/category/unique_categories.csv,22,22,1,other_mixed
+maternity_wear,HEALTH,maternity wear,citybehavex/category/unique_categories.csv,8,8,1,other_mixed
+mattress_manufacturing,WORK,mattress manufacturing,citybehavex/category/unique_categories.csv,6,6,1,other_mixed
+meat_wholesaler,PURCHASE,meat wholesaler,citybehavex/category/unique_categories.csv,31,31,1,other_mixed
+media_news_website,WORK,media news website,citybehavex/category/unique_categories.csv,29,29,1,other_mixed
+meditation_center,OTHER,meditation center,citybehavex/category/unique_categories.csv,40,40,1,other_mixed
+metal_fabricator,WORK,metal fabricator,citybehavex/category/unique_categories.csv,120,120,1,other_mixed
+mining,WORK,mining,citybehavex/category/unique_categories.csv,4,4,0,other_mixed
+mission,OTHER,mission,citybehavex/category/unique_categories.csv,4,4,0,other_mixed
+monument,LEISURE,monument,citybehavex/category/unique_categories.csv,536,536,0,other_mixed
+mortgage_broker,OTHER,mortgage broker,citybehavex/category/unique_categories.csv,198,198,0,other_mixed
+motel,LEISURE,motel,citybehavex/category/unique_categories.csv,10,10,0,other_mixed
+mountain,LEISURE,mountain,citybehavex/category/unique_categories.csv,19,19,1,other_mixed
+movers,PURCHASE,movers,citybehavex/category/unique_categories.csv,154,154,0,other_mixed
+naturopathic_holistic,HEALTH,naturopathic holistic,citybehavex/category/unique_categories.csv,1839,1839,0,other_mixed
+neurologist,HEALTH,neurologist,citybehavex/category/unique_categories.csv,6,6,0,other_mixed
+neuropathologist,HEALTH,neuropathologist,citybehavex/category/unique_categories.csv,2,2,0,other_mixed
+nurse_practitioner,OTHER,nurse practitioner,citybehavex/category/unique_categories.csv,216,216,0,other_mixed
+nutritionist,HEALTH,nutritionist,citybehavex/category/unique_categories.csv,382,382,0,other_mixed
+observatory,LEISURE,observatory,citybehavex/category/unique_categories.csv,12,12,0,other_mixed
+obstetrician_and_gynecologist,HEALTH,obstetrician and gynecologist,citybehavex/category/unique_categories.csv,89,89,1,other_mixed
+occupational_safety,WORK,occupational safety,citybehavex/category/unique_categories.csv,60,60,1,other_mixed
+oncologist,HEALTH,oncologist,citybehavex/category/unique_categories.csv,12,12,0,other_mixed
+onsen,OTHER,onsen,citybehavex/category/unique_categories.csv,2,2,0,other_mixed
+opera_and_ballet,LEISURE,opera and ballet,citybehavex/category/unique_categories.csv,13,13,1,other_mixed
+ophthalmologist,HEALTH,ophthalmologist,citybehavex/category/unique_categories.csv,55,55,0,other_mixed
+oral_surgeon,HEALTH,oral surgeon,citybehavex/category/unique_categories.csv,24,24,1,other_mixed
+organization,WORK,organization,citybehavex/category/unique_categories.csv,108,108,1,other_mixed
+orthodontist,HEALTH,orthodontist,citybehavex/category/unique_categories.csv,119,119,0,other_mixed
+orthopedist,HEALTH,orthopedist,citybehavex/category/unique_categories.csv,51,51,0,other_mixed
+osteopathic_physician,HEALTH,osteopathic physician,citybehavex/category/unique_categories.csv,1257,1257,0,other_mixed
+package_locker,OTHER,package locker,citybehavex/category/unique_categories.csv,738,738,0,other_mixed
+packing_supply,PURCHASE,packing supply,citybehavex/category/unique_categories.csv,18,18,1,other_mixed
+paintball,LEISURE,paintball,citybehavex/category/unique_categories.csv,27,27,0,other_mixed
+painting,PURCHASE,painting,citybehavex/category/unique_categories.csv,231,231,0,other_mixed
+palace,LEISURE,palace,citybehavex/category/unique_categories.csv,22,22,0,other_mixed
+pancake_house,LEISURE,pancake house,citybehavex/category/unique_categories.csv,561,561,1,other_mixed
+party_supply,PURCHASE,party supply,citybehavex/category/unique_categories.csv,69,69,1,other_mixed
+patio_covers,OTHER,patio covers,citybehavex/category/unique_categories.csv,14,14,0,other_mixed
+pediatrician,HEALTH,pediatrician,citybehavex/category/unique_categories.csv,39,39,0,other_mixed
+periodontist,HEALTH,periodontist,citybehavex/category/unique_categories.csv,4,4,0,other_mixed
+personal_assistant,PURCHASE,personal assistant,citybehavex/category/unique_categories.csv,10,10,1,other_mixed
+personal_chef,PURCHASE,personal chef,citybehavex/category/unique_categories.csv,11,11,1,other_mixed
+personal_injury_law,OTHER,personal injury law,citybehavex/category/unique_categories.csv,11,11,1,other_mixed
+pharmaceutical_companies,WORK,pharmaceutical companies,citybehavex/category/unique_categories.csv,93,93,0,other_mixed
+photographer,PURCHASE,photographer,citybehavex/category/unique_categories.csv,153,153,0,other_mixed
+pier,LEISURE,pier,citybehavex/category/unique_categories.csv,2,2,0,other_mixed
+piercing,PURCHASE,piercing,citybehavex/category/unique_categories.csv,3,3,1,other_mixed
+planetarium,LEISURE,planetarium,citybehavex/category/unique_categories.csv,1,1,0,other_mixed
+plastic_surgeon,HEALTH,plastic surgeon,citybehavex/category/unique_categories.csv,125,125,1,other_mixed
+playground,LEISURE,playground,citybehavex/category/unique_categories.csv,77,77,0,other_mixed
+plaza,LEISURE,plaza,citybehavex/category/unique_categories.csv,12,12,1,other_mixed
+plumbing,PURCHASE,plumbing,citybehavex/category/unique_categories.csv,1061,1061,0,other_mixed
+podiatrist,HEALTH,podiatrist,citybehavex/category/unique_categories.csv,193,193,0,other_mixed
+police_department,OTHER,police department,citybehavex/category/unique_categories.csv,386,386,1,other_mixed
+political_organization,WORK,political organization,citybehavex/category/unique_categories.csv,168,168,1,other_mixed
+pool_billiards,LEISURE,pool billiards,citybehavex/category/unique_categories.csv,29,29,1,other_mixed
+pool_cleaning,PURCHASE,pool cleaning,citybehavex/category/unique_categories.csv,85,85,1,other_mixed
+pool_hall,LEISURE,pool hall,citybehavex/category/unique_categories.csv,1,1,1,other_mixed
+print_media,WORK,print media,citybehavex/category/unique_categories.csv,171,171,1,other_mixed
+printing_equipment_and_supply,PURCHASE,printing equipment and supply,citybehavex/category/unique_categories.csv,146,146,1,other_mixed
+private_association,WORK,private association,citybehavex/category/unique_categories.csv,63,63,1,other_mixed
+private_investigation,OTHER,private investigation,citybehavex/category/unique_categories.csv,41,41,1,other_mixed
+process_servers,OTHER,process servers,citybehavex/category/unique_categories.csv,14,14,0,other_mixed
+prosthetics,HEALTH,prosthetics,citybehavex/category/unique_categories.csv,63,63,0,other_mixed
+prosthodontist,HEALTH,prosthodontist,citybehavex/category/unique_categories.csv,2,2,0,other_mixed
+psychiatrist,HEALTH,psychiatrist,citybehavex/category/unique_categories.csv,44,44,0,other_mixed
+psychic,LEISURE,psychic,citybehavex/category/unique_categories.csv,188,188,0,other_mixed
+psychologist,HEALTH,psychologist,citybehavex/category/unique_categories.csv,633,633,1,other_mixed
+psychotherapist,HEALTH,psychotherapist,citybehavex/category/unique_categories.csv,530,530,0,other_mixed
+pulmonologist,HEALTH,pulmonologist,citybehavex/category/unique_categories.csv,1,1,0,other_mixed
+quay,OTHER,quay,citybehavex/category/unique_categories.csv,6,6,0,other_mixed
+race_track,LEISURE,race track,citybehavex/category/unique_categories.csv,59,59,1,other_mixed
+racquetball_court,LEISURE,racquetball court,citybehavex/category/unique_categories.csv,9,9,1,other_mixed
+radiologist,HEALTH,radiologist,citybehavex/category/unique_categories.csv,66,66,0,other_mixed
+rafting_kayaking_area,LEISURE,rafting kayaking area,citybehavex/category/unique_categories.csv,1,1,0,other_mixed
+record_label,WORK,record label,citybehavex/category/unique_categories.csv,129,129,1,other_mixed
+recording_and_rehearsal_studio,WORK,recording and rehearsal studio,citybehavex/category/unique_categories.csv,19,19,1,other_mixed
+recycling_center,OTHER,recycling center,citybehavex/category/unique_categories.csv,94,94,1,other_mixed
+reflexology,HEALTH,reflexology,citybehavex/category/unique_categories.csv,135,135,0,other_mixed
+rehabilitation_center,HEALTH,rehabilitation center,citybehavex/category/unique_categories.csv,1,1,1,other_mixed
+resort,LEISURE,resort,citybehavex/category/unique_categories.csv,26,26,1,other_mixed
+rheumatologist,HEALTH,rheumatologist,citybehavex/category/unique_categories.csv,7,7,0,other_mixed
+ride_sharing,PURCHASE,ride sharing,citybehavex/category/unique_categories.csv,2,2,0,other_mixed
+river,LEISURE,river,citybehavex/category/unique_categories.csv,93,93,0,other_mixed
+rodeo,OTHER,rodeo,citybehavex/category/unique_categories.csv,1,1,0,other_mixed
+roller_skating_rink,LEISURE,roller skating rink,citybehavex/category/unique_categories.csv,10,10,1,other_mixed
+roofing,PURCHASE,roofing,citybehavex/category/unique_categories.csv,828,828,0,other_mixed
+rugby_pitch,LEISURE,rugby pitch,citybehavex/category/unique_categories.csv,24,24,1,other_mixed
+salsa_club,LEISURE,salsa club,citybehavex/category/unique_categories.csv,13,13,1,other_mixed
+sauna,LEISURE,sauna,citybehavex/category/unique_categories.csv,5,5,0,other_mixed
+screen_printing_t_shirt_printing,OTHER,screen printing t shirt printing,citybehavex/category/unique_categories.csv,100,100,1,other_mixed
+scuba_diving_center,LEISURE,scuba diving center,citybehavex/category/unique_categories.csv,35,35,1,other_mixed
+scuba_diving_instruction,LEISURE,scuba diving instruction,citybehavex/category/unique_categories.csv,4,4,1,other_mixed
+sculpture_statue,OTHER,sculpture statue,citybehavex/category/unique_categories.csv,18,18,0,other_mixed
+seaplane_bases,OTHER,seaplane bases,citybehavex/category/unique_categories.csv,1,1,0,other_mixed
+security_systems,WORK,security systems,citybehavex/category/unique_categories.csv,1,1,1,other_mixed
+self_storage_facility,WORK,self storage facility,citybehavex/category/unique_categories.csv,155,155,1,other_mixed
+sewing_and_alterations,PURCHASE,sewing and alterations,citybehavex/category/unique_categories.csv,323,323,1,other_mixed
+sex_therapist,HEALTH,sex therapist,citybehavex/category/unique_categories.csv,29,29,0,other_mixed
+shipping_center,OTHER,shipping center,citybehavex/category/unique_categories.csv,2030,2030,1,other_mixed
+shooting_range,LEISURE,shooting range,citybehavex/category/unique_categories.csv,34,34,1,other_mixed
+sign_making,OTHER,sign making,citybehavex/category/unique_categories.csv,75,75,0,other_mixed
+skating_rink,LEISURE,skating rink,citybehavex/category/unique_categories.csv,7,7,1,other_mixed
+ski_resort,LEISURE,ski resort,citybehavex/category/unique_categories.csv,4,4,1,other_mixed
+sky_diving,LEISURE,sky diving,citybehavex/category/unique_categories.csv,7,7,1,other_mixed
+soccer_club,OTHER,soccer club,citybehavex/category/unique_categories.csv,21,21,1,other_mixed
+soccer_field,LEISURE,soccer field,citybehavex/category/unique_categories.csv,115,115,1,other_mixed
+social_club,LEISURE,social club,citybehavex/category/unique_categories.csv,16,16,1,other_mixed
+software_development,WORK,software development,citybehavex/category/unique_categories.csv,1076,1076,1,other_mixed
+solar_installation,PURCHASE,solar installation,citybehavex/category/unique_categories.csv,66,66,2,other_mixed
+speakeasy,LEISURE,speakeasy,citybehavex/category/unique_categories.csv,12,12,0,other_mixed
+speech_therapist,HEALTH,speech therapist,citybehavex/category/unique_categories.csv,14,14,0,other_mixed
+squash_court,LEISURE,squash court,citybehavex/category/unique_categories.csv,13,13,1,other_mixed
+storage_facility,WORK,storage facility,citybehavex/category/unique_categories.csv,527,527,1,other_mixed
+strip_club,LEISURE,strip club,citybehavex/category/unique_categories.csv,4,4,1,other_mixed
+structural_engineer,WORK,structural engineer,citybehavex/category/unique_categories.csv,23,23,0,other_mixed
+structure_and_geography,OTHER,structure and geography,citybehavex/category/unique_categories.csv,127,127,1,other_mixed
+sugaring,PURCHASE,sugaring,citybehavex/category/unique_categories.csv,1,1,0,other_mixed
+surfing,LEISURE,surfing,citybehavex/category/unique_categories.csv,2,2,0,other_mixed
+surgeon,HEALTH,surgeon,citybehavex/category/unique_categories.csv,69,69,1,other_mixed
+surgical_appliances_and_supplies,PURCHASE,surgical appliances and supplies,citybehavex/category/unique_categories.csv,164,164,1,other_mixed
+surgical_center,HEALTH,surgical center,citybehavex/category/unique_categories.csv,18,18,1,other_mixed
+tai_chi_studio,LEISURE,tai chi studio,citybehavex/category/unique_categories.csv,12,12,1,other_mixed
+tattoo_and_piercing,PURCHASE,tattoo and piercing,citybehavex/category/unique_categories.csv,675,675,1,other_mixed
+tax_law,OTHER,tax law,citybehavex/category/unique_categories.csv,25,25,1,other_mixed
+teeth_whitening,HEALTH,teeth whitening,citybehavex/category/unique_categories.csv,4,4,0,other_mixed
+telecommunications,OTHER,telecommunications,citybehavex/category/unique_categories.csv,95,95,1,other_mixed
+test_preparation,STUDIES,test preparation,citybehavex/category/unique_categories.csv,75,75,0,other_mixed
+theatre,LEISURE,theatre,citybehavex/category/unique_categories.csv,849,849,0,other_mixed
+theatrical_productions,WORK,theatrical productions,citybehavex/category/unique_categories.csv,346,346,17,other_mixed
+ticket_sales,PURCHASE,ticket sales,citybehavex/category/unique_categories.csv,1,1,1,other_mixed
+tiling,PURCHASE,tiling,citybehavex/category/unique_categories.csv,29,29,16,other_mixed
+tours,LEISURE,tours,citybehavex/category/unique_categories.csv,318,318,1,other_mixed
+town_hall,OTHER,town hall,citybehavex/category/unique_categories.csv,1270,1270,1,other_mixed
+trusts,OTHER,trusts,citybehavex/category/unique_categories.csv,23,23,1,other_mixed
+tv_mounting,OTHER,tv mounting,citybehavex/category/unique_categories.csv,4,4,14,other_mixed
+urologist,OTHER,urologist,citybehavex/category/unique_categories.csv,13,13,13,other_mixed
+used_vintage_and_consignment,OTHER,used vintage and consignment,citybehavex/category/unique_categories.csv,222,222,1,other_mixed
+videographer,PURCHASE,videographer,citybehavex/category/unique_categories.csv,15,15,11,other_mixed
+vitamins_and_supplements,OTHER,vitamins and supplements,citybehavex/category/unique_categories.csv,75,75,1,other_mixed
+volleyball_court,LEISURE,volleyball court,citybehavex/category/unique_categories.csv,8,8,1,other_mixed
+waterfall,LEISURE,waterfall,citybehavex/category/unique_categories.csv,2,2,9,other_mixed
+waxing,PURCHASE,waxing,citybehavex/category/unique_categories.csv,7,7,8,other_mixed
+web_designer,WORK,web designer,citybehavex/category/unique_categories.csv,717,717,3,other_mixed
+wedding_chapel,OTHER,wedding chapel,citybehavex/category/unique_categories.csv,6,6,1,other_mixed
+wedding_planning,PURCHASE,wedding planning,citybehavex/category/unique_categories.csv,210,210,1,other_mixed
+weight_loss_center,HEALTH,weight loss center,citybehavex/category/unique_categories.csv,79,79,1,other_mixed
+well_drilling,PURCHASE,well drilling,citybehavex/category/unique_categories.csv,4,4,6,other_mixed
+wholesale_grocer,PURCHASE,wholesale grocer,citybehavex/category/unique_categories.csv,27,27,1,other_mixed
+wholesaler,PURCHASE,wholesaler,citybehavex/category/unique_categories.csv,37,37,1,other_mixed
+wildlife_control,OTHER,wildlife control,citybehavex/category/unique_categories.csv,1,1,1,other_mixed
+wildlife_sanctuary,LEISURE,wildlife sanctuary,citybehavex/category/unique_categories.csv,14,14,1,other_mixed
+wills_trusts_and_probate,OTHER,wills trusts and probate,citybehavex/category/unique_categories.csv,2,2,1,other_mixed
+windows_installation,PURCHASE,windows installation,citybehavex/category/unique_categories.csv,281,281,2,other_mixed
+wine_wholesaler,PURCHASE,wine wholesaler,citybehavex/category/unique_categories.csv,215,215,1,other_mixed
+wood_and_pulp,WORK,wood and pulp,citybehavex/category/unique_categories.csv,13,13,1,other_mixed
+youth_organizations,LEISURE,youth organizations,citybehavex/category/unique_categories.csv,264,264,1,other_mixed
+,OTHER,nan,citybehavex/category/unique_categories.csv,0,0,7,other_mixed
+amusement_park,LEISURE,amusement park,citybehavex/category/unique_categories.csv,359,359,1,parks_outdoors
+aquarium,LEISURE,aquarium,citybehavex/category/unique_categories.csv,22,22,0,parks_outdoors
+attractions_and_activities,LEISURE,attractions and activities,citybehavex/category/unique_categories.csv,327,327,1,parks_outdoors
+beach,LEISURE,beach,citybehavex/category/unique_categories.csv,70,70,1,parks_outdoors
+beer_garden,LEISURE,beer garden,citybehavex/category/unique_categories.csv,54,54,1,parks_outdoors
+boot_camp,LEISURE,boot camp,citybehavex/category/unique_categories.csv,14,14,1,parks_outdoors
+botanical_garden,LEISURE,botanical garden,citybehavex/category/unique_categories.csv,54,54,1,parks_outdoors
+campground,LEISURE,campground,citybehavex/category/unique_categories.csv,83,83,0,parks_outdoors
+campus_building,LEISURE,campus building,citybehavex/category/unique_categories.csv,260,260,1,parks_outdoors
+dog_park,LEISURE,dog park,citybehavex/category/unique_categories.csv,15,15,1,parks_outdoors
+gardener,LEISURE,gardener,citybehavex/category/unique_categories.csv,315,315,0,parks_outdoors
+hiking_trail,LEISURE,hiking trail,citybehavex/category/unique_categories.csv,32,32,0,parks_outdoors
+home_and_garden,LEISURE,home and garden,citybehavex/category/unique_categories.csv,190,190,1,parks_outdoors
+memorial_park,LEISURE,memorial park,citybehavex/category/unique_categories.csv,5,5,1,parks_outdoors
+mountain_bike_trails,LEISURE,mountain bike trails,citybehavex/category/unique_categories.csv,6,6,1,parks_outdoors
+national_park,LEISURE,national park,citybehavex/category/unique_categories.csv,24,24,1,parks_outdoors
+nature_reserve,LEISURE,nature reserve,citybehavex/category/unique_categories.csv,11,11,0,parks_outdoors
+nursery_and_gardening,LEISURE,nursery and gardening,citybehavex/category/unique_categories.csv,288,288,1,parks_outdoors
+outdoor_gear,OTHER,outdoor gear,citybehavex/category/unique_categories.csv,47,47,1,parks_outdoors
+park,LEISURE,park,citybehavex/category/unique_categories.csv,1921,1921,1,parks_outdoors
+parking,OTHER,parking,citybehavex/category/unique_categories.csv,2146,2146,0,parks_outdoors
+petting_zoo,LEISURE,petting zoo,citybehavex/category/unique_categories.csv,10,10,5,parks_outdoors
+rv_park,LEISURE,rv park,citybehavex/category/unique_categories.csv,32,32,1,parks_outdoors
+state_park,LEISURE,state park,citybehavex/category/unique_categories.csv,2,2,1,parks_outdoors
+trailer_dealer,LEISURE,trailer dealer,citybehavex/category/unique_categories.csv,7,7,1,parks_outdoors
+water_park,LEISURE,water park,citybehavex/category/unique_categories.csv,23,23,1,parks_outdoors
+zoo,LEISURE,zoo,citybehavex/category/unique_categories.csv,43,43,5,parks_outdoors
+abuse_and_addiction_treatment,HEALTH,abuse and addiction treatment,citybehavex/category/unique_categories.csv,12,12,1,personal_services
+accountant,OTHER,accountant,citybehavex/category/unique_categories.csv,764,764,0,personal_services
+agricultural_service,WORK,agricultural service,citybehavex/category/unique_categories.csv,54,54,1,personal_services
+aircraft_repair,PURCHASE,aircraft repair,citybehavex/category/unique_categories.csv,1,1,1,personal_services
+alcohol_and_drug_treatment_centers,HEALTH,alcohol and drug treatment centers,citybehavex/category/unique_categories.csv,6,6,1,personal_services
+ambulance_and_ems_services,HEALTH,ambulance and ems services,citybehavex/category/unique_categories.csv,296,296,1,personal_services
+animal_rescue_service,OTHER,animal rescue service,citybehavex/category/unique_categories.csv,20,20,1,personal_services
+appliance_repair_service,PURCHASE,appliance repair service,citybehavex/category/unique_categories.csv,87,87,1,personal_services
+appraisal_services,OTHER,appraisal services,citybehavex/category/unique_categories.csv,399,399,1,personal_services
+archaeological_services,WORK,archaeological services,citybehavex/category/unique_categories.csv,5,5,1,personal_services
+art_restoration_service,PURCHASE,art restoration service,citybehavex/category/unique_categories.csv,2,2,1,personal_services
+atms,OTHER,atms,citybehavex/category/unique_categories.csv,1629,1629,0,personal_services
+atv_rentals_and_tours,LEISURE,atv rentals and tours,citybehavex/category/unique_categories.csv,6,6,1,personal_services
+auto_glass_service,PURCHASE,auto glass service,citybehavex/category/unique_categories.csv,352,352,1,personal_services
+auto_restoration_services,PURCHASE,auto restoration services,citybehavex/category/unique_categories.csv,51,51,1,personal_services
+automation_services,WORK,automation services,citybehavex/category/unique_categories.csv,41,41,1,personal_services
+automobile_registration_service,PURCHASE,automobile registration service,citybehavex/category/unique_categories.csv,42,42,1,personal_services
+automotive_repair,PURCHASE,automotive repair,citybehavex/category/unique_categories.csv,3669,3669,1,personal_services
+automotive_services_and_repair,PURCHASE,automotive services and repair,citybehavex/category/unique_categories.csv,675,675,1,personal_services
+automotive_wheel_polishing_service,PURCHASE,automotive wheel polishing service,citybehavex/category/unique_categories.csv,2,2,1,personal_services
+bank_credit_union,OTHER,bank credit union,citybehavex/category/unique_categories.csv,897,897,1,personal_services
+bank_equipment_service,PURCHASE,bank equipment service,citybehavex/category/unique_categories.csv,3,3,1,personal_services
+banks,OTHER,banks,citybehavex/category/unique_categories.csv,4377,4377,1,personal_services
+beauty_and_spa,PURCHASE,beauty and spa,citybehavex/category/unique_categories.csv,2639,2639,1,personal_services
+beauty_product_supplier,PURCHASE,beauty product supplier,citybehavex/category/unique_categories.csv,65,65,1,personal_services
+beauty_salon,PURCHASE,beauty salon,citybehavex/category/unique_categories.csv,5506,5506,1,personal_services
+bike_rentals,PURCHASE,bike rentals,citybehavex/category/unique_categories.csv,519,519,1,personal_services
+bike_repair_maintenance,PURCHASE,bike repair maintenance,citybehavex/category/unique_categories.csv,84,84,1,personal_services
+boat_rental_and_training,STUDIES,boat rental and training,citybehavex/category/unique_categories.csv,62,62,1,personal_services
+boat_service_and_repair,PURCHASE,boat service and repair,citybehavex/category/unique_categories.csv,13,13,1,personal_services
+business_management_services,WORK,business management services,citybehavex/category/unique_categories.csv,144,144,1,personal_services
+business_to_business_services,WORK,business to business services,citybehavex/category/unique_categories.csv,31,31,1,personal_services
+canoe_and_kayak_hire_service,PURCHASE,canoe and kayak hire service,citybehavex/category/unique_categories.csv,26,26,1,personal_services
+car_rental_agency,PURCHASE,car rental agency,citybehavex/category/unique_categories.csv,1049,1049,1,personal_services
+child_protection_service,OTHER,child protection service,citybehavex/category/unique_categories.csv,1,1,1,personal_services
+cleaning_services,PURCHASE,cleaning services,citybehavex/category/unique_categories.csv,83,83,1,personal_services
+community_services_non_profits,OTHER,community services non profits,citybehavex/category/unique_categories.csv,7163,7163,1,personal_services
+construction_services,PURCHASE,construction services,citybehavex/category/unique_categories.csv,1250,1250,1,personal_services
+copywriting_service,WORK,copywriting service,citybehavex/category/unique_categories.csv,3,3,1,personal_services
+corporate_entertainment_services,WORK,corporate entertainment services,citybehavex/category/unique_categories.csv,6,6,1,personal_services
+cosmetic_and_beauty_supplies,PURCHASE,cosmetic and beauty supplies,citybehavex/category/unique_categories.csv,1833,1833,1,personal_services
+courier_and_delivery_services,PURCHASE,courier and delivery services,citybehavex/category/unique_categories.csv,1,1,1,personal_services
+coworking_space,PURCHASE,coworking space,citybehavex/category/unique_categories.csv,127,127,1,personal_services
+day_spa,PURCHASE,day spa,citybehavex/category/unique_categories.csv,94,94,1,personal_services
+diagnostic_services,HEALTH,diagnostic services,citybehavex/category/unique_categories.csv,100,100,1,personal_services
+disability_services_and_support_organization,OTHER,disability services and support organization,citybehavex/category/unique_categories.csv,103,103,1,personal_services
+distribution_services,WORK,distribution services,citybehavex/category/unique_categories.csv,5,5,1,personal_services
+dj_service,PURCHASE,dj service,citybehavex/category/unique_categories.csv,27,27,1,personal_services
+educational_services,STUDIES,educational services,citybehavex/category/unique_categories.csv,83,83,1,personal_services
+elevator_service,PURCHASE,elevator service,citybehavex/category/unique_categories.csv,36,36,1,personal_services
+emergency_roadside_service,PURCHASE,emergency roadside service,citybehavex/category/unique_categories.csv,4,4,1,personal_services
+engineering_services,WORK,engineering services,citybehavex/category/unique_categories.csv,635,635,1,personal_services
+environmental_and_ecological_services_for_businesses,WORK,environmental and ecological services for businesses,citybehavex/category/unique_categories.csv,45,45,1,personal_services
+escrow_services,OTHER,escrow services,citybehavex/category/unique_categories.csv,1,1,1,personal_services
+event_technology_service,WORK,event technology service,citybehavex/category/unique_categories.csv,40,40,1,personal_services
+excavation_service,PURCHASE,excavation service,citybehavex/category/unique_categories.csv,15,15,1,personal_services
+fence_and_gate_sales_service,PURCHASE,fence and gate sales service,citybehavex/category/unique_categories.csv,17,17,1,personal_services
+financial_service,OTHER,financial service,citybehavex/category/unique_categories.csv,2592,2592,1,personal_services
+fire_protection_service,OTHER,fire protection service,citybehavex/category/unique_categories.csv,50,50,1,personal_services
+fireplace_service,PURCHASE,fireplace service,citybehavex/category/unique_categories.csv,52,52,1,personal_services
+forestry_service,WORK,forestry service,citybehavex/category/unique_categories.csv,27,27,1,personal_services
+freight_and_cargo_service,PURCHASE,freight and cargo service,citybehavex/category/unique_categories.csv,1028,1028,1,personal_services
+funeral_services_and_cemeteries,OTHER,funeral services and cemeteries,citybehavex/category/unique_categories.csv,752,752,1,personal_services
+garage_door_service,PURCHASE,garage door service,citybehavex/category/unique_categories.csv,15,15,1,personal_services
+garbage_collection_service,OTHER,garbage collection service,citybehavex/category/unique_categories.csv,215,215,1,personal_services
+gents_tailor,PURCHASE,gents tailor,citybehavex/category/unique_categories.csv,38,38,0,personal_services
+geological_services,WORK,geological services,citybehavex/category/unique_categories.csv,5,5,1,personal_services
+glass_and_mirror_sales_service,PURCHASE,glass and mirror sales service,citybehavex/category/unique_categories.csv,154,154,1,personal_services
+government_services,OTHER,government services,citybehavex/category/unique_categories.csv,74,74,1,personal_services
+gutter_service,PURCHASE,gutter service,citybehavex/category/unique_categories.csv,1,1,1,personal_services
+hair_salon,PURCHASE,hair salon,citybehavex/category/unique_categories.csv,4528,4528,1,personal_services
+health_spa,HEALTH,health spa,citybehavex/category/unique_categories.csv,72,72,1,personal_services
+holiday_rental_home,PURCHASE,holiday rental home,citybehavex/category/unique_categories.csv,336,336,1,personal_services
+home_service,PURCHASE,home service,citybehavex/category/unique_categories.csv,1126,1126,1,personal_services
+horseback_riding_service,LEISURE,horseback riding service,citybehavex/category/unique_categories.csv,14,14,1,personal_services
+hotel_supply_service,PURCHASE,hotel supply service,citybehavex/category/unique_categories.csv,10,10,1,personal_services
+hvac_services,PURCHASE,hvac services,citybehavex/category/unique_categories.csv,672,672,1,personal_services
+insurance_agency,OTHER,insurance agency,citybehavex/category/unique_categories.csv,1886,1886,1,personal_services
+internet_service_provider,WORK,internet service provider,citybehavex/category/unique_categories.csv,70,70,1,personal_services
+inventory_control_service,WORK,inventory control service,citybehavex/category/unique_categories.csv,1,1,1,personal_services
+it_service_and_computer_repair,PURCHASE,it service and computer repair,citybehavex/category/unique_categories.csv,1277,1277,1,personal_services
+janitorial_services,PURCHASE,janitorial services,citybehavex/category/unique_categories.csv,394,394,1,personal_services
+jet_skis_rental,PURCHASE,jet skis rental,citybehavex/category/unique_categories.csv,1,1,1,personal_services
+laundry_services,PURCHASE,laundry services,citybehavex/category/unique_categories.csv,291,291,1,personal_services
+lawyer,OTHER,lawyer,citybehavex/category/unique_categories.csv,1547,1547,0,personal_services
+legal_services,OTHER,legal services,citybehavex/category/unique_categories.csv,947,947,1,personal_services
+limo_services,PURCHASE,limo services,citybehavex/category/unique_categories.csv,124,124,1,personal_services
+logging_services,WORK,logging services,citybehavex/category/unique_categories.csv,5,5,1,personal_services
+machine_and_tool_rentals,PURCHASE,machine and tool rentals,citybehavex/category/unique_categories.csv,7,7,1,personal_services
+massage,PURCHASE,massage,citybehavex/category/unique_categories.csv,394,394,1,personal_services
+massage_school,STUDIES,massage school,citybehavex/category/unique_categories.csv,24,24,1,personal_services
+massage_therapy,HEALTH,massage therapy,citybehavex/category/unique_categories.csv,417,417,1,personal_services
+media_restoration_service,PURCHASE,media restoration service,citybehavex/category/unique_categories.csv,3,3,1,personal_services
+medical_service_organizations,HEALTH,medical service organizations,citybehavex/category/unique_categories.csv,168,168,1,personal_services
+medical_spa,HEALTH,medical spa,citybehavex/category/unique_categories.csv,94,94,1,personal_services
+merchandising_service,WORK,merchandising service,citybehavex/category/unique_categories.csv,16,16,1,personal_services
+metal_plating_service,WORK,metal plating service,citybehavex/category/unique_categories.csv,7,7,1,personal_services
+motorcycle_rentals,PURCHASE,motorcycle rentals,citybehavex/category/unique_categories.csv,9,9,1,personal_services
+motorcycle_repair,PURCHASE,motorcycle repair,citybehavex/category/unique_categories.csv,229,229,1,personal_services
+nail_salon,PURCHASE,nail salon,citybehavex/category/unique_categories.csv,928,928,1,personal_services
+nanny_services,PURCHASE,nanny services,citybehavex/category/unique_categories.csv,11,11,1,personal_services
+passport_and_visa_services,OTHER,passport and visa services,citybehavex/category/unique_categories.csv,42,42,1,personal_services
+pest_control_service,PURCHASE,pest control service,citybehavex/category/unique_categories.csv,231,231,1,personal_services
+pet_services,PURCHASE,pet services,citybehavex/category/unique_categories.csv,148,148,1,personal_services
+powder_coating_service,PURCHASE,powder coating service,citybehavex/category/unique_categories.csv,1,1,1,personal_services
+printing_services,PURCHASE,printing services,citybehavex/category/unique_categories.csv,2107,2107,1,personal_services
+professional_services,PURCHASE,professional services,citybehavex/category/unique_categories.csv,8557,8557,1,personal_services
+real_estate_service,OTHER,real estate service,citybehavex/category/unique_categories.csv,240,240,1,personal_services
+recreation_vehicle_repair,LEISURE,recreation vehicle repair,citybehavex/category/unique_categories.csv,6,6,1,personal_services
+rental_service,PURCHASE,rental service,citybehavex/category/unique_categories.csv,410,410,1,personal_services
+rv_rentals,PURCHASE,rv rentals,citybehavex/category/unique_categories.csv,8,8,1,personal_services
+sandblasting_service,PURCHASE,sandblasting service,citybehavex/category/unique_categories.csv,5,5,1,personal_services
+secretarial_services,PURCHASE,secretarial services,citybehavex/category/unique_categories.csv,21,21,1,personal_services
+senior_citizen_services,OTHER,senior citizen services,citybehavex/category/unique_categories.csv,31,31,1,personal_services
+septic_services,PURCHASE,septic services,citybehavex/category/unique_categories.csv,10,10,1,personal_services
+service_apartments,OTHER,service apartments,citybehavex/category/unique_categories.csv,122,122,1,personal_services
+shipping_collection_services,PURCHASE,shipping collection services,citybehavex/category/unique_categories.csv,1,1,1,personal_services
+shoe_repair,PURCHASE,shoe repair,citybehavex/category/unique_categories.csv,127,127,1,personal_services
+shredding_services,PURCHASE,shredding services,citybehavex/category/unique_categories.csv,1,1,1,personal_services
+social_and_human_services,OTHER,social and human services,citybehavex/category/unique_categories.csv,48,48,1,personal_services
+social_service_organizations,OTHER,social service organizations,citybehavex/category/unique_categories.csv,806,806,1,personal_services
+spas,LEISURE,spas,citybehavex/category/unique_categories.csv,906,906,0,personal_services
+tanning_salon,LEISURE,tanning salon,citybehavex/category/unique_categories.csv,183,183,1,personal_services
+taxi_service,PURCHASE,taxi service,citybehavex/category/unique_categories.csv,451,451,1,personal_services
+television_service_providers,WORK,television service providers,citybehavex/category/unique_categories.csv,35,35,1,personal_services
+threading_service,PURCHASE,threading service,citybehavex/category/unique_categories.csv,1,1,1,personal_services
+tire_dealer_and_repair,PURCHASE,tire dealer and repair,citybehavex/category/unique_categories.csv,308,308,1,personal_services
+towing_service,PURCHASE,towing service,citybehavex/category/unique_categories.csv,107,107,1,personal_services
+trailer_rentals,LEISURE,trailer rentals,citybehavex/category/unique_categories.csv,3,3,1,personal_services
+translating_and_interpreting_services,WORK,translating and interpreting services,citybehavex/category/unique_categories.csv,111,111,1,personal_services
+translation_services,WORK,translation services,citybehavex/category/unique_categories.csv,23,23,1,personal_services
+transmission_repair,PURCHASE,transmission repair,citybehavex/category/unique_categories.csv,7,7,1,personal_services
+travel_services,PURCHASE,travel services,citybehavex/category/unique_categories.csv,1632,1632,1,personal_services
+tree_services,PURCHASE,tree services,citybehavex/category/unique_categories.csv,51,51,1,personal_services
+truck_rentals,PURCHASE,truck rentals,citybehavex/category/unique_categories.csv,39,39,1,personal_services
+truck_repair,PURCHASE,truck repair,citybehavex/category/unique_categories.csv,23,23,1,personal_services
+venue_and_event_space,PURCHASE,venue and event space,citybehavex/category/unique_categories.csv,77,77,1,personal_services
+water_treatment_equipment_and_services,PURCHASE,water treatment equipment and services,citybehavex/category/unique_categories.csv,27,27,1,personal_services
+wheel_and_rim_repair,PURCHASE,wheel and rim repair,citybehavex/category/unique_categories.csv,13,13,1,personal_services
+writing_service,WORK,writing service,citybehavex/category/unique_categories.csv,22,22,1,personal_services
+anglican_church,OTHER,anglican church,citybehavex/category/unique_categories.csv,7,7,0,religion_civic
+baptist_church,OTHER,baptist church,citybehavex/category/unique_categories.csv,26,26,0,religion_civic
+buddhist_temple,OTHER,buddhist temple,citybehavex/category/unique_categories.csv,50,50,0,religion_civic
+catholic_church,OTHER,catholic church,citybehavex/category/unique_categories.csv,894,894,0,religion_civic
+charity_organization,WORK,charity organization,citybehavex/category/unique_categories.csv,321,321,1,religion_civic
+church_cathedral,OTHER,church cathedral,citybehavex/category/unique_categories.csv,1517,1517,0,religion_civic
+courthouse,OTHER,courthouse,citybehavex/category/unique_categories.csv,122,122,0,religion_civic
+embassy,OTHER,embassy,citybehavex/category/unique_categories.csv,330,330,0,religion_civic
+episcopal_church,OTHER,episcopal church,citybehavex/category/unique_categories.csv,1,1,0,religion_civic
+evangelical_church,OTHER,evangelical church,citybehavex/category/unique_categories.csv,213,213,0,religion_civic
+hindu_temple,OTHER,hindu temple,citybehavex/category/unique_categories.csv,13,13,0,religion_civic
+mosque,OTHER,mosque,citybehavex/category/unique_categories.csv,211,211,0,religion_civic
+non_governmental_association,OTHER,non governmental association,citybehavex/category/unique_categories.csv,338,338,1,religion_civic
+pentecostal_church,OTHER,pentecostal church,citybehavex/category/unique_categories.csv,34,34,0,religion_civic
+religious_organization,OTHER,religious organization,citybehavex/category/unique_categories.csv,668,668,1,religion_civic
+sikh_temple,OTHER,sikh temple,citybehavex/category/unique_categories.csv,5,5,0,religion_civic
+synagogue,OTHER,synagogue,citybehavex/category/unique_categories.csv,114,114,0,religion_civic
+temple,OTHER,temple,citybehavex/category/unique_categories.csv,3,3,0,religion_civic
+academic_bookstore,PURCHASE,academic bookstore,citybehavex/category/unique_categories.csv,2,2,1,retail_shopping
+adult_store,PURCHASE,adult store,citybehavex/category/unique_categories.csv,9,9,1,retail_shopping
+antique_store,PURCHASE,antique store,citybehavex/category/unique_categories.csv,484,484,1,retail_shopping
+appliance_store,PURCHASE,appliance store,citybehavex/category/unique_categories.csv,141,141,1,retail_shopping
+aquatic_pet_store,PURCHASE,aquatic pet store,citybehavex/category/unique_categories.csv,9,9,1,retail_shopping
+archery_shop,PURCHASE,archery shop,citybehavex/category/unique_categories.csv,6,6,1,retail_shopping
+audio_visual_equipment_store,PURCHASE,audio visual equipment store,citybehavex/category/unique_categories.csv,124,124,1,retail_shopping
+auto_body_shop,PURCHASE,auto body shop,citybehavex/category/unique_categories.csv,305,305,1,retail_shopping
+avionics_shop,PURCHASE,avionics shop,citybehavex/category/unique_categories.csv,2,2,1,retail_shopping
+baby_gear_and_furniture,OTHER,baby gear and furniture,citybehavex/category/unique_categories.csv,46,46,1,retail_shopping
+bagel_shop,PURCHASE,bagel shop,citybehavex/category/unique_categories.csv,82,82,1,retail_shopping
+beverage_store,PURCHASE,beverage store,citybehavex/category/unique_categories.csv,212,212,1,retail_shopping
+bicycle_shop,PURCHASE,bicycle shop,citybehavex/category/unique_categories.csv,375,375,1,retail_shopping
+bookstore,PURCHASE,bookstore,citybehavex/category/unique_categories.csv,1383,1383,1,retail_shopping
+boutique,PURCHASE,boutique,citybehavex/category/unique_categories.csv,1349,1349,0,retail_shopping
+bridal_shop,PURCHASE,bridal shop,citybehavex/category/unique_categories.csv,277,277,1,retail_shopping
+building_supply_store,PURCHASE,building supply store,citybehavex/category/unique_categories.csv,1506,1506,1,retail_shopping
+butcher_shop,PURCHASE,butcher shop,citybehavex/category/unique_categories.csv,1201,1201,1,retail_shopping
+candy_store,PURCHASE,candy store,citybehavex/category/unique_categories.csv,129,129,1,retail_shopping
+car_stereo_store,PURCHASE,car stereo store,citybehavex/category/unique_categories.csv,5,5,1,retail_shopping
+carpet_store,PURCHASE,carpet store,citybehavex/category/unique_categories.csv,252,252,1,retail_shopping
+cheese_shop,PURCHASE,cheese shop,citybehavex/category/unique_categories.csv,320,320,1,retail_shopping
+childrens_clothing_store,PURCHASE,childrens clothing store,citybehavex/category/unique_categories.csv,534,534,1,retail_shopping
+clothing_company,WORK,clothing company,citybehavex/category/unique_categories.csv,87,87,1,retail_shopping
+clothing_store,PURCHASE,clothing store,citybehavex/category/unique_categories.csv,4859,4859,1,retail_shopping
+comic_books_store,PURCHASE,comic books store,citybehavex/category/unique_categories.csv,116,116,1,retail_shopping
+computer_store,PURCHASE,computer store,citybehavex/category/unique_categories.csv,124,124,1,retail_shopping
+convenience_store,PURCHASE,convenience store,citybehavex/category/unique_categories.csv,1131,1131,1,retail_shopping
+costume_store,PURCHASE,costume store,citybehavex/category/unique_categories.csv,86,86,1,retail_shopping
+cupcake_shop,PURCHASE,cupcake shop,citybehavex/category/unique_categories.csv,46,46,1,retail_shopping
+custom_clothing,OTHER,custom clothing,citybehavex/category/unique_categories.csv,6,6,1,retail_shopping
+dairy_stores,PURCHASE,dairy stores,citybehavex/category/unique_categories.csv,1,1,1,retail_shopping
+denim_wear_store,PURCHASE,denim wear store,citybehavex/category/unique_categories.csv,1,1,1,retail_shopping
+department_store,PURCHASE,department store,citybehavex/category/unique_categories.csv,299,299,1,retail_shopping
+discount_store,PURCHASE,discount store,citybehavex/category/unique_categories.csv,437,437,1,retail_shopping
+dive_shop,PURCHASE,dive shop,citybehavex/category/unique_categories.csv,1,1,1,retail_shopping
+do_it_yourself_store,PURCHASE,do it yourself store,citybehavex/category/unique_categories.csv,40,40,1,retail_shopping
+drugstore,HEALTH,drugstore,citybehavex/category/unique_categories.csv,157,157,0,retail_shopping
+duty_free_shop,PURCHASE,duty free shop,citybehavex/category/unique_categories.csv,12,12,1,retail_shopping
+e_cigarette_store,PURCHASE,e cigarette store,citybehavex/category/unique_categories.csv,377,377,1,retail_shopping
+educational_supply_store,STUDIES,educational supply store,citybehavex/category/unique_categories.csv,12,12,1,retail_shopping
+electrical_supply_store,PURCHASE,electrical supply store,citybehavex/category/unique_categories.csv,43,43,1,retail_shopping
+electronics,OTHER,electronics,citybehavex/category/unique_categories.csv,667,667,0,retail_shopping
+fabric_store,PURCHASE,fabric store,citybehavex/category/unique_categories.csv,231,231,1,retail_shopping
+farmers_market,PURCHASE,farmers market,citybehavex/category/unique_categories.csv,267,267,1,retail_shopping
+fashion_accessories_store,PURCHASE,fashion accessories store,citybehavex/category/unique_categories.csv,526,526,1,retail_shopping
+firework_retailer,PURCHASE,firework retailer,citybehavex/category/unique_categories.csv,7,7,0,retail_shopping
+flea_market,PURCHASE,flea market,citybehavex/category/unique_categories.csv,66,66,1,retail_shopping
+flowers_and_gifts_shop,PURCHASE,flowers and gifts shop,citybehavex/category/unique_categories.csv,2144,2144,1,retail_shopping
+framing_store,PURCHASE,framing store,citybehavex/category/unique_categories.csv,55,55,1,retail_shopping
+frozen_yoghurt_shop,PURCHASE,frozen yoghurt shop,citybehavex/category/unique_categories.csv,69,69,1,retail_shopping
+furniture_assembly,OTHER,furniture assembly,citybehavex/category/unique_categories.csv,210,210,1,retail_shopping
+furniture_store,PURCHASE,furniture store,citybehavex/category/unique_categories.csv,2236,2236,1,retail_shopping
+gift_shop,PURCHASE,gift shop,citybehavex/category/unique_categories.csv,233,233,1,retail_shopping
+grocery_store,PURCHASE,grocery store,citybehavex/category/unique_categories.csv,2745,2745,1,retail_shopping
+hair_supply_stores,PURCHASE,hair supply stores,citybehavex/category/unique_categories.csv,206,206,1,retail_shopping
+handbag_stores,PURCHASE,handbag stores,citybehavex/category/unique_categories.csv,3,3,1,retail_shopping
+hardware_store,PURCHASE,hardware store,citybehavex/category/unique_categories.csv,684,684,1,retail_shopping
+hat_shop,PURCHASE,hat shop,citybehavex/category/unique_categories.csv,37,37,1,retail_shopping
+herb_and_spice_shop,PURCHASE,herb and spice shop,citybehavex/category/unique_categories.csv,4,4,1,retail_shopping
+hobby_shop,PURCHASE,hobby shop,citybehavex/category/unique_categories.csv,108,108,1,retail_shopping
+home_goods_store,PURCHASE,home goods store,citybehavex/category/unique_categories.csv,451,451,1,retail_shopping
+home_improvement_store,PURCHASE,home improvement store,citybehavex/category/unique_categories.csv,724,724,1,retail_shopping
+home_theater_systems_stores,PURCHASE,home theater systems stores,citybehavex/category/unique_categories.csv,4,4,1,retail_shopping
+internet_marketing_service,WORK,internet marketing service,citybehavex/category/unique_categories.csv,288,288,1,retail_shopping
+jewelry_and_watches_manufacturer,WORK,jewelry and watches manufacturer,citybehavex/category/unique_categories.csv,258,258,1,retail_shopping
+jewelry_store,PURCHASE,jewelry store,citybehavex/category/unique_categories.csv,2155,2155,1,retail_shopping
+kitchen_supply_store,PURCHASE,kitchen supply store,citybehavex/category/unique_categories.csv,36,36,1,retail_shopping
+lighting_store,PURCHASE,lighting store,citybehavex/category/unique_categories.csv,110,110,1,retail_shopping
+lingerie_store,PURCHASE,lingerie store,citybehavex/category/unique_categories.csv,445,445,1,retail_shopping
+liquor_store,PURCHASE,liquor store,citybehavex/category/unique_categories.csv,1155,1155,1,retail_shopping
+luggage_store,PURCHASE,luggage store,citybehavex/category/unique_categories.csv,214,214,1,retail_shopping
+lumber_store,PURCHASE,lumber store,citybehavex/category/unique_categories.csv,27,27,1,retail_shopping
+machine_shop,PURCHASE,machine shop,citybehavex/category/unique_categories.csv,69,69,1,retail_shopping
+marketing_agency,WORK,marketing agency,citybehavex/category/unique_categories.csv,784,784,1,retail_shopping
+marketing_consultant,WORK,marketing consultant,citybehavex/category/unique_categories.csv,44,44,1,retail_shopping
+mattress_store,PURCHASE,mattress store,citybehavex/category/unique_categories.csv,146,146,1,retail_shopping
+mens_clothing_store,PURCHASE,mens clothing store,citybehavex/category/unique_categories.csv,599,599,1,retail_shopping
+mobile_phone_store,PURCHASE,mobile phone store,citybehavex/category/unique_categories.csv,709,709,1,retail_shopping
+motorsports_store,PURCHASE,motorsports store,citybehavex/category/unique_categories.csv,16,16,1,retail_shopping
+music_and_dvd_store,PURCHASE,music and dvd store,citybehavex/category/unique_categories.csv,211,211,1,retail_shopping
+musical_instrument_store,PURCHASE,musical instrument store,citybehavex/category/unique_categories.csv,185,185,1,retail_shopping
+newspaper_and_magazines_store,PURCHASE,newspaper and magazines store,citybehavex/category/unique_categories.csv,137,137,1,retail_shopping
+night_market,LEISURE,night market,citybehavex/category/unique_categories.csv,2,2,1,retail_shopping
+online_shop,PURCHASE,online shop,citybehavex/category/unique_categories.csv,52,52,1,retail_shopping
+organic_grocery_store,PURCHASE,organic grocery store,citybehavex/category/unique_categories.csv,389,389,1,retail_shopping
+outlet_store,PURCHASE,outlet store,citybehavex/category/unique_categories.csv,56,56,1,retail_shopping
+pawn_shop,PURCHASE,pawn shop,citybehavex/category/unique_categories.csv,5,5,1,retail_shopping
+perfume_store,PURCHASE,perfume store,citybehavex/category/unique_categories.csv,99,99,1,retail_shopping
+pet_store,PURCHASE,pet store,citybehavex/category/unique_categories.csv,393,393,1,retail_shopping
+pharmacy,HEALTH,pharmacy,citybehavex/category/unique_categories.csv,2775,2775,0,retail_shopping
+photography_store_and_services,PURCHASE,photography store and services,citybehavex/category/unique_categories.csv,73,73,1,retail_shopping
+pop_up_shop,PURCHASE,pop up shop,citybehavex/category/unique_categories.csv,59,59,1,retail_shopping
+reptile_shop,PURCHASE,reptile shop,citybehavex/category/unique_categories.csv,1,1,1,retail_shopping
+retail,PURCHASE,retail,citybehavex/category/unique_categories.csv,699,699,0,retail_shopping
+sandwich_shop,LEISURE,sandwich shop,citybehavex/category/unique_categories.csv,455,455,1,retail_shopping
+shoe_store,PURCHASE,shoe store,citybehavex/category/unique_categories.csv,1421,1421,1,retail_shopping
+shopping,PURCHASE,shopping,citybehavex/category/unique_categories.csv,1988,1988,1,retail_shopping
+shopping_center,PURCHASE,shopping center,citybehavex/category/unique_categories.csv,439,439,1,retail_shopping
+skate_shop,PURCHASE,skate shop,citybehavex/category/unique_categories.csv,20,20,1,retail_shopping
+ski_and_snowboard_shop,PURCHASE,ski and snowboard shop,citybehavex/category/unique_categories.csv,5,5,1,retail_shopping
+souvenir_shop,PURCHASE,souvenir shop,citybehavex/category/unique_categories.csv,47,47,1,retail_shopping
+specialty_grocery_store,PURCHASE,specialty grocery store,citybehavex/category/unique_categories.csv,294,294,1,retail_shopping
+supermarket,PURCHASE,supermarket,citybehavex/category/unique_categories.csv,4347,4347,0,retail_shopping
+superstore,PURCHASE,superstore,citybehavex/category/unique_categories.csv,24,24,0,retail_shopping
+surf_shop,PURCHASE,surf shop,citybehavex/category/unique_categories.csv,6,6,1,retail_shopping
+swimwear_store,PURCHASE,swimwear store,citybehavex/category/unique_categories.csv,21,21,1,retail_shopping
+telemarketing_services,PURCHASE,telemarketing services,citybehavex/category/unique_categories.csv,15,15,1,retail_shopping
+thrift_store,PURCHASE,thrift store,citybehavex/category/unique_categories.csv,233,233,1,retail_shopping
+tire_repair_shop,PURCHASE,tire repair shop,citybehavex/category/unique_categories.csv,18,18,1,retail_shopping
+tobacco_shop,PURCHASE,tobacco shop,citybehavex/category/unique_categories.csv,367,367,1,retail_shopping
+toy_store,PURCHASE,toy store,citybehavex/category/unique_categories.csv,421,421,1,retail_shopping
+trophy_shop,PURCHASE,trophy shop,citybehavex/category/unique_categories.csv,17,17,1,retail_shopping
+uniform_store,PURCHASE,uniform store,citybehavex/category/unique_categories.csv,27,27,1,retail_shopping
+used_bookstore,PURCHASE,used bookstore,citybehavex/category/unique_categories.csv,4,4,1,retail_shopping
+video_game_store,PURCHASE,video game store,citybehavex/category/unique_categories.csv,159,159,1,retail_shopping
+vinyl_record_store,PURCHASE,vinyl record store,citybehavex/category/unique_categories.csv,18,18,1,retail_shopping
+watch_store,PURCHASE,watch store,citybehavex/category/unique_categories.csv,39,39,1,retail_shopping
+wholesale_store,PURCHASE,wholesale store,citybehavex/category/unique_categories.csv,447,447,1,retail_shopping
+wig_store,PURCHASE,wig store,citybehavex/category/unique_categories.csv,37,37,1,retail_shopping
+womens_clothing_store,PURCHASE,womens clothing store,citybehavex/category/unique_categories.csv,1650,1650,1,retail_shopping
+amateur_sports_league,LEISURE,amateur sports league,citybehavex/category/unique_categories.csv,30,30,1,sports_fitness
+atv_recreation_park,LEISURE,atv recreation park,citybehavex/category/unique_categories.csv,1,1,1,sports_fitness
+baseball_stadium,LEISURE,baseball stadium,citybehavex/category/unique_categories.csv,2,2,1,sports_fitness
+basketball_stadium,LEISURE,basketball stadium,citybehavex/category/unique_categories.csv,7,7,1,sports_fitness
+boxing_gym,LEISURE,boxing gym,citybehavex/category/unique_categories.csv,4,4,0,sports_fitness
+country_dance_hall,LEISURE,country dance hall,citybehavex/category/unique_categories.csv,2,2,1,sports_fitness
+dance_club,LEISURE,dance club,citybehavex/category/unique_categories.csv,517,517,1,sports_fitness
+dance_wear,OTHER,dance wear,citybehavex/category/unique_categories.csv,1,1,1,sports_fitness
+esports_league,LEISURE,esports league,citybehavex/category/unique_categories.csv,4,4,1,sports_fitness
+fitness_trainer,LEISURE,fitness trainer,citybehavex/category/unique_categories.csv,338,338,1,sports_fitness
+football_stadium,LEISURE,football stadium,citybehavex/category/unique_categories.csv,34,34,1,sports_fitness
+golf_cart_dealer,LEISURE,golf cart dealer,citybehavex/category/unique_categories.csv,3,3,1,sports_fitness
+golf_club,LEISURE,golf club,citybehavex/category/unique_categories.csv,2,2,1,sports_fitness
+golf_course,LEISURE,golf course,citybehavex/category/unique_categories.csv,129,129,1,sports_fitness
+golf_instructor,LEISURE,golf instructor,citybehavex/category/unique_categories.csv,11,11,1,sports_fitness
+gym,LEISURE,gym,citybehavex/category/unique_categories.csv,2913,2913,0,sports_fitness
+gymnastics_center,LEISURE,gymnastics center,citybehavex/category/unique_categories.csv,107,107,1,sports_fitness
+hockey_arena,LEISURE,hockey arena,citybehavex/category/unique_categories.csv,1,1,1,sports_fitness
+kids_recreation_and_party,LEISURE,kids recreation and party,citybehavex/category/unique_categories.csv,28,28,1,sports_fitness
+martial_arts_club,LEISURE,martial arts club,citybehavex/category/unique_categories.csv,860,860,1,sports_fitness
+miniature_golf_course,LEISURE,miniature golf course,citybehavex/category/unique_categories.csv,4,4,1,sports_fitness
+pilates_studio,LEISURE,pilates studio,citybehavex/category/unique_categories.csv,179,179,1,sports_fitness
+professional_sports_league,LEISURE,professional sports league,citybehavex/category/unique_categories.csv,6,6,1,sports_fitness
+recreational_vehicle_dealer,PURCHASE,recreational vehicle dealer,citybehavex/category/unique_categories.csv,11,11,1,sports_fitness
+rock_climbing_gym,LEISURE,rock climbing gym,citybehavex/category/unique_categories.csv,7,7,0,sports_fitness
+rock_climbing_spot,LEISURE,rock climbing spot,citybehavex/category/unique_categories.csv,64,64,0,sports_fitness
+rugby_stadium,LEISURE,rugby stadium,citybehavex/category/unique_categories.csv,12,12,1,sports_fitness
+skate_park,LEISURE,skate park,citybehavex/category/unique_categories.csv,46,46,1,sports_fitness
+soccer_stadium,LEISURE,soccer stadium,citybehavex/category/unique_categories.csv,55,55,1,sports_fitness
+sporting_goods,PURCHASE,sporting goods,citybehavex/category/unique_categories.csv,551,551,1,sports_fitness
+sports_and_fitness_instruction,LEISURE,sports and fitness instruction,citybehavex/category/unique_categories.csv,110,110,1,sports_fitness
+sports_and_recreation_venue,LEISURE,sports and recreation venue,citybehavex/category/unique_categories.csv,874,874,1,sports_fitness
+sports_club_and_league,LEISURE,sports club and league,citybehavex/category/unique_categories.csv,1502,1502,1,sports_fitness
+sports_medicine,HEALTH,sports medicine,citybehavex/category/unique_categories.csv,23,23,1,sports_fitness
+sports_psychologist,HEALTH,sports psychologist,citybehavex/category/unique_categories.csv,1,1,1,sports_fitness
+sports_wear,PURCHASE,sports wear,citybehavex/category/unique_categories.csv,127,127,1,sports_fitness
+stadium_arena,LEISURE,stadium arena,citybehavex/category/unique_categories.csv,733,733,1,sports_fitness
+swimming_instructor,OTHER,swimming instructor,citybehavex/category/unique_categories.csv,20,20,1,sports_fitness
+swimming_pool,LEISURE,swimming pool,citybehavex/category/unique_categories.csv,405,405,1,sports_fitness
+table_tennis_club,OTHER,table tennis club,citybehavex/category/unique_categories.csv,8,8,1,sports_fitness
+tennis_court,LEISURE,tennis court,citybehavex/category/unique_categories.csv,375,375,1,sports_fitness
+tennis_stadium,LEISURE,tennis stadium,citybehavex/category/unique_categories.csv,18,18,1,sports_fitness
+track_stadium,LEISURE,track stadium,citybehavex/category/unique_categories.csv,10,10,1,sports_fitness
+transportation,OTHER,transportation,citybehavex/category/unique_categories.csv,1486,1486,15,sports_fitness
+yoga_studio,LEISURE,yoga studio,citybehavex/category/unique_categories.csv,486,486,1,sports_fitness
+accommodation,OTHER,accommodation,citybehavex/category/unique_categories.csv,486,486,0,transport_travel
+airline,OTHER,airline,citybehavex/category/unique_categories.csv,60,60,0,transport_travel
+airlines,OTHER,airlines,citybehavex/category/unique_categories.csv,18,18,0,transport_travel
+airport,OTHER,airport,citybehavex/category/unique_categories.csv,351,351,0,transport_travel
+airport_lounge,OTHER,airport lounge,citybehavex/category/unique_categories.csv,48,48,0,transport_travel
+airport_shuttles,PURCHASE,airport shuttles,citybehavex/category/unique_categories.csv,37,37,0,transport_travel
+airport_terminal,OTHER,airport terminal,citybehavex/category/unique_categories.csv,59,59,0,transport_travel
+bus_station,OTHER,bus station,citybehavex/category/unique_categories.csv,85,85,1,transport_travel
+bus_tours,LEISURE,bus tours,citybehavex/category/unique_categories.csv,12,12,1,transport_travel
+business,WORK,business,citybehavex/category/unique_categories.csv,971,971,1,transport_travel
+business_advertising,WORK,business advertising,citybehavex/category/unique_categories.csv,155,155,1,transport_travel
+business_brokers,OTHER,business brokers,citybehavex/category/unique_categories.csv,12,12,1,transport_travel
+business_consulting,WORK,business consulting,citybehavex/category/unique_categories.csv,88,88,1,transport_travel
+business_manufacturing_and_supply,PURCHASE,business manufacturing and supply,citybehavex/category/unique_categories.csv,667,667,1,transport_travel
+dog_trainer,PURCHASE,dog trainer,citybehavex/category/unique_categories.csv,117,117,1,transport_travel
+ev_charging_station,OTHER,ev charging station,citybehavex/category/unique_categories.csv,5,5,1,transport_travel
+gas_station,PURCHASE,gas station,citybehavex/category/unique_categories.csv,2009,2009,1,transport_travel
+horse_trainer,PURCHASE,horse trainer,citybehavex/category/unique_categories.csv,6,6,1,transport_travel
+hotel,LEISURE,hotel,citybehavex/category/unique_categories.csv,5972,5972,1,transport_travel
+light_rail_and_subway_stations,OTHER,light rail and subway stations,citybehavex/category/unique_categories.csv,13,13,1,transport_travel
+metro_station,OTHER,metro station,citybehavex/category/unique_categories.csv,265,265,1,transport_travel
+oil_change_station,OTHER,oil change station,citybehavex/category/unique_categories.csv,4,4,1,transport_travel
+radio_station,WORK,radio station,citybehavex/category/unique_categories.csv,81,81,1,transport_travel
+railroad_freight,PURCHASE,railroad freight,citybehavex/category/unique_categories.csv,33,33,1,transport_travel
+taxidermist,PURCHASE,taxidermist,citybehavex/category/unique_categories.csv,1,1,0,transport_travel
+television_station,WORK,television station,citybehavex/category/unique_categories.csv,24,24,1,transport_travel
+train_station,OTHER,train station,citybehavex/category/unique_categories.csv,1349,1349,1,transport_travel
+travel,LEISURE,travel,citybehavex/category/unique_categories.csv,365,365,1,transport_travel
+travel_agents,PURCHASE,travel agents,citybehavex/category/unique_categories.csv,297,297,1,transport_travel
+truck_gas_station,PURCHASE,truck gas station,citybehavex/category/unique_categories.csv,98,98,1,transport_travel
+weather_station,OTHER,weather station,citybehavex/category/unique_categories.csv,1,1,1,transport_travel
+advertising_agency,WORK,advertising agency,citybehavex/category/unique_categories.csv,2157,2157,1,work_industry
+agriculture,WORK,agriculture,citybehavex/category/unique_categories.csv,87,87,0,work_industry
+aircraft_manufacturer,WORK,aircraft manufacturer,citybehavex/category/unique_categories.csv,1,1,1,work_industry
+appliance_manufacturer,WORK,appliance manufacturer,citybehavex/category/unique_categories.csv,119,119,1,work_industry
+auto_company,WORK,auto company,citybehavex/category/unique_categories.csv,97,97,1,work_industry
+auto_manufacturers_and_distributors,WORK,auto manufacturers and distributors,citybehavex/category/unique_categories.csv,32,32,1,work_industry
+bags_luggage_company,WORK,bags luggage company,citybehavex/category/unique_categories.csv,25,25,1,work_industry
+biotechnology_company,WORK,biotechnology company,citybehavex/category/unique_categories.csv,36,36,1,work_industry
+bottled_water_company,WORK,bottled water company,citybehavex/category/unique_categories.csv,6,6,1,work_industry
+building_contractor,PURCHASE,building contractor,citybehavex/category/unique_categories.csv,52,52,1,work_industry
+business_office_supplies_and_stationery,PURCHASE,business office supplies and stationery,citybehavex/category/unique_categories.csv,93,93,1,work_industry
+central_government_office,OTHER,central government office,citybehavex/category/unique_categories.csv,236,236,1,work_industry
+chemical_plant,WORK,chemical plant,citybehavex/category/unique_categories.csv,61,61,0,work_industry
+commercial_industrial,WORK,commercial industrial,citybehavex/category/unique_categories.csv,255,255,1,work_industry
+computer_hardware_company,WORK,computer hardware company,citybehavex/category/unique_categories.csv,304,304,1,work_industry
+contractor,PURCHASE,contractor,citybehavex/category/unique_categories.csv,2396,2396,1,work_industry
+corporate_office,WORK,corporate office,citybehavex/category/unique_categories.csv,1342,1342,1,work_industry
+dairy_farm,WORK,dairy farm,citybehavex/category/unique_categories.csv,6,6,1,work_industry
+energy_company,WORK,energy company,citybehavex/category/unique_categories.csv,177,177,1,work_industry
+farm,LEISURE,farm,citybehavex/category/unique_categories.csv,297,297,1,work_industry
+ferry_boat_company,OTHER,ferry boat company,citybehavex/category/unique_categories.csv,4,4,1,work_industry
+fish_farm,WORK,fish farm,citybehavex/category/unique_categories.csv,2,2,1,work_industry
+flooring_contractors,PURCHASE,flooring contractors,citybehavex/category/unique_categories.csv,38,38,0,work_industry
+glass_manufacturer,WORK,glass manufacturer,citybehavex/category/unique_categories.csv,23,23,1,work_industry
+granite_supplier,PURCHASE,granite supplier,citybehavex/category/unique_categories.csv,13,13,1,work_industry
+ice_supplier,PURCHASE,ice supplier,citybehavex/category/unique_categories.csv,2,2,1,work_industry
+industrial_company,WORK,industrial company,citybehavex/category/unique_categories.csv,171,171,1,work_industry
+industrial_equipment,WORK,industrial equipment,citybehavex/category/unique_categories.csv,597,597,1,work_industry
+information_technology_company,WORK,information technology company,citybehavex/category/unique_categories.csv,653,653,1,work_industry
+laboratory_equipment_supplier,PURCHASE,laboratory equipment supplier,citybehavex/category/unique_categories.csv,4,4,1,work_industry
+local_and_state_government_offices,OTHER,local and state government offices,citybehavex/category/unique_categories.csv,2,2,1,work_industry
+logging_contractor,PURCHASE,logging contractor,citybehavex/category/unique_categories.csv,1,1,1,work_industry
+media_agency,WORK,media agency,citybehavex/category/unique_categories.csv,179,179,1,work_industry
+media_news_company,WORK,media news company,citybehavex/category/unique_categories.csv,236,236,1,work_industry
+metal_supplier,PURCHASE,metal supplier,citybehavex/category/unique_categories.csv,139,139,1,work_industry
+motorcycle_manufacturer,WORK,motorcycle manufacturer,citybehavex/category/unique_categories.csv,7,7,1,work_industry
+office_equipment,WORK,office equipment,citybehavex/category/unique_categories.csv,206,206,1,work_industry
+paving_contractor,PURCHASE,paving contractor,citybehavex/category/unique_categories.csv,5,5,1,work_industry
+plastic_company,WORK,plastic company,citybehavex/category/unique_categories.csv,4,4,1,work_industry
+plastic_fabrication_company,WORK,plastic fabrication company,citybehavex/category/unique_categories.csv,27,27,1,work_industry
+plastic_manufacturer,WORK,plastic manufacturer,citybehavex/category/unique_categories.csv,27,27,1,work_industry
+political_party_office,WORK,political party office,citybehavex/category/unique_categories.csv,69,69,1,work_industry
+post_office,OTHER,post office,citybehavex/category/unique_categories.csv,730,730,1,work_industry
+poultry_farm,WORK,poultry farm,citybehavex/category/unique_categories.csv,4,4,1,work_industry
+sightseeing_tour_agency,LEISURE,sightseeing tour agency,citybehavex/category/unique_categories.csv,65,65,1,work_industry
+social_media_agency,WORK,social media agency,citybehavex/category/unique_categories.csv,32,32,1,work_industry
+social_media_company,WORK,social media company,citybehavex/category/unique_categories.csv,6,6,1,work_industry
+talent_agency,WORK,talent agency,citybehavex/category/unique_categories.csv,2,2,1,work_industry
+telecommunications_company,WORK,telecommunications company,citybehavex/category/unique_categories.csv,454,454,1,work_industry
+travel_company,WORK,travel company,citybehavex/category/unique_categories.csv,77,77,1,work_industry
+urban_farm,WORK,urban farm,citybehavex/category/unique_categories.csv,32,32,1,work_industry
+vending_machine_supplier,PURCHASE,vending machine supplier,citybehavex/category/unique_categories.csv,26,26,1,work_industry
+warehouses,WORK,warehouses,citybehavex/category/unique_categories.csv,11,11,10,work_industry
+water_supplier,OTHER,water supplier,citybehavex/category/unique_categories.csv,18,18,1,work_industry
