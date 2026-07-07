@@ -324,6 +324,10 @@ def simulate_agents(
     act_temp: float = 0.5,
     activity_alignment_scores: np.ndarray | None = None,
     activity_cluster_labels: np.ndarray | None = None,
+    poi_semantic_scores: np.ndarray | None = None,
+    location_semantic_cluster_ids: np.ndarray | None = None,
+    poi_mask_starts: np.ndarray | None = None,
+    poi_mask_activities: np.ndarray | None = None,
     activity_history_weight: float = 1.0,
     materialize_travel: bool = True,
     road_edge_from: np.ndarray | None = None,
@@ -538,9 +542,11 @@ def simulate_agents(
                 dtype=np.float64,
             )
     activity_alignment_flat = None
+    poi_semantic_scores_flat = None
     n_activity_clusters = 0
     n_activity_blocks = 0
     n_activity_prev = 0
+    n_poi_semantic_clusters = 0
     activity_cluster_labels_arr = None
     if activity_alignment_scores is not None:
         activity_alignment_scores = np.asarray(activity_alignment_scores, dtype=np.float64)
@@ -555,6 +561,36 @@ def simulate_agents(
         activity_cluster_labels_arr = np.ascontiguousarray(activity_cluster_labels, dtype=np.int64)
         if len(activity_cluster_labels_arr) != n_agents:
             raise ValueError("activity_cluster_labels must have one label per agent")
+    if poi_semantic_scores is not None:
+        poi_semantic_scores = np.asarray(poi_semantic_scores, dtype=np.float64)
+        if poi_semantic_scores.ndim != 3:
+            raise ValueError("poi_semantic_scores must have shape [clusters, semantic_clusters, activities]")
+        if activity_cluster_labels is None:
+            raise ValueError("activity_cluster_labels is required when poi_semantic_scores is provided")
+        if activity_cluster_labels_arr is None:
+            activity_cluster_labels_arr = np.ascontiguousarray(activity_cluster_labels, dtype=np.int64)
+            if len(activity_cluster_labels_arr) != n_agents:
+                raise ValueError("activity_cluster_labels must have one label per agent")
+        if int(poi_semantic_scores.shape[0]) != n_activity_clusters and n_activity_clusters != 0:
+            raise ValueError("poi_semantic_scores cluster dimension must match activity_alignment_scores")
+        n_activity_clusters = int(poi_semantic_scores.shape[0])
+        n_poi_semantic_clusters = int(poi_semantic_scores.shape[1])
+        poi_semantic_scores_flat = np.ascontiguousarray(poi_semantic_scores.flatten(), dtype=np.float64)
+    location_semantic_cluster_ids_arr = (
+        np.ascontiguousarray(location_semantic_cluster_ids, dtype=np.int64)
+        if location_semantic_cluster_ids is not None
+        else None
+    )
+    poi_mask_starts_arr = (
+        np.ascontiguousarray(poi_mask_starts, dtype=np.int64)
+        if poi_mask_starts is not None
+        else None
+    )
+    poi_mask_activities_arr = (
+        np.ascontiguousarray(poi_mask_activities, dtype=np.int64)
+        if poi_mask_activities is not None
+        else None
+    )
 
     rust_on_day_flush = None
     if on_day_flush is not None:
@@ -640,6 +676,11 @@ def simulate_agents(
         int(n_activity_clusters),
         int(n_activity_blocks),
         int(n_activity_prev),
+        poi_semantic_scores_flat,
+        location_semantic_cluster_ids_arr,
+        poi_mask_starts_arr,
+        poi_mask_activities_arr,
+        int(n_poi_semantic_clusters),
         float(activity_history_weight),
         bool(materialize_travel),
         r_edge_from,

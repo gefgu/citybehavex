@@ -90,7 +90,11 @@ fn opt_i64_as_usize_vec(v: &Option<PyReadonlyArray1<'_, i64>>) -> PyResult<Optio
     profile_act_sims=None,
     activity_alignment_scores=None, activity_cluster_labels=None,
     activity_alignment_clusters=0usize, activity_alignment_blocks=0usize,
-    activity_alignment_previous=0usize, activity_history_weight=1.0f64,
+    activity_alignment_previous=0usize,
+    poi_semantic_scores=None, location_semantic_cluster_ids=None,
+    poi_mask_starts=None, poi_mask_activities=None,
+    poi_semantic_clusters=0usize,
+    activity_history_weight=1.0f64,
     materialize_travel=true,
     road_edge_from=None, road_edge_to=None, road_edge_weight_ds=None,
     road_node_lats=None, road_node_lngs=None, location_road_node=None,
@@ -150,6 +154,11 @@ pub fn simulation_core_simulate_agents<'py>(
     activity_alignment_clusters: usize,
     activity_alignment_blocks: usize,
     activity_alignment_previous: usize,
+    poi_semantic_scores: Option<PyReadonlyArray1<'py, f64>>,
+    location_semantic_cluster_ids: Option<PyReadonlyArray1<'py, i64>>,
+    poi_mask_starts: Option<PyReadonlyArray1<'py, i64>>,
+    poi_mask_activities: Option<PyReadonlyArray1<'py, i64>>,
+    poi_semantic_clusters: usize,
     activity_history_weight: f64,
     materialize_travel: bool,
     road_edge_from: Option<PyReadonlyArray1<'py, i64>>,
@@ -249,8 +258,13 @@ pub fn simulation_core_simulate_agents<'py>(
     let profile_embs_s = opt_slice(&profile_embs)?;
     let profile_act_sims_s = opt_slice(&profile_act_sims)?;
     let activity_alignment_scores_s = opt_slice(&activity_alignment_scores)?;
+    let poi_semantic_scores_s = opt_slice(&poi_semantic_scores)?;
     let activity_cluster_labels_v =
         opt_i64_as_usize_vec(&activity_cluster_labels)?.unwrap_or_default();
+    let location_semantic_cluster_ids_v =
+        opt_i64_as_usize_vec(&location_semantic_cluster_ids)?.unwrap_or_default();
+    let poi_mask_starts_v = opt_i64_as_usize_vec(&poi_mask_starts)?.unwrap_or_default();
+    let poi_mask_activities_v = opt_i64_as_usize_vec(&poi_mask_activities)?.unwrap_or_default();
 
     let purpose_act_starts_v = opt_i64_as_usize_vec(&purpose_act_starts)?.unwrap_or_default();
     let purpose_acts_v = opt_i64_as_usize_vec(&purpose_acts)?.unwrap_or_default();
@@ -449,6 +463,11 @@ pub fn simulation_core_simulate_agents<'py>(
                 n_clusters: activity_alignment_clusters,
                 n_blocks: activity_alignment_blocks,
                 n_previous: activity_alignment_previous,
+                poi_semantic_scores: poi_semantic_scores_s,
+                location_semantic_cluster_ids: &location_semantic_cluster_ids_v,
+                poi_mask_starts: &poi_mask_starts_v,
+                poi_mask_activities: &poi_mask_activities_v,
+                n_poi_semantic_clusters: poi_semantic_clusters,
                 history_weight: activity_history_weight,
                 emb_dim,
                 kappa: act_kappa,
@@ -554,9 +573,8 @@ pub fn build_co_presence_edges_py<'py>(
             "day_codes, location_codes and nodes must have the same length",
         ));
     }
-    let (edge_from, edge_to, persistence, skipped_groups, skipped_rows) = py.detach(|| {
-        build_co_presence_edges(day, location, node, max_group_size, time_steps)
-    });
+    let (edge_from, edge_to, persistence, skipped_groups, skipped_rows) =
+        py.detach(|| build_co_presence_edges(day, location, node, max_group_size, time_steps));
     Ok((
         edge_from.into_pyarray(py),
         edge_to.into_pyarray(py),
@@ -641,8 +659,7 @@ impl RoadNetworkHandle {
     ) -> PyResult<(Bound<'py, PyArray1<f64>>, Bound<'py, PyArray1<u8>>)> {
         let from_slice = from_nodes.as_slice()?;
         let to_slice = to_nodes.as_slice()?;
-        let (dist, conn) =
-            py.detach(|| batch_road_distances(&self.graph, from_slice, to_slice));
+        let (dist, conn) = py.detach(|| batch_road_distances(&self.graph, from_slice, to_slice));
         let conn_u8: Vec<u8> = conn.into_iter().map(|b| b as u8).collect();
         Ok((dist.into_pyarray(py), conn_u8.into_pyarray(py)))
     }

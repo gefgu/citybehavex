@@ -25,7 +25,10 @@ from citybehavex.activities import (
     build_eligibility_csr,
     cluster_profile_embeddings,
     expand_cluster_scores,
+    build_poi_semantic_activity_data,
     score_activity_alignment,
+    score_poi_semantic_alignment,
+    semantic_cluster_ids_for_categories,
 )
 from citybehavex.config import CityBehavExConfig
 from citybehavex.embedding import embed_profiles, embed_texts
@@ -990,6 +993,7 @@ def _configured_activity_duration_arrays(config: ActivitiesConfig) -> tuple[np.n
 
 def _build_activity_data(
     config: CityBehavExConfig,
+    tessellation_df: Optional[pd.DataFrame] = None,
     bank: Optional[DiaryBank] = None,
     profile_clusters: Optional[ProfileClusters] = None,
     output_path: Optional[str] = None,
@@ -1002,10 +1006,14 @@ def _build_activity_data(
     Optional[np.ndarray],
     Optional[np.ndarray],
     Optional[np.ndarray],
+    Optional[np.ndarray],
+    Optional[np.ndarray],
+    Optional[np.ndarray],
+    Optional[np.ndarray],
 ]:
     """Return activity arrays, plus optional contextual alignment tensor."""
     if not config.activities.enabled:
-        return None, None, None, None, None, None, None
+        return None, None, None, None, None, None, None, None, None, None, None
     act_dur_mu, act_dur_sigma = _configured_activity_duration_arrays(config.activities)
     purpose_act_starts, purpose_acts = build_eligibility_csr()
     act_embs = None
@@ -1018,11 +1026,25 @@ def _build_activity_data(
             typer.echo("Activity embeddings unavailable — using count-only CRP")
     activity_alignment_scores = None
     activity_cluster_labels = None
+    poi_semantic_scores = None
+    location_semantic_cluster_ids = None
+    poi_mask_starts = None
+    poi_mask_activities = None
+    poi_data = None
+    if tessellation_df is not None and "category" in tessellation_df.columns:
+        poi_data = build_poi_semantic_activity_data()
+        location_semantic_cluster_ids = semantic_cluster_ids_for_categories(
+            tessellation_df["category"],
+            poi_data,
+        )
+        poi_mask_starts = poi_data.mask_starts
+        poi_mask_activities = poi_data.mask_activities
     if (
         config.activities.alignment_backend == "rerank"
         and bank is not None
         and profile_clusters is not None
     ):
+        activity_cluster_labels = profile_clusters.labels
         aligned = score_activity_alignment(
             profile_clusters.narratives,
             bank.diaries,
@@ -1031,7 +1053,6 @@ def _build_activity_data(
         )
         if aligned is not None:
             activity_alignment_scores, _blocks, metadata = aligned
-            activity_cluster_labels = profile_clusters.labels
             typer.echo(f"Micro-activity alignment scores: {activity_alignment_scores.shape}")
             if output_path is not None:
                 alignment_path = output_path.replace(".parquet", "_activity_alignment.parquet")
@@ -1039,6 +1060,21 @@ def _build_activity_data(
                 typer.echo(f"Saved micro-activity alignment scores -> {alignment_path}")
         else:
             typer.echo("Micro-activity alignment scorer unavailable — falling back to activity embeddings")
+        if poi_data is not None:
+            poi_aligned = score_poi_semantic_alignment(
+                profile_clusters.narratives,
+                config.activities,
+                poi_data,
+            )
+            if poi_aligned is not None:
+                poi_semantic_scores, poi_metadata = poi_aligned
+                typer.echo(f"POI semantic activity alignment scores: {poi_semantic_scores.shape}")
+                if output_path is not None:
+                    poi_alignment_path = output_path.replace(".parquet", "_poi_activity_alignment.parquet")
+                    poi_metadata.to_parquet(poi_alignment_path, index=False)
+                    typer.echo(f"Saved POI semantic activity alignment scores -> {poi_alignment_path}")
+            else:
+                typer.echo("POI semantic activity scorer unavailable — falling back to activity embeddings/counts for OTHER")
     typer.echo(f"Activities enabled: {len(act_dur_mu)} activities, kappa={config.activities.kappa}, T={config.activities.temperature}")
     return (
         act_embs,
@@ -1048,6 +1084,10 @@ def _build_activity_data(
         purpose_acts,
         activity_alignment_scores,
         activity_cluster_labels,
+        poi_semantic_scores,
+        location_semantic_cluster_ids,
+        poi_mask_starts,
+        poi_mask_activities,
     )
 
 
@@ -1150,8 +1190,13 @@ def _run_simulation_core(
         purpose_acts,
         activity_alignment_scores,
         activity_cluster_labels,
+        poi_semantic_scores,
+        location_semantic_cluster_ids,
+        poi_mask_starts,
+        poi_mask_activities,
     ) = _build_activity_data(
         config,
+        tessellation_df=tessellation_df,
         bank=bank,
         profile_clusters=profile_clusters,
         output_path=output_path,
@@ -1304,6 +1349,10 @@ def _run_simulation_core(
         act_temp=config.activities.temperature,
         activity_alignment_scores=activity_alignment_scores,
         activity_cluster_labels=activity_cluster_labels,
+        poi_semantic_scores=poi_semantic_scores,
+        location_semantic_cluster_ids=location_semantic_cluster_ids,
+        poi_mask_starts=poi_mask_starts,
+        poi_mask_activities=poi_mask_activities,
         activity_history_weight=config.activities.history_weight,
         materialize_travel=config.activities.materialize_travel,
         return_social_graph=True,

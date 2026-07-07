@@ -843,6 +843,7 @@ fn start_activity_sample(
     activities: &mut ActivityOutputBuffers,
 ) {
     let current_stop_id = output.stop_id[output.last_output_idx[a]];
+    let current_location = output.loc_id[output.last_output_idx[a]] as usize;
     let seq = par_data[a].activity_seq;
     par_data[a].activity_seq += 1;
     let AgentParData {
@@ -855,6 +856,7 @@ fn start_activity_sample(
     } = par_data[a];
     let (act_idx, dur) = sample_activity_and_duration(
         a,
+        current_location,
         abstract_loc,
         block_id,
         *last_activity,

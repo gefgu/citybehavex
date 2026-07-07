@@ -8,6 +8,12 @@ import pytest
 from pydantic import ValidationError
 
 from citybehavex.activities import ProfileClusters, activity_duration_arrays, build_catalog, build_eligibility_csr
+from citybehavex.activities.poi_semantic import (
+    UNKNOWN_SEMANTIC_CLUSTER,
+    build_poi_semantic_activity_data,
+    load_poi_activity_mask,
+    semantic_cluster_for_category,
+)
 from citybehavex.config.root import CityBehavExConfig
 from citybehavex.simulation.runner import _build_activity_data, _probe_visited_activity_blocks
 
@@ -89,6 +95,17 @@ def test_unknown_activity_duration_override_is_rejected() -> None:
                 },
             }
         )
+
+
+def test_poi_semantic_mapping_and_mask_package_data() -> None:
+    data = build_poi_semantic_activity_data()
+    assert semantic_cluster_for_category("coffee_shop", data.category_to_cluster) == "food_drink"
+    assert semantic_cluster_for_category(float("nan"), data.category_to_cluster) == UNKNOWN_SEMANTIC_CLUSTER
+    assert data.cluster_to_id[UNKNOWN_SEMANTIC_CLUSTER] == 0
+
+    mask = load_poi_activity_mask()
+    assert not mask["travel"].any()
+    assert not mask["commute"].any()
 
 
 def test_build_activity_data_passes_visited_pairs_through(monkeypatch):

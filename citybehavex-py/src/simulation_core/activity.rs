@@ -41,6 +41,8 @@ fn eligible_activities_for_purpose<'a>(
 #[allow(clippy::too_many_arguments)]
 fn activity_weight(
     agent: usize,
+    location: usize,
+    abstract_loc: i32,
     block_id: i32,
     previous_activity: i32,
     act: usize,
@@ -57,7 +59,28 @@ fn activity_weight(
     } else {
         inputs.kappa
     };
-    let contextual_sim = if has_contextual && block_id >= 0 {
+    let poi_sim = if abstract_loc > 1 && has_contextual {
+        let cluster = inputs.cluster_labels[agent];
+        let semantic_cluster = inputs
+            .location_semantic_cluster_ids
+            .get(location)
+            .copied()
+            .unwrap_or(0);
+        let idx = ((cluster * inputs.n_poi_semantic_clusters + semantic_cluster) * n_acts) + act;
+        if cluster < inputs.n_clusters
+            && semantic_cluster < inputs.n_poi_semantic_clusters
+            && idx < inputs.poi_semantic_scores.len()
+        {
+            Some(inputs.poi_semantic_scores[idx].clamp(0.0, 1.0))
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+    let contextual_sim = if poi_sim.is_some() {
+        poi_sim
+    } else if has_contextual && abstract_loc <= 1 && block_id >= 0 {
         let cluster = inputs.cluster_labels[agent];
         let block = block_id as usize;
         let previous_idx = if previous_activity >= 0 {
@@ -101,6 +124,25 @@ fn activity_weight(
     }
 }
 
+fn poi_activities_for_location<'a>(
+    location: usize,
+    inputs: &ActivityInputs<'a>,
+) -> Option<&'a [usize]> {
+    if inputs.location_semantic_cluster_ids.len() <= location || inputs.poi_mask_starts.len() < 2 {
+        return None;
+    }
+    let semantic_cluster = inputs.location_semantic_cluster_ids[location];
+    if semantic_cluster + 1 >= inputs.poi_mask_starts.len() {
+        return None;
+    }
+    let start = inputs.poi_mask_starts[semantic_cluster];
+    let end = inputs.poi_mask_starts[semantic_cluster + 1];
+    if start >= end || end > inputs.poi_mask_activities.len() {
+        return None;
+    }
+    Some(&inputs.poi_mask_activities[start..end])
+}
+
 /// Log-normal activity duration in seconds, floored at one minute.
 fn sample_duration(chosen: usize, inputs: &ActivityInputs<'_>, rng: &mut impl Rng) -> i64 {
     let mu = if chosen < inputs.act_dur_mu.len() {
@@ -120,6 +162,7 @@ fn sample_duration(chosen: usize, inputs: &ActivityInputs<'_>, rng: &mut impl Rn
 
 pub(crate) fn sample_activity_and_duration(
     agent: usize,
+    location: usize,
     abstract_loc: i32,
     block_id: i32,
     previous_activity: i32,
@@ -144,8 +187,21 @@ pub(crate) fn sample_activity_and_duration(
         && inputs.cluster_labels[agent] < inputs.n_clusters
         && inputs.contextual_scores.len()
             >= inputs.n_clusters * inputs.n_blocks * inputs.n_previous * n_acts;
+    let has_poi_contextual = !inputs.poi_semantic_scores.is_empty()
+        && !inputs.cluster_labels.is_empty()
+        && inputs.cluster_labels.len() > agent
+        && inputs.n_clusters > 0
+        && inputs.n_poi_semantic_clusters > 0
+        && inputs.cluster_labels[agent] < inputs.n_clusters
+        && inputs.poi_semantic_scores.len()
+            >= inputs.n_clusters * inputs.n_poi_semantic_clusters * n_acts;
+    let has_context_for_current = if abstract_loc > 1 {
+        has_poi_contextual
+    } else {
+        has_contextual
+    };
     let has_embs = !has_precomputed
-        && !has_contextual
+        && !has_context_for_current
         && inputs.emb_dim > 0
         && !inputs.act_embs.is_empty()
         && !inputs.profile_embs.is_empty()
@@ -156,12 +212,37 @@ pub(crate) fn sample_activity_and_duration(
         &[]
     };
 
-    scratch.act_cdf.clear();
-    let mut cumsum = 0.0_f64;
-    for &a in eligible {
+    scratch.candidates.clear();
+    let source_activities = if abstract_loc > 1 {
+        poi_activities_for_location(location, inputs).unwrap_or(eligible)
+    } else {
+        eligible
+    };
+    for &a in source_activities {
+        if a >= n_acts {
+            continue;
+        }
         if inputs.materialize_travel && (a == COMMUTE_ACTIVITY_IDX || a == TRAVEL_ACTIVITY_IDX) {
             continue;
         }
+        scratch.candidates.push(a);
+    }
+    if scratch.candidates.is_empty() {
+        for &a in eligible {
+            if a >= n_acts {
+                continue;
+            }
+            if inputs.materialize_travel && (a == COMMUTE_ACTIVITY_IDX || a == TRAVEL_ACTIVITY_IDX)
+            {
+                continue;
+            }
+            scratch.candidates.push(a);
+        }
+    }
+
+    scratch.act_cdf.clear();
+    let mut cumsum = 0.0_f64;
+    for &a in &scratch.candidates {
         let count = if a < activity_counts.len() {
             activity_counts[a]
         } else {
@@ -169,13 +250,15 @@ pub(crate) fn sample_activity_and_duration(
         };
         let w = activity_weight(
             agent,
+            location,
+            abstract_loc,
             block_id,
             previous_activity,
             a,
             count,
             n_acts,
             has_precomputed,
-            has_contextual,
+            has_contextual || has_poi_contextual,
             has_embs,
             prof_slice,
             inputs,
@@ -184,27 +267,16 @@ pub(crate) fn sample_activity_and_duration(
         scratch.act_cdf.push(cumsum);
     }
     if scratch.act_cdf.is_empty() || cumsum <= 0.0 {
-        return (
-            eligible[0] as i64,
-            sample_duration(eligible[0], inputs, rng),
-        );
+        let fallback = scratch.candidates.first().copied().unwrap_or(eligible[0]);
+        return (fallback as i64, sample_duration(fallback, inputs, rng));
     }
 
     let threshold = rng.gen_range(0.0..1.0) * cumsum;
     let idx = scratch
         .act_cdf
         .partition_point(|&v| v <= threshold)
-        .min(eligible.len() - 1);
-    let chosen = if inputs.materialize_travel {
-        eligible
-            .iter()
-            .copied()
-            .filter(|&a| a != COMMUTE_ACTIVITY_IDX && a != TRAVEL_ACTIVITY_IDX)
-            .nth(idx)
-            .unwrap_or(eligible[0])
-    } else {
-        eligible[idx]
-    };
+        .min(scratch.candidates.len() - 1);
+    let chosen = scratch.candidates[idx];
 
     if chosen >= activity_counts.len() {
         activity_counts.resize(chosen + 1, 0);
