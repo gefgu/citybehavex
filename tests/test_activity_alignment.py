@@ -12,6 +12,10 @@ from citybehavex.activities.alignment import (
     expand_cluster_scores,
     score_activity_alignment,
     score_poi_semantic_alignment,
+    score_poi_type_alignment,
+    _cache_key,
+    _poi_cache_key,
+    _poi_type_cache_key,
 )
 from citybehavex.activities.poi_semantic import build_poi_semantic_activity_data
 from citybehavex.activities.config import ActivitiesConfig
@@ -176,6 +180,68 @@ def test_poi_semantic_alignment_scores_only_masked_activities(monkeypatch):
     assert not np.any(scores[0, food_id, [0, 3, 16, 17]])
     all_texts = [text for call in calls for _query, text in call["pairs"]]
     assert not any(text.startswith("travel:") or text.startswith("commute:") for text in all_texts)
+
+
+def test_poi_type_alignment_scores_only_other_blocks(monkeypatch):
+    calls = []
+
+    class Response:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return [{"index": i, "score": 0.5} for i in range(len(calls[-1]["pairs"]))]
+
+    def fake_post(url, headers, json, timeout):
+        calls.append(json)
+        return Response()
+
+    monkeypatch.setattr("citybehavex.activities.alignment.requests.post", fake_post)
+
+    poi_data = build_poi_semantic_activity_data()
+    food_id = poi_data.cluster_to_id["food_drink"]
+    education_id = poi_data.cluster_to_id["education"]
+    result = score_poi_type_alignment(
+        ["profile cluster"],
+        [_diary_with_other()],
+        ActivitiesConfig(
+            enabled=True,
+            alignment_backend="rerank",
+            alignment_base_url="http://tei.local",
+            alignment_model="activity-aligner",
+            alignment_batch_size=100,
+            poi_type_choice_enabled=True,
+        ),
+        poi_data,
+        available_cluster_ids=[food_id, education_id],
+    )
+
+    assert result is not None
+    scores, blocks, metadata = result
+    assert scores.shape == (1, 3, len(poi_data.semantic_clusters))
+    other_block = next(block for block in blocks if block.purpose == "OTHER")
+    home_block = next(block for block in blocks if block.purpose == "HOME")
+    assert np.any(scores[0, other_block.block_id, [food_id, education_id]])
+    assert not np.any(scores[0, home_block.block_id])
+    assert set(metadata["purpose"]) == {"OTHER"}
+    assert set(metadata["semantic_cluster"]) == {"food_drink", "education"}
+    all_queries = " ".join(pair[0] for call in calls for pair in call["pairs"])
+    assert "OTHER from 08:00 to 17:00" in all_queries
+    assert "HOME" not in all_queries
+
+
+def test_alignment_cache_keys_distinguish_score_products():
+    diary = _diary_with_other()
+    block = score_activity_alignment.__globals__["diary_activity_blocks"]([diary])[1]
+    catalog = score_activity_alignment.__globals__["build_catalog"]()
+    activity_text = "eatdrink: Eating and drinking"
+
+    keys = {
+        _cache_key("model", "profile", block, -1, activity_text),
+        _poi_cache_key("model", "profile", "food_drink", activity_text),
+        _poi_type_cache_key("model", "profile", block, "food_drink"),
+    }
+    assert len(keys) == 3
 
 
 def test_activity_alignment_visited_pairs_prunes_unreachable_cluster_block_combos(monkeypatch):

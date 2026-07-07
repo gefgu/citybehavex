@@ -33,6 +33,9 @@ class ActivitiesConfig(BaseModel):
     profile_cluster_similarity_threshold: float = Field(default=0.94, ge=-1.0, le=1.0)
     history_weight: float = Field(default=1.0, ge=0.0)
     materialize_travel: bool = True
+    poi_type_choice_enabled: bool = False
+    poi_type_choice_temperature: float = Field(default=0.5, gt=0)
+    poi_type_choice_alpha: float = Field(default=1.0, ge=0.0)
     # When true, run a cheap disposable simulation pass first (no contextual
     # alignment, no road/rail routing) to discover which (cluster, block)
     # pairs are actually reachable, and only score those through the

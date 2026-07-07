@@ -328,6 +328,10 @@ def simulate_agents(
     location_semantic_cluster_ids: np.ndarray | None = None,
     poi_mask_starts: np.ndarray | None = None,
     poi_mask_activities: np.ndarray | None = None,
+    poi_type_choice_enabled: bool = False,
+    poi_type_alignment_scores: np.ndarray | None = None,
+    poi_type_choice_temperature: float = 0.5,
+    poi_type_choice_alpha: float = 1.0,
     activity_history_weight: float = 1.0,
     materialize_travel: bool = True,
     road_edge_from: np.ndarray | None = None,
@@ -543,10 +547,13 @@ def simulate_agents(
             )
     activity_alignment_flat = None
     poi_semantic_scores_flat = None
+    poi_type_alignment_flat = None
     n_activity_clusters = 0
     n_activity_blocks = 0
     n_activity_prev = 0
     n_poi_semantic_clusters = 0
+    n_poi_type_blocks = 0
+    n_poi_type_clusters = 0
     activity_cluster_labels_arr = None
     if activity_alignment_scores is not None:
         activity_alignment_scores = np.asarray(activity_alignment_scores, dtype=np.float64)
@@ -576,6 +583,22 @@ def simulate_agents(
         n_activity_clusters = int(poi_semantic_scores.shape[0])
         n_poi_semantic_clusters = int(poi_semantic_scores.shape[1])
         poi_semantic_scores_flat = np.ascontiguousarray(poi_semantic_scores.flatten(), dtype=np.float64)
+    if poi_type_alignment_scores is not None:
+        poi_type_alignment_scores = np.asarray(poi_type_alignment_scores, dtype=np.float64)
+        if poi_type_alignment_scores.ndim != 3:
+            raise ValueError("poi_type_alignment_scores must have shape [clusters, blocks, semantic_clusters]")
+        if activity_cluster_labels is None:
+            raise ValueError("activity_cluster_labels is required when poi_type_alignment_scores is provided")
+        if activity_cluster_labels_arr is None:
+            activity_cluster_labels_arr = np.ascontiguousarray(activity_cluster_labels, dtype=np.int64)
+            if len(activity_cluster_labels_arr) != n_agents:
+                raise ValueError("activity_cluster_labels must have one label per agent")
+        if int(poi_type_alignment_scores.shape[0]) != n_activity_clusters and n_activity_clusters != 0:
+            raise ValueError("poi_type_alignment_scores cluster dimension must match other alignment tensors")
+        n_activity_clusters = int(poi_type_alignment_scores.shape[0])
+        n_poi_type_blocks = int(poi_type_alignment_scores.shape[1])
+        n_poi_type_clusters = int(poi_type_alignment_scores.shape[2])
+        poi_type_alignment_flat = np.ascontiguousarray(poi_type_alignment_scores.flatten(), dtype=np.float64)
     location_semantic_cluster_ids_arr = (
         np.ascontiguousarray(location_semantic_cluster_ids, dtype=np.int64)
         if location_semantic_cluster_ids is not None
@@ -591,6 +614,15 @@ def simulate_agents(
         if poi_mask_activities is not None
         else None
     )
+    if poi_type_choice_enabled:
+        if poi_type_alignment_flat is None:
+            raise ValueError("poi_type_alignment_scores is required when poi_type_choice_enabled=True")
+        if location_semantic_cluster_ids_arr is None:
+            raise ValueError("location_semantic_cluster_ids is required when poi_type_choice_enabled=True")
+        if len(location_semantic_cluster_ids_arr) != len(tessellation_df):
+            raise ValueError("location_semantic_cluster_ids must have one value per tessellation row")
+        if n_poi_type_clusters <= 0:
+            raise ValueError("poi_type_alignment_scores must include at least one semantic cluster")
 
     rust_on_day_flush = None
     if on_day_flush is not None:
@@ -681,6 +713,12 @@ def simulate_agents(
         poi_mask_starts_arr,
         poi_mask_activities_arr,
         int(n_poi_semantic_clusters),
+        bool(poi_type_choice_enabled),
+        poi_type_alignment_flat,
+        int(n_poi_type_blocks),
+        int(n_poi_type_clusters),
+        float(poi_type_choice_temperature),
+        float(poi_type_choice_alpha),
         float(activity_history_weight),
         bool(materialize_travel),
         r_edge_from,

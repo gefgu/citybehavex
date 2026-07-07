@@ -14,7 +14,11 @@ import requests
 
 from citybehavex.activities.catalog import N_PURPOSES, Activity, build_catalog
 from citybehavex.activities.config import ActivitiesConfig
-from citybehavex.activities.poi_semantic import PoiSemanticActivityData, build_poi_semantic_activity_data
+from citybehavex.activities.poi_semantic import (
+    PoiSemanticActivityData,
+    build_poi_semantic_activity_data,
+    example_categories_by_semantic_cluster,
+)
 from citybehavex.llm_diaries import Diary
 
 START_PREVIOUS_ACTIVITY = -1
@@ -203,6 +207,34 @@ def _poi_cache_key(
     activity_text: str,
 ) -> str:
     raw = f"{model or ''}\x00{profile_text}\x00POI\x00{semantic_cluster}\x00{activity_text}"
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+def _poi_type_query_text(profile_text: str, block: ActivityBlock) -> str:
+    return (
+        f"{profile_text}\n"
+        f"Schedule block: diary {block.diary_id}, block {block.episode_index}, "
+        f"{block.purpose} from {block.start} to {block.end}.\n"
+        "Score which kind of public place best fits this person and schedule block."
+    )
+
+
+def _poi_type_candidate_text(semantic_cluster: str, example_categories: Sequence[str]) -> str:
+    examples = ", ".join(example_categories[:12]) if example_categories else "unknown POI types"
+    return f"{semantic_cluster}: public place type with example Overture categories {examples}"
+
+
+def _poi_type_cache_key(
+    model: str | None,
+    profile_text: str,
+    block: ActivityBlock,
+    semantic_cluster: str,
+) -> str:
+    raw = (
+        f"{model or ''}\x00{profile_text}\x00POI_TYPE\x00{block.diary_id}\x00"
+        f"{block.episode_index}\x00{block.purpose}\x00{block.start}\x00"
+        f"{block.end}\x00{semantic_cluster}"
+    )
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
@@ -702,3 +734,172 @@ def score_poi_semantic_alignment(
     if cache_path is not None:
         _save_cache(cache_path, cache)
     return np.clip(scores, 0.0, 1.0), pd.DataFrame(rows)
+
+
+def score_poi_type_alignment(
+    cluster_narratives: Sequence[str],
+    diaries: Sequence[Diary],
+    config: ActivitiesConfig,
+    poi_data: PoiSemanticActivityData | None = None,
+    available_cluster_ids: Sequence[int] | None = None,
+) -> Optional[tuple[np.ndarray, list[ActivityBlock], pd.DataFrame]]:
+    """Return OTHER-block POI type alignment scores or ``None`` on failure.
+
+    Shape is ``[n_profile_clusters, n_blocks, n_semantic_clusters]``. Only
+    OTHER schedule blocks and semantic clusters present in the tessellation
+    are sent to the reranker; all other slots remain zero.
+    """
+    if (
+        not cluster_narratives
+        or not diaries
+        or not config.poi_type_choice_enabled
+        or config.alignment_backend != "rerank"
+        or not config.alignment_base_url
+    ):
+        return None
+
+    poi_data = poi_data or build_poi_semantic_activity_data()
+    blocks = diary_activity_blocks(diaries)
+    n_clusters = len(poi_data.semantic_clusters)
+    scores = np.zeros((len(cluster_narratives), len(blocks), n_clusters), dtype=np.float64)
+    rows: list[dict[str, object]] = []
+    examples = example_categories_by_semantic_cluster(poi_data)
+
+    if available_cluster_ids is None:
+        cluster_ids = list(range(n_clusters))
+    else:
+        cluster_ids = sorted({
+            int(cluster_id)
+            for cluster_id in available_cluster_ids
+            if 0 <= int(cluster_id) < n_clusters
+        })
+    if not cluster_ids:
+        return None
+
+    cache: dict[str, float] = {}
+    cache_path = Path(config.alignment_cache_path) if config.alignment_cache_path else None
+    if cache_path is not None:
+        cache = _load_cache(cache_path)
+
+    try:
+        pending: list[tuple[str, str, str]] = []
+        pending_seen: set[str] = set()
+        for profile_text in cluster_narratives:
+            for block in blocks:
+                if block.purpose != "OTHER":
+                    continue
+                query = _poi_type_query_text(profile_text, block)
+                for semantic_cluster_id in cluster_ids:
+                    semantic_cluster = poi_data.semantic_clusters[semantic_cluster_id]
+                    text = _poi_type_candidate_text(
+                        semantic_cluster,
+                        examples.get(semantic_cluster, []),
+                    )
+                    key = _poi_type_cache_key(
+                        config.alignment_model,
+                        profile_text,
+                        block,
+                        semantic_cluster,
+                    )
+                    if key in cache or key in pending_seen:
+                        continue
+                    pending_seen.add(key)
+                    pending.append((key, query, text))
+
+        chunks = [
+            pending[start : start + config.alignment_batch_size]
+            for start in range(0, len(pending), config.alignment_batch_size)
+        ]
+        total_chunks = len(chunks)
+        total_pairs = len(pending)
+        start_time = time.perf_counter()
+        checkpoint_every = config.alignment_checkpoint_every
+
+        def _apply_chunk_scores(chunk: list[tuple[str, str, str]], chunk_scores: list[float]) -> None:
+            for (key, _query, _text), score in zip(chunk, chunk_scores):
+                cache[key] = float(np.clip(score, 0.0, 1.0))
+
+        def _report_progress(done_chunks: int, done_pairs: int) -> None:
+            if checkpoint_every <= 0 or done_chunks % checkpoint_every != 0:
+                return
+            elapsed = time.perf_counter() - start_time
+            rate = done_pairs / elapsed if elapsed > 0 else 0.0
+            remaining_pairs = total_pairs - done_pairs
+            eta = remaining_pairs / rate if rate > 0 else float("nan")
+            print(
+                f"POI type alignment: {done_chunks}/{total_chunks} batches, "
+                f"{done_pairs}/{total_pairs} pairs, {rate:.0f} pairs/sec, "
+                f"{elapsed:.1f}s elapsed, ETA {_format_duration(eta)}",
+                flush=True,
+            )
+            if cache_path is not None:
+                _save_cache(cache_path, cache)
+
+        if config.alignment_concurrency <= 1:
+            done_pairs = 0
+            for done_chunks, chunk in enumerate(chunks, start=1):
+                chunk_scores = _score_chunk_with_retries(
+                    config.alignment_base_url,
+                    config.alignment_model,
+                    [(query, text) for _key, query, text in chunk],
+                    timeout=config.alignment_timeout_seconds,
+                    retries=config.alignment_retries,
+                )
+                _apply_chunk_scores(chunk, chunk_scores)
+                done_pairs += len(chunk)
+                _report_progress(done_chunks, done_pairs)
+        else:
+            done_pairs = 0
+            with ThreadPoolExecutor(max_workers=config.alignment_concurrency) as executor:
+                futures = {
+                    executor.submit(
+                        _score_chunk_with_retries,
+                        config.alignment_base_url,
+                        config.alignment_model,
+                        [(query, text) for _key, query, text in chunk],
+                        timeout=config.alignment_timeout_seconds,
+                        retries=config.alignment_retries,
+                    ): chunk
+                    for chunk in chunks
+                }
+                for done_chunks, future in enumerate(as_completed(futures), start=1):
+                    chunk = futures[future]
+                    chunk_scores = future.result()
+                    _apply_chunk_scores(chunk, chunk_scores)
+                    done_pairs += len(chunk)
+                    _report_progress(done_chunks, done_pairs)
+
+        for cluster_id, profile_text in enumerate(cluster_narratives):
+            for block in blocks:
+                if block.purpose != "OTHER":
+                    continue
+                for semantic_cluster_id in cluster_ids:
+                    semantic_cluster = poi_data.semantic_clusters[semantic_cluster_id]
+                    key = _poi_type_cache_key(
+                        config.alignment_model,
+                        profile_text,
+                        block,
+                        semantic_cluster,
+                    )
+                    score = float(cache[key])
+                    scores[cluster_id, block.block_id, semantic_cluster_id] = score
+                    rows.append(
+                        {
+                            "cluster": cluster_id,
+                            "diary_id": block.diary_id,
+                            "block_index": block.episode_index,
+                            "block_id": block.block_id,
+                            "purpose": block.purpose,
+                            "start": block.start,
+                            "end": block.end,
+                            "semantic_cluster": semantic_cluster,
+                            "semantic_cluster_id": semantic_cluster_id,
+                            "score": score,
+                        }
+                    )
+    except Exception:  # noqa: BLE001 - callers intentionally fall back.
+        return None
+
+    if cache_path is not None:
+        _save_cache(cache_path, cache)
+    return np.clip(scores, 0.0, 1.0), blocks, pd.DataFrame(rows)

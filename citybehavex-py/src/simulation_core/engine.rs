@@ -319,6 +319,7 @@ fn route_mode_leg(
 fn push_stop_record(
     ctx: &TripAppendContext,
     dur_s: i64,
+    locations: &LocationInputs<'_>,
     output: &mut TripOutputBuffers,
     agents: &mut [AgentState],
     next_stop_id: &mut u32,
@@ -329,6 +330,11 @@ fn push_stop_record(
     output.departure[prev_idx] = departure as i32;
 
     agents[ctx.agent_idx].visit(ctx.next_loc);
+    if ctx.abstract_loc > WORK_CODE
+        && let Some(&semantic_cluster) = locations.semantic_cluster_ids.get(ctx.next_loc)
+    {
+        agents[ctx.agent_idx].visit_poi_type(semantic_cluster);
+    }
     agents[ctx.agent_idx].current_location = ctx.next_loc;
 
     let stop_id = *next_stop_id;
@@ -391,10 +397,12 @@ fn append_trip_record(
     wp_cum_ds: &[i64],
     output: &mut TripOutputBuffers,
     agents: &mut [AgentState],
+    locations: &LocationInputs<'_>,
     paths: &mut RoadPathOutputBuffers,
     next_stop_id: &mut u32,
 ) -> (i64, i64, u32) {
-    let (departure, arrival, stop_id) = push_stop_record(&ctx, dur_s, output, agents, next_stop_id);
+    let (departure, arrival, stop_id) =
+        push_stop_record(&ctx, dur_s, locations, output, agents, next_stop_id);
     push_path_waypoints(
         &ctx, stop_id, departure, dur_s, wp_lats, wp_lngs, wp_cum_ds, paths,
     );
@@ -423,6 +431,32 @@ fn validate_locations(locations: &LocationInputs<'_>) -> Result<usize, String> {
             n_locations * n_locations,
             locations.distances.len()
         ));
+    }
+    if locations.poi_type_choice_enabled {
+        if locations.semantic_cluster_ids.len() != n_locations {
+            return Err(format!(
+                "location_semantic_cluster_ids must have length n_locations={}, got {}",
+                n_locations,
+                locations.semantic_cluster_ids.len()
+            ));
+        }
+        if locations.poi_type_n_blocks == 0 || locations.poi_type_n_clusters == 0 {
+            return Err("POI type alignment dimensions must be positive when enabled".to_string());
+        }
+        let expected = locations.poi_type_n_blocks * locations.poi_type_n_clusters;
+        if locations.poi_type_scores.len() % expected != 0 {
+            return Err(format!(
+                "poi_type_alignment_scores length must be a multiple of blocks*clusters={}, got {}",
+                expected,
+                locations.poi_type_scores.len()
+            ));
+        }
+        if !(locations.poi_type_temperature.is_finite() && locations.poi_type_temperature > 0.0) {
+            return Err("poi_type_choice_temperature must be positive".to_string());
+        }
+        if !(locations.poi_type_alpha.is_finite() && locations.poi_type_alpha >= 0.0) {
+            return Err("poi_type_choice_alpha must be non-negative".to_string());
+        }
     }
     Ok(n_locations)
 }
@@ -776,8 +810,10 @@ fn resolve_agent_moves(
                         n_locations,
                         current_ts: ts,
                         locations: &inputs.locations,
+                        activities: &inputs.activities,
                         od_rows,
                         diary_abs_locs: inputs.diary.abstract_locations,
+                        diary_block_ids: inputs.diary.block_ids,
                         scratch: &mut data.scratch,
                         encounters: &mut data.encounters,
                     }),
@@ -1051,6 +1087,7 @@ fn commit_one_move(
             &wp_cum_ds,
             output,
             agents,
+            &inputs.locations,
             paths,
             next_stop_id,
         );

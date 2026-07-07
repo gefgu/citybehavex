@@ -898,6 +898,53 @@ def test_other_poi_uses_semantic_cluster_mask_and_scores():
     assert set(other_block) == {compint}
 
 
+def test_other_location_choice_filters_to_aligned_poi_type():
+    poi_data = build_poi_semantic_activity_data()
+    food_id = poi_data.cluster_to_id["food_drink"]
+    education_id = poi_data.cluster_to_id["education"]
+    tess = pd.DataFrame({
+        "tile_id": [0, 1, 2],
+        "lat": [48.8566, 48.8580, 48.8600],
+        "lng": [2.3522, 2.3540, 2.3560],
+        "relevance": [1.0, 1.0, 1.0],
+    })
+    diary_arrays = (
+        np.array([0, 3600], dtype=np.int64),
+        np.array([0, 2], dtype=np.int32),
+        np.array([0], dtype=np.int64),
+        np.array([2], dtype=np.int64),
+        np.array([0, 1], dtype=np.int32),
+    )
+    poi_type_scores = np.zeros((1, 2, len(poi_data.semantic_clusters)), dtype=np.float64)
+    poi_type_scores[0, 1, food_id] = 1.0
+
+    df, _encounters, _moving, _activities = simulate_agents(
+        tess,
+        "relevance",
+        diary_arrays,
+        start_ts=0,
+        end_ts=7200,
+        slot_seconds=_SLOT,
+        car_speed_kmh=_SPEED,
+        n_agents=1,
+        random_state=42,
+        rho=1.0,
+        alpha=0.0,
+        starting_locs=np.array([0], dtype=np.int64),
+        work_tiles=np.array([0], dtype=np.int64),
+        activity_cluster_labels=np.array([0], dtype=np.int64),
+        location_semantic_cluster_ids=np.array([0, food_id, education_id], dtype=np.int64),
+        poi_type_choice_enabled=True,
+        poi_type_alignment_scores=poi_type_scores,
+        poi_type_choice_temperature=0.01,
+    )
+
+    other_stops = df[df["purpose"] == "OTHER"]
+    assert not other_stops.empty
+    assert set(other_stops["lat"]) == {tess.loc[1, "lat"]}
+    assert set(other_stops["lng"]) == {tess.loc[1, "lng"]}
+
+
 def test_block_id_refreshes_across_same_abstract_location_boundary():
     """Regression test for a bug where the block id driving contextual
     alignment lookups only refreshed on an abstract-location change, so two

@@ -120,6 +120,9 @@ activities:
   alignment_concurrency: 4
   alignment_retries: 2
   alignment_checkpoint_every: 20
+  poi_type_choice_enabled: true
+  poi_type_choice_temperature: 0.5
+  poi_type_choice_alpha: 1.0
   prune_to_reachable: true
   durations:
     sleep:

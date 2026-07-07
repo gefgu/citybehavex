@@ -26,8 +26,10 @@ from citybehavex.activities import (
     cluster_profile_embeddings,
     expand_cluster_scores,
     build_poi_semantic_activity_data,
+    available_semantic_cluster_ids,
     score_activity_alignment,
     score_poi_semantic_alignment,
+    score_poi_type_alignment,
     semantic_cluster_ids_for_categories,
 )
 from citybehavex.config import CityBehavExConfig
@@ -1010,10 +1012,11 @@ def _build_activity_data(
     Optional[np.ndarray],
     Optional[np.ndarray],
     Optional[np.ndarray],
+    Optional[np.ndarray],
 ]:
     """Return activity arrays, plus optional contextual alignment tensor."""
     if not config.activities.enabled:
-        return None, None, None, None, None, None, None, None, None, None, None
+        return None, None, None, None, None, None, None, None, None, None, None, None
     act_dur_mu, act_dur_sigma = _configured_activity_duration_arrays(config.activities)
     purpose_act_starts, purpose_acts = build_eligibility_csr()
     act_embs = None
@@ -1030,6 +1033,7 @@ def _build_activity_data(
     location_semantic_cluster_ids = None
     poi_mask_starts = None
     poi_mask_activities = None
+    poi_type_alignment_scores = None
     poi_data = None
     if tessellation_df is not None and "category" in tessellation_df.columns:
         poi_data = build_poi_semantic_activity_data()
@@ -1075,6 +1079,23 @@ def _build_activity_data(
                     typer.echo(f"Saved POI semantic activity alignment scores -> {poi_alignment_path}")
             else:
                 typer.echo("POI semantic activity scorer unavailable — falling back to activity embeddings/counts for OTHER")
+            if config.activities.poi_type_choice_enabled and location_semantic_cluster_ids is not None:
+                poi_type_aligned = score_poi_type_alignment(
+                    profile_clusters.narratives,
+                    bank.diaries,
+                    config.activities,
+                    poi_data,
+                    available_cluster_ids=available_semantic_cluster_ids(location_semantic_cluster_ids),
+                )
+                if poi_type_aligned is not None:
+                    poi_type_alignment_scores, _blocks, poi_type_metadata = poi_type_aligned
+                    typer.echo(f"POI type alignment scores: {poi_type_alignment_scores.shape}")
+                    if output_path is not None:
+                        poi_type_alignment_path = output_path.replace(".parquet", "_poi_type_alignment.parquet")
+                        poi_type_metadata.to_parquet(poi_type_alignment_path, index=False)
+                        typer.echo(f"Saved POI type alignment scores -> {poi_type_alignment_path}")
+                else:
+                    typer.echo("POI type scorer unavailable — using legacy unrestricted OTHER location choice")
     typer.echo(f"Activities enabled: {len(act_dur_mu)} activities, kappa={config.activities.kappa}, T={config.activities.temperature}")
     return (
         act_embs,
@@ -1088,6 +1109,7 @@ def _build_activity_data(
         location_semantic_cluster_ids,
         poi_mask_starts,
         poi_mask_activities,
+        poi_type_alignment_scores,
     )
 
 
@@ -1194,6 +1216,7 @@ def _run_simulation_core(
         location_semantic_cluster_ids,
         poi_mask_starts,
         poi_mask_activities,
+        poi_type_alignment_scores,
     ) = _build_activity_data(
         config,
         tessellation_df=tessellation_df,
@@ -1353,6 +1376,10 @@ def _run_simulation_core(
         location_semantic_cluster_ids=location_semantic_cluster_ids,
         poi_mask_starts=poi_mask_starts,
         poi_mask_activities=poi_mask_activities,
+        poi_type_choice_enabled=config.activities.poi_type_choice_enabled and poi_type_alignment_scores is not None,
+        poi_type_alignment_scores=poi_type_alignment_scores,
+        poi_type_choice_temperature=config.activities.poi_type_choice_temperature,
+        poi_type_choice_alpha=config.activities.poi_type_choice_alpha,
         activity_history_weight=config.activities.history_weight,
         materialize_travel=config.activities.materialize_travel,
         return_social_graph=True,
