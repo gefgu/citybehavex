@@ -93,6 +93,56 @@ schedule:
   alignment_model: models/modernbert-schedule-aligner
 ```
 
+### Fine-tuning the ModernBERT vehicle ownership aligner
+
+To replace fixed car/bike ownership probabilities with profile-conditioned
+probabilities, first generate or load agent profiles, then label
+transport-neutral profile/vehicle pairs with the LLM and fine-tune one shared
+car+bike scorer:
+
+```bash
+uv run --extra finetuning python scripts/train_modernbert_vehicle_ownership_aligner.py \
+  --profiles-path data/gparis/results/gparis_agent_profiles.parquet \
+  --city-profile "Greater Paris metropolitan region, urban mobility with commuting, errands, leisure, healthcare, studies, and home routines." \
+  --llm-base-url http://localhost:8081 \
+  --llm-model Qwen/Qwen2.5-32B-Instruct-AWQ \
+  --dataset-output data/llm_diaries_gparis/vehicle_ownership_alignment_scores.parquet \
+  --output-model-path models/modernbert-vehicle-ownership-aligner \
+  --sample-size 2000 \
+  --llm-concurrency 8 \
+  --epochs 1 \
+  --batch-size 8 \
+  --learning-rate 2e-5
+```
+
+The training query excludes existing transport ownership text so the model
+learns from demographics and city context rather than echoing old random
+labels. To use the scorer during profile generation, serve it with the same
+rerank-compatible server on a free port and set:
+
+```bash
+PYTHONPATH=/home/gustavo/vllm/.venv/lib/python3.12/site-packages \
+  .venv/bin/python scripts/serve_schedule_aligner.py \
+  --model-path models/modernbert-vehicle-ownership-aligner \
+  --port 8084 \
+  --device cuda \
+  --predict-batch-size 128
+```
+
+```yaml
+profiles:
+  ownership_alignment_backend: rerank
+  ownership_alignment_base_url: http://localhost:8084
+  ownership_alignment_model: models/modernbert-vehicle-ownership-aligner
+  ownership_alignment_batch_size: 256
+  ownership_alignment_cache_path: data/llm_diaries_gparis/vehicle_ownership_alignment_cache.npz
+  ownership_alignment_concurrency: 4
+```
+
+At runtime, the car and bike scores are treated as Bernoulli probabilities.
+The sampled booleans still populate `has_car` and `has_bike`, and the numeric
+scores are saved as `car_ownership_score` and `bike_ownership_score`.
+
 ### Fine-tuning the ModernBERT activity aligner
 
 To label sampled profile/block/activity pairs with the same running LLM server

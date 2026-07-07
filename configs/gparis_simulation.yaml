@@ -161,6 +161,12 @@ profiles:
   work_distance_fallback: expand
   work_distance_density_correction_power: 1.0
   work_from_home_probability: 0.02
+  ownership_alignment_backend: rerank
+  ownership_alignment_base_url: http://localhost:8084
+  ownership_alignment_model: models/modernbert-vehicle-ownership-aligner
+  ownership_alignment_batch_size: 256
+  ownership_alignment_cache_path: data/llm_diaries_gparis/vehicle_ownership_alignment_cache.npz
+  ownership_alignment_concurrency: 4
 
 comparison:
   path: data/gparis/gparis_visitation_df.parquet

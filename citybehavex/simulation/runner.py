@@ -42,10 +42,12 @@ from citybehavex.profiles import (
     AgentProfile,
     AgentProfilesConfig,
     calibrate_demographic_weights,
+    expand_vehicle_scores,
     generate_profiles,
     load_profiles,
     profile_to_narrative,
     profiles_to_frame,
+    score_vehicle_ownership_alignment,
 )
 from citybehavex.roads import build_rail_graph, build_road_graph, snap_locations_to_graph
 from citybehavex.schedules import (
@@ -1395,6 +1397,83 @@ def resolve_calibrated_profiles_config(
     return pc.model_copy(update=weights)
 
 
+def _profile_city_context(diaries_config: DiariesConfig) -> str | None:
+    return (
+        diaries_config.city_profile
+        or diaries_config.city_profile_weekday
+        or diaries_config.city_profile_weekend
+    )
+
+
+def _apply_vehicle_ownership_alignment(
+    profiles: list[AgentProfile],
+    config: CityBehavExConfig,
+) -> list[AgentProfile]:
+    pc = config.profiles
+    if (
+        not profiles
+        or pc.ownership_alignment_backend != "rerank"
+        or not pc.ownership_alignment_base_url
+    ):
+        return profiles
+
+    neutral_narratives = [profile_to_narrative(p, include_transport=False) for p in profiles]
+    profile_embeddings = embed_profiles(neutral_narratives, config.embedding)
+    if profile_embeddings is not None:
+        clusters = cluster_profile_embeddings(
+            neutral_narratives,
+            profile_embeddings,
+            pc.ownership_profile_cluster_similarity_threshold,
+        )
+    else:
+        typer.echo(
+            "Profile embeddings unavailable for ownership alignment — "
+            "scoring profiles individually"
+        )
+        clusters = cluster_profile_embeddings(neutral_narratives, None, 1.0)
+
+    scored = score_vehicle_ownership_alignment(
+        clusters.narratives,
+        pc,
+        city_profile=_profile_city_context(config.diaries),
+    )
+    if scored is None:
+        typer.echo("Vehicle ownership alignment scorer unavailable — keeping configured random ownership")
+        return profiles
+
+    cluster_scores, metadata = scored
+    agent_scores = expand_vehicle_scores(cluster_scores, clusters)
+    rng = np.random.default_rng(config.simulation.random_state + 17)
+    car_score = np.clip(agent_scores[:, 0], 0.0, 1.0)
+    bike_score = np.clip(agent_scores[:, 1], 0.0, 1.0)
+    has_car = rng.random(len(profiles)) < car_score
+    has_bike = rng.random(len(profiles)) < bike_score
+    updated = [
+        profile.model_copy(
+            update={
+                "has_car": bool(has_car[idx]),
+                "has_bike": bool(has_bike[idx]),
+                "car_ownership_score": float(car_score[idx]),
+                "bike_ownership_score": float(bike_score[idx]),
+            }
+        )
+        for idx, profile in enumerate(profiles)
+    ]
+    typer.echo(
+        "Vehicle ownership alignment scores: "
+        f"{len(clusters.narratives)} profile clusters for {len(profiles)} profiles; "
+        f"car mean={float(car_score.mean()):.3f}, bike mean={float(bike_score.mean()):.3f}"
+    )
+    if pc.output:
+        alignment_path = Path(pc.output).with_name(
+            f"{Path(pc.output).stem}_ownership_alignment.parquet"
+        )
+        alignment_path.parent.mkdir(parents=True, exist_ok=True)
+        metadata.to_parquet(alignment_path, index=False)
+        typer.echo(f"Saved vehicle ownership alignment scores -> {alignment_path}")
+    return updated
+
+
 def maybe_build_profiles(
     config: CityBehavExConfig,
     tessellation_df: pd.DataFrame,
@@ -1410,14 +1489,21 @@ def maybe_build_profiles(
         loaded = load_profiles(pc.profiles_path, n)
         if loaded is not None:
             typer.echo(f"Loaded {len(loaded)} agent profiles from {pc.profiles_path}")
+            loaded = _apply_vehicle_ownership_alignment(loaded, config)
+            if pc.output:
+                out = Path(pc.output)
+                out.parent.mkdir(parents=True, exist_ok=True)
+                profiles_to_frame(loaded).to_parquet(str(out), index=False)
+                typer.echo(f"Saved agent profiles -> {pc.output}")
             return loaded
         typer.echo(f"Warning: profiles_path {pc.profiles_path!r} not usable — generating")
     pc = resolve_calibrated_profiles_config(pc, config.llm, config.diaries)
+    config = config.model_copy(update={"profiles": pc})
     rng = np.random.default_rng(config.simulation.random_state)
     profiles = generate_profiles(n, pc, rng, tessellation_df, relevance_column, home_tile_pool=home_tile_pool)
+    profiles = _apply_vehicle_ownership_alignment(profiles, config)
     typer.echo(f"Generated {len(profiles)} agent profiles")
     if pc.output:
-        from pathlib import Path
         out = Path(pc.output)
         out.parent.mkdir(parents=True, exist_ok=True)
         profiles_to_frame(profiles).to_parquet(str(out), index=False)
