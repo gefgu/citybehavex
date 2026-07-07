@@ -96,6 +96,7 @@ STVD_VOLUME_THRESHOLD = 3.0
 
 _MAX_ECDF_POINTS = 400
 _MAX_SCATTER_POINTS = 4000
+SOCIAL_SIDECAR_MAX_AGENTS = 2_000
 _BASE_FILTER_KEY = "all"
 TIME_USE_CATEGORIES = [
     "sleep",
@@ -627,6 +628,20 @@ def _load_social_network_sidecar(synthetic_path: str) -> dict[str, Any] | None:
     for row in edges[:10]:
         if not isinstance(row, list) or len(row) < 2:
             raise ValueError(f"invalid social network edge row: {path}")
+    if len(nodes) > SOCIAL_SIDECAR_MAX_AGENTS:
+        visible = SOCIAL_SIDECAR_MAX_AGENTS
+        data = {
+            **data,
+            "nodes": nodes[:visible],
+            "edges": [
+                row for row in edges
+                if int(row[0]) < visible and int(row[1]) < visible
+            ],
+            "nodes_sampled": True,
+            "edges_sampled": True,
+        }
+        if degrees is not None:
+            data["degrees"] = degrees[:visible]
     return data
 
 
@@ -751,8 +766,14 @@ def _build_comparison_payload(
     include_progressive_metadata: bool = False,
     include_social_network: bool = True,
     include_profiles: bool = True,
+    sections: Optional[list[str]] = None,
 ) -> dict[str, Any]:
     warnings: list[str] = []
+    requested_sections = set(sections) if sections is not None else None
+
+    def wants(section: str) -> bool:
+        return requested_sections is None or section in requested_sections
+
     available_filters = _filter_options(special_days)
     available_distribution_filters = _distribution_filter_options(special_days)
     distribution_filters = _select_filter_metas(available_distribution_filters, filter_keys)
@@ -815,16 +836,21 @@ def _build_comparison_payload(
     road_nodes_path_obj = None
     road_edges_path_obj = None
 
-    synth_jumps_rog = features.get_jumps_rog(
-        Path(synthetic_path),
-        uid_col=traj.uid_col,
-        lat_col=traj.lat_col,
-        lng_col=traj.lng_col,
-        datetime_col=traj.datetime_col,
-        filters=distribution_filters,
-        road_nodes_path=road_nodes_path_obj,
-        road_edges_path=road_edges_path_obj,
-        road_snap_max_distance_m=road_snap_max_distance_m,
+    needs_jumps = wants("distributions") or wants("metrics") or wants("mobility-laws")
+    synth_jumps_rog = (
+        features.get_jumps_rog(
+            Path(synthetic_path),
+            uid_col=traj.uid_col,
+            lat_col=traj.lat_col,
+            lng_col=traj.lng_col,
+            datetime_col=traj.datetime_col,
+            filters=distribution_filters,
+            road_nodes_path=road_nodes_path_obj,
+            road_edges_path=road_edges_path_obj,
+            road_snap_max_distance_m=road_snap_max_distance_m,
+        )
+        if needs_jumps
+        else {}
     )
     real_jumps_rog = (
         features.get_jumps_rog(
@@ -838,7 +864,7 @@ def _build_comparison_payload(
             road_edges_path=road_edges_path_obj,
             road_snap_max_distance_m=road_snap_max_distance_m,
         )
-        if real_traj is not None
+        if needs_jumps and real_traj is not None
         else None
     )
 
@@ -923,31 +949,44 @@ def _build_comparison_payload(
                     wasserstein.append(row)
         return group
 
-    ecdf = {"groups": [guard(f"ecdf.{m['key']}", lambda m=m: distribution_group(m)) for m in distribution_filters]}
-    ecdf["groups"] = [g for g in ecdf["groups"] if g is not None]
+    ecdf_groups = (
+        [guard(f"ecdf.{m['key']}", lambda m=m: distribution_group(m)) for m in distribution_filters]
+        if wants("distributions") or wants("metrics")
+        else []
+    )
+    ecdf = {"groups": [g for g in ecdf_groups if g is not None]} if wants("distributions") else {"groups": []}
 
     synthetic_visits = None
-    synthetic_visit_result = features.get_activity_visits(
-        Path(synthetic_path),
-        label="synthetic",
-        uid_col=traj.uid_col,
-        datetime_col=traj.datetime_col,
-        activity_col=(
-            synth_activity_col
-            if synth_activity_col and synth_activity_col in traj.df.columns
-            else None
-        ),
-        location_col=synth_location_col,
-        lat_col=traj.lat_col,
-        lng_col=traj.lng_col,
-        location_resolution=resolution,
+    needs_visits = (
+        wants("activity")
+        or wants("metrics")
+        or wants("mobility-laws")
+        or wants("profiles")
+        or wants("motifs")
     )
-    if synthetic_visit_result is not None:
-        synthetic_visits = synthetic_visit_result.visits
-        if synthetic_visit_result.warning:
-            warnings.append(synthetic_visit_result.warning)
+    synthetic_visit_result = None
+    if needs_visits:
+        synthetic_visit_result = features.get_activity_visits(
+            Path(synthetic_path),
+            label="synthetic",
+            uid_col=traj.uid_col,
+            datetime_col=traj.datetime_col,
+            activity_col=(
+                synth_activity_col
+                if synth_activity_col and synth_activity_col in traj.df.columns
+                else None
+            ),
+            location_col=synth_location_col,
+            lat_col=traj.lat_col,
+            lng_col=traj.lng_col,
+            location_resolution=resolution,
+        )
+        if synthetic_visit_result is not None:
+            synthetic_visits = synthetic_visit_result.visits
+            if synthetic_visit_result.warning:
+                warnings.append(synthetic_visit_result.warning)
     observed_visits = None
-    if real_df is not None and real_traj is not None:
+    if needs_visits and real_df is not None and real_traj is not None:
         observed_visit_result = features.get_activity_visits(
             Path(observed_path),
             label=observed_label,
@@ -966,7 +1005,7 @@ def _build_comparison_payload(
                 warnings.append(observed_visit_result.warning)
 
     activity = None
-    if synthetic_visits is not None:
+    if (wants("activity") or wants("metrics")) and synthetic_visits is not None:
         def _activity_group(meta: dict[str, Any]):
             syn_v = _filter_visits(synthetic_visits, meta)
             obs_v = _filter_visits(observed_visits, meta)
@@ -1009,7 +1048,8 @@ def _build_comparison_payload(
             return {"filter_key": meta["key"], "filter_label": meta["label"], **block}
         activity_groups = [guard(f"activity.{m['key']}", lambda m=m: _activity_group(m)) for m in filters]
         activity_groups = [g for g in activity_groups if g is not None]
-        activity = {"groups": activity_groups} if activity_groups else None
+        if wants("activity"):
+            activity = {"groups": activity_groups} if activity_groups else None
 
     def _micro_activity_usage():
         if synthetic_activities_path is None:
@@ -1033,19 +1073,27 @@ def _build_comparison_payload(
             })
         return {"groups": groups} if groups else None
 
-    micro_activity_usage = guard("micro_activity_usage", _micro_activity_usage)
+    micro_activity_usage = (
+        guard("micro_activity_usage", _micro_activity_usage)
+        if wants("micro-activity")
+        else None
+    )
 
-    time_use_comparison = guard(
-        "time_use_comparison",
-        lambda: _build_time_use_comparison_block(
-            time_use_path=time_use_path,
-            synthetic_activities_path=synthetic_activities_path,
-            observed_label=time_use_label,
-            country=time_use_country,
-            survey=time_use_survey,
-            weight_col=time_use_weight_col,
-            filters=filters,
-        ),
+    time_use_comparison = (
+        guard(
+            "time_use_comparison",
+            lambda: _build_time_use_comparison_block(
+                time_use_path=time_use_path,
+                synthetic_activities_path=synthetic_activities_path,
+                observed_label=time_use_label,
+                country=time_use_country,
+                survey=time_use_survey,
+                weight_col=time_use_weight_col,
+                filters=filters,
+            ),
+        )
+        if wants("time-use")
+        else None
     )
 
     # ---- mobility laws --------------------------------------------------- #
@@ -1103,22 +1151,24 @@ def _build_comparison_payload(
                      **_distance_frequency_series(obs_law_visits, syn_law_visits, observed_label if obs_law_visits is not None else None)})
         blocks = {k: v for k, v in block.items() if v is not None}
         return {"filter_key": meta["key"], "filter_label": meta["label"], "blocks": blocks} if blocks else None
-    mobility_groups = _parallel_map(
-        filters,
-        lambda m: guard(f"mobility_laws.{m['key']}", lambda m=m: _mobility_laws_group(m)),
-    )
-    mobility_groups = [g for g in mobility_groups if g is not None]
-    mobility_laws = {"groups": mobility_groups} if mobility_groups else None
+    mobility_laws = None
+    if wants("mobility-laws"):
+        mobility_groups = _parallel_map(
+            filters,
+            lambda m: guard(f"mobility_laws.{m['key']}", lambda m=m: _mobility_laws_group(m)),
+        )
+        mobility_groups = [g for g in mobility_groups if g is not None]
+        mobility_laws = {"groups": mobility_groups} if mobility_groups else None
 
     # ---- profiles -------------------------------------------------------- #
     profiles = None
-    if include_profiles and synthetic_visits is not None and observed_visits is not None:
+    if wants("profiles") and include_profiles and synthetic_visits is not None and observed_visits is not None:
         profiles = guard("profiles", lambda: _build_profiles_block(
             observed_label, compute_profiles(observed_visits), compute_profiles(synthetic_visits)))
 
     # ---- motifs ---------------------------------------------------------- #
     motifs = None
-    if observed_visits is not None or synthetic_visits is not None:
+    if (wants("motifs") or wants("metrics")) and (observed_visits is not None or synthetic_visits is not None):
         motif_groups = []
         for meta in filters:
             motif = guard(
@@ -1133,11 +1183,12 @@ def _build_comparison_payload(
             )
             if motif is not None:
                 motif_groups.append({"filter_key": meta["key"], "filter_label": meta["label"], "block": motif})
-        motifs = {"groups": motif_groups} if motif_groups else None
+        if wants("motifs"):
+            motifs = {"groups": motif_groups} if motif_groups else None
 
     # ---- STVD ------------------------------------------------------------ #
     stvd = None
-    if mode == "comparison" and traj.lat_col and traj.lng_col and real_traj and real_traj.lat_col and real_traj.lng_col:
+    if wants("stvd") and mode == "comparison" and traj.lat_col and traj.lng_col and real_traj and real_traj.lat_col and real_traj.lng_col:
         stvd_groups = []
         def _stvd_group(meta):
             def _stvd(meta=meta):
@@ -1158,7 +1209,7 @@ def _build_comparison_payload(
         stvd_groups = [g for g in _parallel_map(filters, _stvd_group) if g is not None]
         stvd = {"groups": stvd_groups} if stvd_groups else None
 
-    if mode == "comparison" and real_traj is not None:
+    if wants("metrics") and mode == "comparison" and real_traj is not None:
         for meta in filters:
             def _cpc(meta=meta):
                 synth_df = _filter_df(traj.df, traj.datetime_col, meta)
@@ -1182,7 +1233,7 @@ def _build_comparison_payload(
     # doesn't block first paint of the rest of the charts.
     social_network = (
         guard("social_network", lambda: _load_social_network_sidecar(synthetic_path))
-        if include_social_network
+        if wants("social-network") and include_social_network
         else None
     )
     payload = {

@@ -7,7 +7,7 @@ tessellation:
   enrich_overture: true
   output: data/yjmob2/yjmob2_h3_tessellation.parquet
 simulation:
-  agents: 100000
+  agents: 25000
   days: 75
   start_date: '2019-09-15'
   output: data/yjmob2/yjmob2_simulation_trajectories.parquet
@@ -89,14 +89,39 @@ schedule:
   alignment_cache_path: data/llm_diaries_yjmob2/alignment_cache.npz
 activities:
   enabled: true
-  kappa: 1.0
-  temperature: 0.5
+  materialize_travel: true
+  kappa: 0.3
+  temperature: 0.25
   embed_activities: true
   alignment_backend: rerank
   alignment_base_url: http://localhost:8083
   alignment_model: models/modernbert-activity-aligner
   alignment_batch_size: 512
   alignment_cache_path: data/llm_diaries_yjmob2/activity_alignment_cache.npz
+  durations:
+    sleep:
+      scale: 2.4
+      sigma_scale: 0.8
+    eatdrink:
+      scale: 0.75
+    selfcare:
+      scale: 0.75
+    foodprep:
+      scale: 0.6
+    cleanetc:
+      scale: 0.6
+    maintain:
+      scale: 0.6
+    garden:
+      scale: 0.6
+    petcare:
+      scale: 0.6
+    eldcare:
+      scale: 0.6
+    pkidcare:
+      scale: 0.6
+    ikidcare:
+      scale: 0.6
 profiles:
   enabled: true
   llm_override: true
