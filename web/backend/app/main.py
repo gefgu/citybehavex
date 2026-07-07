@@ -14,10 +14,13 @@ from pathlib import Path
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
+from fastapi.routing import APIRoute, APIRouter
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from .api import api_router
+from .api.charts import router as charts_router
+from .api.experiments import router as experiments_router
+from .api.timeline import router as timeline_router
 from .config import REPO_ROOT
 from .executor import init_executor, shutdown_executor
 
@@ -50,12 +53,45 @@ def create_app() -> FastAPI:
     )
     app.add_middleware(GZipMiddleware, minimum_size=1024)
 
-    app.include_router(api_router)
+    _include_router_flat(app, experiments_router, prefix="/api")
+    _include_router_flat(app, charts_router, prefix="/api")
+    _include_router_flat(app, timeline_router, prefix="/api")
 
     if _FRONTEND_DIST.is_dir():
         _mount_frontend(app, _FRONTEND_DIST)
 
     return app
+
+
+def _include_router_flat(app: FastAPI, router: APIRouter, *, prefix: str = "") -> None:
+    """Register router routes eagerly.
+
+    FastAPI 0.139 stores included routers as deferred ``_IncludedRouter``
+    entries. In this app/version combination those placeholders are not being
+    matched by Starlette, so register the concrete API routes directly.
+    """
+    for route in router.routes:
+        if not isinstance(route, APIRoute):
+            continue
+        app.add_api_route(
+            f"{prefix}{route.path}",
+            route.endpoint,
+            methods=route.methods,
+            name=route.name,
+            response_model=route.response_model,
+            status_code=route.status_code,
+            tags=route.tags,
+            dependencies=route.dependencies,
+            summary=route.summary,
+            description=route.description,
+            response_description=route.response_description,
+            responses=route.responses,
+            deprecated=route.deprecated,
+            operation_id=route.operation_id,
+            include_in_schema=route.include_in_schema,
+            response_class=route.response_class,
+            openapi_extra=route.openapi_extra,
+        )
 
 
 def _mount_frontend(app: FastAPI, dist: Path) -> None:

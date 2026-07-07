@@ -57,8 +57,8 @@ def _context_from_kwargs(**kwargs: Any) -> ComparisonContext:
     return ComparisonContext.from_kwargs(**kwargs)
 
 
-def _regular_artifact(ctx: ComparisonContext, filter_key: str) -> dict[str, Any]:
-    key = (*ctx.artifact_key(filter_key), "regular")
+def _regular_artifact(ctx: ComparisonContext, filter_key: str, section: str) -> dict[str, Any]:
+    key = (*ctx.artifact_key(filter_key), "regular", section)
     return artifact_store.get_or_build(
         key,
         lambda: legacy._build_comparison_payload(
@@ -76,6 +76,7 @@ def _regular_artifact(ctx: ComparisonContext, filter_key: str) -> dict[str, Any]
             include_progressive_metadata=True,
             include_profiles=False,
             include_social_network=False,
+            sections=[section],
         ),
     )
 
@@ -136,58 +137,74 @@ def build_chart_base_payload(
 
 def _section_payload(ctx: ComparisonContext, filter_key: str) -> dict[str, Any]:
     payload = _empty_payload(ctx, loaded_filters=[filter_key])
-    artifact = _regular_artifact(ctx, filter_key)
+    artifact = _regular_artifact(ctx, filter_key, "metrics")
     payload["warnings"] = artifact.get("warnings", [])
     return payload
 
 
 def build_section_distributions(ctx: ComparisonContext, filter_key: str) -> dict[str, Any]:
-    payload = _section_payload(ctx, filter_key)
-    payload["ecdf"] = _regular_artifact(ctx, filter_key).get("ecdf", {"groups": []})
+    artifact = _regular_artifact(ctx, filter_key, "distributions")
+    payload = _empty_payload(ctx, loaded_filters=[filter_key])
+    payload["warnings"] = artifact.get("warnings", [])
+    payload["ecdf"] = artifact.get("ecdf", {"groups": []})
     return payload
 
 
 def build_section_metrics(ctx: ComparisonContext, filter_key: str) -> dict[str, Any]:
-    payload = _section_payload(ctx, filter_key)
-    payload["metrics"] = _regular_artifact(ctx, filter_key).get(
+    artifact = _regular_artifact(ctx, filter_key, "metrics")
+    payload = _empty_payload(ctx, loaded_filters=[filter_key])
+    payload["warnings"] = artifact.get("warnings", [])
+    payload["metrics"] = artifact.get(
         "metrics", {"wasserstein": [], "jsd": [], "cpc": []}
     )
     return payload
 
 
 def build_section_activity(ctx: ComparisonContext, filter_key: str) -> dict[str, Any]:
-    payload = _section_payload(ctx, filter_key)
-    payload["activity"] = _regular_artifact(ctx, filter_key).get("activity")
+    artifact = _regular_artifact(ctx, filter_key, "activity")
+    payload = _empty_payload(ctx, loaded_filters=[filter_key])
+    payload["warnings"] = artifact.get("warnings", [])
+    payload["activity"] = artifact.get("activity")
     return payload
 
 
 def build_section_mobility_laws(ctx: ComparisonContext, filter_key: str) -> dict[str, Any]:
-    payload = _section_payload(ctx, filter_key)
-    payload["mobility_laws"] = _regular_artifact(ctx, filter_key).get("mobility_laws")
+    artifact = _regular_artifact(ctx, filter_key, "mobility-laws")
+    payload = _empty_payload(ctx, loaded_filters=[filter_key])
+    payload["warnings"] = artifact.get("warnings", [])
+    payload["mobility_laws"] = artifact.get("mobility_laws")
     return payload
 
 
 def build_section_micro_activity(ctx: ComparisonContext, filter_key: str) -> dict[str, Any]:
-    payload = _section_payload(ctx, filter_key)
-    payload["micro_activity_usage"] = _regular_artifact(ctx, filter_key).get("micro_activity_usage")
+    artifact = _regular_artifact(ctx, filter_key, "micro-activity")
+    payload = _empty_payload(ctx, loaded_filters=[filter_key])
+    payload["warnings"] = artifact.get("warnings", [])
+    payload["micro_activity_usage"] = artifact.get("micro_activity_usage")
     return payload
 
 
 def build_section_time_use(ctx: ComparisonContext, filter_key: str) -> dict[str, Any]:
-    payload = _section_payload(ctx, filter_key)
-    payload["time_use_comparison"] = _regular_artifact(ctx, filter_key).get("time_use_comparison")
+    artifact = _regular_artifact(ctx, filter_key, "time-use")
+    payload = _empty_payload(ctx, loaded_filters=[filter_key])
+    payload["warnings"] = artifact.get("warnings", [])
+    payload["time_use_comparison"] = artifact.get("time_use_comparison")
     return payload
 
 
 def build_section_motifs(ctx: ComparisonContext, filter_key: str) -> dict[str, Any]:
-    payload = _section_payload(ctx, filter_key)
-    payload["motifs"] = _regular_artifact(ctx, filter_key).get("motifs")
+    artifact = _regular_artifact(ctx, filter_key, "motifs")
+    payload = _empty_payload(ctx, loaded_filters=[filter_key])
+    payload["warnings"] = artifact.get("warnings", [])
+    payload["motifs"] = artifact.get("motifs")
     return payload
 
 
 def build_section_stvd(ctx: ComparisonContext, filter_key: str) -> dict[str, Any]:
-    payload = _section_payload(ctx, filter_key)
-    payload["stvd"] = _regular_artifact(ctx, filter_key).get("stvd")
+    artifact = _regular_artifact(ctx, filter_key, "stvd")
+    payload = _empty_payload(ctx, loaded_filters=[filter_key])
+    payload["warnings"] = artifact.get("warnings", [])
+    payload["stvd"] = artifact.get("stvd")
     return payload
 
 

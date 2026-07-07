@@ -1,5 +1,17 @@
 # AGENTS.md
 
+## Serving the diary-generation LLM
+
+The diary-generation model (`Qwen/Qwen2.5-32B-Instruct-AWQ`, port 8081) is served from the
+sibling `/home/gustavo/vllm` folder, not from this repo. Start it with `./serve.sh` there
+(a `screen -S llm` session is normally kept around for this). Use `--gpu-memory-utilization
+0.75` (the value already in `vllm/serve.sh`), not the `0.9` in `vllm/command.txt` — this GPU
+also hosts the schedule aligner (TEI, port 8082, ~0.9 GB) and the activity aligner
+(`scripts/serve_schedule_aligner.py`, port 8083, ~2.1 GB) persistently, so 0.9 leaves too
+thin a margin against a shared card. Port convention: 8081 = diary LLM, 8082 = schedule
+aligner, 8083 = activity aligner, 8001 = on-demand embedding server (auto-launched by
+`embedding.auto_launch: true`, only spawned on a cache miss).
+
 ## Activity Aligner Fine-Tuning
 
 - `scripts/train_modernbert_activity_aligner.py` labels profile/block/activity pairs through the configured OpenAI-compatible chat endpoint.

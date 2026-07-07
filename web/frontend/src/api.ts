@@ -1,7 +1,7 @@
 // Thin fetch wrapper. Every backend response is `{ data: ... }`; we return `data`.
 
-async function getJson<T>(url: string): Promise<T> {
-  const res = await fetch(url);
+async function getJson<T>(url: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(url, init);
   return readJson<T>(res);
 }
 
@@ -116,12 +116,14 @@ export function fetchChartSection(
   section: string,
   filter = "all",
   run?: string,
+  signal?: AbortSignal,
 ): Promise<ChartPayload> {
   const q = new URLSearchParams();
   q.set("filter", filter);
   if (run) q.set("run", run);
   return getJson<ChartPayload>(
     `/api/experiments/${encodeURIComponent(id)}/charts/${encodeURIComponent(section)}?${q.toString()}`,
+    { signal },
   );
 }
 
@@ -527,6 +529,7 @@ export interface SocialNetworkBlock {
   social_graph_k: number;
   nodes: ([number, number, number, number] | [number, number, number, number, string])[];
   edges: [number, number, number?][];
+  nodes_sampled?: boolean;
   edges_sampled?: boolean;
   degrees?: number[];
 }

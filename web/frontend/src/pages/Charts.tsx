@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import type { EChartsOption } from "echarts";
@@ -94,9 +94,35 @@ const FILTERED_SECTIONS = [
   "stvd",
 ];
 const STATIC_SECTIONS = ["profiles", "social-network"];
+const SECTION_REQUEST_TIMEOUT_MS = 20_000;
 
 function sectionKey(section: string, filter = "all") {
   return `${section}:${filter}`;
+}
+
+function defaultSectionRequests(
+  dayFilter: string,
+  distributionFilter: string,
+  fastOnly = false,
+): [string, string][] {
+  if (fastOnly) {
+    return [
+      ["time-use", dayFilter],
+      ["social-network", "all"],
+    ];
+  }
+  const metricFilter = distributionFilter === "all" ? dayFilter : distributionFilter;
+  return [
+    ["micro-activity", dayFilter],
+    ["time-use", dayFilter],
+    ["activity", dayFilter],
+    ["motifs", dayFilter],
+    ...STATIC_SECTIONS.map((section): [string, string] => [section, "all"]),
+    ["metrics", metricFilter],
+    ["distributions", distributionFilter],
+    ["mobility-laws", dayFilter],
+    ["stvd", dayFilter],
+  ];
 }
 
 function mergeGroups<T extends { filter_key: string }>(
@@ -280,13 +306,15 @@ export function Charts() {
   const [payload, setPayload] = useState<ChartPayload | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loadingSections, setLoadingSections] = useState<Set<string>>(new Set());
-  const [loadedSections, setLoadedSections] = useState<Set<string>>(new Set());
   const [sectionErrors, setSectionErrors] = useState<Record<string, string>>({});
   const [dayFilter, setDayFilter] = useState("all");
   const [distributionFilter, setDistributionFilter] = useState("all");
   const [homeWork, setHomeWork] = useState<HomeWorkResponse | null>(null);
   const [networkValidation, setNetworkValidation] = useState<NetworkValidationResponse | null>(null);
   const [networkValidationError, setNetworkValidationError] = useState<string | null>(null);
+  const requestScopeRef = useRef(0);
+  const loadingSectionsRef = useRef<Set<string>>(new Set());
+  const loadedSectionsRef = useRef<Set<string>>(new Set());
   const [demoFilter, setDemoFilter] = useState<DemographicFilterValue>({
     gender: null,
     age_bracket: null,
@@ -300,6 +328,64 @@ export function Charts() {
   useEffect(() => {
     demoFilterRef.current = demoFilter;
   }, [demoFilter]);
+  const demoSafeMode = id.includes("yjmob2");
+
+  const loadSectionRequests = useCallback(
+    async (basePayload: ChartPayload, requests: [string, string][], requestScope: number) => {
+      const enabled = basePayload.enabled_sections ?? [...FILTERED_SECTIONS, ...STATIC_SECTIONS];
+      const jobs: [string, string, string][] = [];
+      for (const [section, filter] of requests) {
+        if (!enabled.includes(section)) continue;
+        const key = sectionKey(section, filter);
+        if (loadedSectionsRef.current.has(key) || loadingSectionsRef.current.has(key)) continue;
+
+        loadingSectionsRef.current.add(key);
+        jobs.push([section, filter, key]);
+      }
+
+      if (jobs.length === 0) return;
+      setLoadingSections((current) => {
+        const copy = new Set(current);
+        for (const [, , key] of jobs) copy.add(key);
+        return copy;
+      });
+
+      for (const [section, filter, key] of jobs) {
+        const controller = new AbortController();
+        const timeout = window.setTimeout(() => controller.abort(), SECTION_REQUEST_TIMEOUT_MS);
+        try {
+          const next = await fetchChartSection(id, section, filter, run, controller.signal);
+          if (requestScopeRef.current !== requestScope) return;
+          setPayload((current) => (current ? mergeChartPayload(current, next) : next));
+          loadedSectionsRef.current.add(key);
+          setSectionErrors((current) => {
+            const copy = { ...current };
+            delete copy[key];
+            return copy;
+          });
+        } catch (e) {
+          if (requestScopeRef.current === requestScope) {
+            const message =
+              e instanceof DOMException && e.name === "AbortError"
+                ? "Timed out while building this section; reload to retry."
+                : String(e);
+            setSectionErrors((current) => ({ ...current, [key]: message }));
+          }
+        } finally {
+          window.clearTimeout(timeout);
+          if (requestScopeRef.current === requestScope) {
+            loadingSectionsRef.current.delete(key);
+            setLoadingSections((current) => {
+              const copy = new Set(current);
+              copy.delete(key);
+              return copy;
+            });
+          }
+        }
+      }
+    },
+    [id, run],
+  );
 
   // Sequential on purpose (per-request server load, not just UI ergonomics):
   // charts -> home-work -> network-validation run one after another instead
@@ -307,13 +393,15 @@ export function Charts() {
   // the concurrent load on the backend's comparison-payload builder.
   useEffect(() => {
     let cancelled = false;
+    requestScopeRef.current += 1;
     setPayload(null);
     setError(null);
     setHomeWork(null);
     setNetworkValidation(null);
     setNetworkValidationError(null);
+    loadingSectionsRef.current = new Set();
+    loadedSectionsRef.current = new Set();
     setLoadingSections(new Set());
-    setLoadedSections(new Set());
     setSectionErrors({});
 
     (async () => {
@@ -326,6 +414,12 @@ export function Charts() {
       }
       if (cancelled) return;
       setPayload(chartsResult);
+      await loadSectionRequests(
+        chartsResult,
+        defaultSectionRequests("all", "all", demoSafeMode),
+        requestScopeRef.current,
+      );
+      if (cancelled) return;
 
       try {
         const hw = await fetchHomeWork(id, run, demoFilterRef.current);
@@ -339,72 +433,29 @@ export function Charts() {
       // /network-validation route) -- still fetched last, independent of
       // whether home-work succeeded, so one failing section doesn't block
       // the other.
-      try {
-        const nv = await fetchNetworkValidation(id, run);
-        if (!cancelled) setNetworkValidation(nv);
-      } catch (e) {
-        if (!cancelled) setNetworkValidationError(String(e));
+      if (!demoSafeMode) {
+        try {
+          const nv = await fetchNetworkValidation(id, run);
+          if (!cancelled) setNetworkValidation(nv);
+        } catch (e) {
+          if (!cancelled) setNetworkValidationError(String(e));
+        }
       }
     })();
 
     return () => {
       cancelled = true;
     };
-  }, [id, run]);
+  }, [id, run, loadSectionRequests, demoSafeMode]);
 
   useEffect(() => {
     if (!payload) return;
-    const metricFilter = distributionFilter === "all" ? dayFilter : distributionFilter;
-    const requests = [
-      ["distributions", distributionFilter],
-      ["metrics", metricFilter],
-      ["activity", dayFilter],
-      ["mobility-laws", dayFilter],
-      ["micro-activity", dayFilter],
-      ["time-use", dayFilter],
-      ["motifs", dayFilter],
-      ["stvd", dayFilter],
-      ...STATIC_SECTIONS.map((section) => [section, "all"]),
-    ].filter(([section, filter]) => {
-      const enabled = payload.enabled_sections ?? [...FILTERED_SECTIONS, ...STATIC_SECTIONS];
-      const key = sectionKey(section, filter);
-      return enabled.includes(section) && !loadedSections.has(key) && !loadingSections.has(key);
-    });
-    if (!requests.length) return;
-    let cancelled = false;
-    for (const [section, filter] of requests) {
-      const key = sectionKey(section, filter);
-      setLoadingSections((current) => new Set(current).add(key));
-      fetchChartSection(id, section, filter, run)
-        .then((next) => {
-          if (cancelled) return;
-          setPayload((current) => (current ? mergeChartPayload(current, next) : next));
-          setLoadedSections((current) => new Set(current).add(key));
-          setSectionErrors((current) => {
-            const copy = { ...current };
-            delete copy[key];
-            return copy;
-          });
-        })
-        .catch((e) => {
-          if (!cancelled) {
-            setSectionErrors((current) => ({ ...current, [key]: String(e) }));
-          }
-        })
-        .finally(() => {
-          if (!cancelled) {
-            setLoadingSections((current) => {
-              const copy = new Set(current);
-              copy.delete(key);
-              return copy;
-            });
-          }
-        });
-    }
-    return () => {
-      cancelled = true;
-    };
-  }, [payload, dayFilter, distributionFilter, id, run, loadedSections, loadingSections]);
+    void loadSectionRequests(
+      payload,
+      defaultSectionRequests(dayFilter, distributionFilter, demoSafeMode),
+      requestScopeRef.current,
+    );
+  }, [payload, dayFilter, distributionFilter, loadSectionRequests, demoSafeMode]);
 
   // Demographic-filter-only refetch: the sequential chain above already
   // covers the initial home-work fetch on mount/id/run change, so this only
@@ -749,11 +800,7 @@ export function Charts() {
       )}
 
       <SectionHeading title="Social network" />
-      {networkValidationError ? (
-        <div className="state">Failed to load network validation: {networkValidationError}</div>
-      ) : networkValidation === null ? (
-        <div className="state">Building social network validation… (fetched separately from the rest of the charts)</div>
-      ) : networkValidation.network_validation ? (
+      {networkValidation?.network_validation ? (
         <>
           <NetworkValidationSection
             block={networkValidation.network_validation.synthetic_vs_random}
@@ -768,6 +815,10 @@ export function Charts() {
         </>
       ) : payload.social_network ? (
         <SocialNetworkGraph block={payload.social_network} title="Initial social graph" />
+      ) : networkValidationError ? (
+        <div className="state">Failed to load network validation: {networkValidationError}</div>
+      ) : networkValidation === null && !demoSafeMode ? (
+        <div className="state">Building social network validation… (fetched separately from the rest of the charts)</div>
       ) : (
         <div className="network-empty">
           No social network sidecar found for this run. Re-run the simulation with the latest code,

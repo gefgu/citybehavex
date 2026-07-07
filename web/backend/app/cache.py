@@ -26,7 +26,7 @@ from typing import Any, Callable
 
 from .config import CACHE_DIR
 
-PAYLOAD_CACHE_VERSION = "v6"
+PAYLOAD_CACHE_VERSION = "v7"
 MAX_CACHE_KEY_PREFIX = 120
 
 _inflight: dict[str, Future] = {}

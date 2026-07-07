@@ -48,6 +48,35 @@ def test_load_social_network_sidecar_validates_and_returns_payload(tmp_path):
     assert _load_social_network_sidecar(str(synthetic)) == payload
 
 
+def test_load_social_network_sidecar_caps_visible_agents(tmp_path):
+    synthetic = tmp_path / "trajectories_20260101T010203.parquet"
+    pd.DataFrame({"uid": [1]}).to_parquet(synthetic, index=False)
+    sidecar = social_network_sidecar_path(synthetic)
+    payload = {
+        "kind": "initial_profile_similarity",
+        "node_count": 2001,
+        "edge_count": 3,
+        "layout": "profile_svd",
+        "directed": True,
+        "social_graph_k": 1,
+        "nodes": [[float(i), 0.0, 8.0, i] for i in range(2001)],
+        "edges": [[0, 1999, 1.0], [1999, 2000, 1.0], [2000, 1, 1.0]],
+        "degrees": [1 for _ in range(2001)],
+    }
+    sidecar.write_text(json.dumps(payload), encoding="utf-8")
+
+    loaded = _load_social_network_sidecar(str(synthetic))
+
+    assert loaded is not None
+    assert loaded["node_count"] == 2001
+    assert loaded["edge_count"] == 3
+    assert len(loaded["nodes"]) == 2000
+    assert loaded["edges"] == [[0, 1999, 1.0]]
+    assert len(loaded["degrees"]) == 2000
+    assert loaded["nodes_sampled"] is True
+    assert loaded["edges_sampled"] is True
+
+
 def test_build_network_validation_payload_includes_synthetic_validation(tmp_path):
     # network_validation moved to its own endpoint/build function (see
     # web/backend/app/api/charts.py's /network-validation route) so its
