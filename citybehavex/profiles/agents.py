@@ -17,7 +17,7 @@ from typing import Optional
 
 import numpy as np
 import pandas as pd
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from citybehavex.math import sample_beta_scaled_ints, sample_multinomial_index, sample_weighted_indices
 from citybehavex.profiles.config import AgentProfilesConfig
@@ -81,6 +81,8 @@ class AgentProfile(BaseModel):
     job: str
     has_car: bool
     has_bike: bool
+    car_ownership_score: Optional[float] = Field(default=None, ge=0.0, le=1.0)
+    bike_ownership_score: Optional[float] = Field(default=None, ge=0.0, le=1.0)
     home_tile: int  # index into tessellation DataFrame
     work_tile: int  # index into tessellation DataFrame
 
@@ -92,32 +94,36 @@ class AgentProfile(BaseModel):
 _HEALTH_LABELS = {1: "very poor", 2: "poor", 3: "fair", 4: "good", 5: "very good"}
 
 
-def profile_to_narrative(profile: AgentProfile) -> str:
+def profile_to_narrative(profile: AgentProfile, *, include_transport: bool = True) -> str:
     """Return a concise prose description of a profile for embedding.
 
     This is the single source of truth that all downstream modules embed:
     the ddCRP (schedule similarity), the social graph, and the activity CRP
     all operate on embeddings of this text.
     """
-    transport: list[str] = []
-    if profile.has_car:
-        transport.append("a car")
-    if profile.has_bike:
-        transport.append("a bike")
-    transport_str = (
-        f"They own {' and '.join(transport)}."
-        if transport
-        else "They rely on public transport or walking."
-    )
+    transport_str = ""
+    if include_transport:
+        transport: list[str] = []
+        if profile.has_car:
+            transport.append("a car")
+        if profile.has_bike:
+            transport.append("a bike")
+        transport_str = (
+            f"They own {' and '.join(transport)}."
+            if transport
+            else "They rely on public transport or walking."
+        )
     health_label = _HEALTH_LABELS.get(profile.health, str(profile.health))
-    return (
+    parts = [
         f"{profile.name} is a {profile.age}-year-old {profile.gender} "
-        f"working as a {profile.job}. "
+        f"working as a {profile.job}. ",
         f"They have {profile.education} level education "
-        f"and {health_label} health. "
-        f"They live as: {profile.household}. "
-        f"{transport_str}"
-    )
+        f"and {health_label} health. ",
+        f"They live as: {profile.household}. ",
+    ]
+    if transport_str:
+        parts.append(transport_str)
+    return "".join(parts)
 
 
 # ---------------------------------------------------------------------------

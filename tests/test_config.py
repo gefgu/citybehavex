@@ -104,6 +104,9 @@ def test_profiles_default_to_poi_building_location_inference():
     assert config.work_distance_max_km == 60.0
     assert config.work_distance_density_correction_power == 1.0
     assert config.work_from_home_probability == 0.05
+    assert config.ownership_alignment_backend == "none"
+    assert config.ownership_alignment_base_url is None
+    assert config.ownership_profile_cluster_similarity_threshold == 0.94
 
 
 def test_simulation_config_rejects_tessellation_and_bbox():

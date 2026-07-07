@@ -56,6 +56,18 @@ class AgentProfilesConfig(BaseModel):
 
     car_probability: float = Field(default=0.55, ge=0.0, le=1.0)
     bike_probability: float = Field(default=0.35, ge=0.0, le=1.0)
+    ownership_alignment_backend: Literal["none", "rerank"] = "none"
+    ownership_alignment_base_url: Optional[str] = None
+    ownership_alignment_model: Optional[str] = None
+    ownership_alignment_timeout_seconds: float = Field(default=120.0, gt=0)
+    ownership_alignment_batch_size: int = Field(default=32, gt=0)
+    ownership_alignment_cache_path: Optional[str] = None
+    ownership_alignment_concurrency: int = Field(default=4, ge=1)
+    ownership_alignment_retries: int = Field(default=2, ge=1)
+    ownership_alignment_checkpoint_every: int = Field(default=20, ge=1)
+    ownership_profile_cluster_similarity_threshold: float = Field(
+        default=0.94, ge=-1.0, le=1.0
+    )
 
     male_names: list[str] = Field(
         default_factory=lambda: [

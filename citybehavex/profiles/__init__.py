@@ -14,6 +14,11 @@ from .agents import (
 from .calibration import WEIGHT_GROUPS, calibrate_demographic_weights
 from .config import AgentProfilesConfig
 from .metrics import PROFILE_METRICS, compute_profiles
+from .ownership_alignment import (
+    VEHICLE_CANDIDATES,
+    expand_vehicle_scores,
+    score_vehicle_ownership_alignment,
+)
 
 __all__ = [
     "AgentProfile",
@@ -30,4 +35,7 @@ __all__ = [
     "load_profiles",
     "profile_to_narrative",
     "profiles_to_frame",
+    "VEHICLE_CANDIDATES",
+    "expand_vehicle_scores",
+    "score_vehicle_ownership_alignment",
 ]
