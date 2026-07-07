@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import type { EChartsOption } from "echarts";
 import {
+  fetchChartSection,
   fetchCharts,
   fetchHomeWork,
   fetchNetworkValidation,
@@ -81,6 +82,60 @@ const PERIOD_FILTERS: FilterChoice[] = [
   { key: "evening", label: "Evening" },
   { key: "night", label: "Night" },
 ];
+
+const FILTERED_SECTIONS = [
+  "distributions",
+  "metrics",
+  "activity",
+  "mobility-laws",
+  "micro-activity",
+  "time-use",
+  "motifs",
+  "stvd",
+];
+const STATIC_SECTIONS = ["profiles", "social-network"];
+
+function sectionKey(section: string, filter = "all") {
+  return `${section}:${filter}`;
+}
+
+function mergeGroups<T extends { filter_key: string }>(
+  current: { groups: T[] } | null,
+  incoming: { groups: T[] } | null,
+): { groups: T[] } | null {
+  if (!incoming) return current;
+  const byKey = new Map((current?.groups ?? []).map((group) => [group.filter_key, group]));
+  for (const group of incoming.groups) byKey.set(group.filter_key, group);
+  return { groups: Array.from(byKey.values()) };
+}
+
+function mergeMetricRows<T extends { filter_key?: string }>(current: T[], incoming: T[]): T[] {
+  const incomingKeys = new Set(incoming.map((row) => row.filter_key ?? "all"));
+  return [...current.filter((row) => !incomingKeys.has(row.filter_key ?? "all")), ...incoming];
+}
+
+function mergeChartPayload(current: ChartPayload, incoming: ChartPayload): ChartPayload {
+  const loaded = new Set([...(current.loaded_filters ?? ["all"]), ...(incoming.loaded_filters ?? [])]);
+  return {
+    ...current,
+    warnings: Array.from(new Set([...current.warnings, ...incoming.warnings])),
+    loaded_filters: Array.from(loaded),
+    metrics: {
+      wasserstein: mergeMetricRows(current.metrics.wasserstein, incoming.metrics.wasserstein),
+      jsd: mergeMetricRows(current.metrics.jsd, incoming.metrics.jsd),
+      cpc: mergeMetricRows(current.metrics.cpc, incoming.metrics.cpc),
+    },
+    ecdf: mergeGroups(current.ecdf, incoming.ecdf) ?? current.ecdf,
+    mobility_laws: mergeGroups(current.mobility_laws, incoming.mobility_laws),
+    activity: mergeGroups(current.activity, incoming.activity),
+    micro_activity_usage: mergeGroups(current.micro_activity_usage, incoming.micro_activity_usage),
+    time_use_comparison: mergeGroups(current.time_use_comparison, incoming.time_use_comparison),
+    motifs: mergeGroups(current.motifs, incoming.motifs),
+    stvd: mergeGroups(current.stvd, incoming.stvd),
+    profiles: incoming.profiles ?? current.profiles,
+    social_network: incoming.social_network ?? current.social_network,
+  };
+}
 
 function SegmentedControl({
   label,
@@ -224,6 +279,9 @@ export function Charts() {
   const run = params.get("run") ?? undefined;
   const [payload, setPayload] = useState<ChartPayload | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [loadingSections, setLoadingSections] = useState<Set<string>>(new Set());
+  const [loadedSections, setLoadedSections] = useState<Set<string>>(new Set());
+  const [sectionErrors, setSectionErrors] = useState<Record<string, string>>({});
   const [dayFilter, setDayFilter] = useState("all");
   const [distributionFilter, setDistributionFilter] = useState("all");
   const [homeWork, setHomeWork] = useState<HomeWorkResponse | null>(null);
@@ -254,6 +312,9 @@ export function Charts() {
     setHomeWork(null);
     setNetworkValidation(null);
     setNetworkValidationError(null);
+    setLoadingSections(new Set());
+    setLoadedSections(new Set());
+    setSectionErrors({});
 
     (async () => {
       let chartsResult: ChartPayload;
@@ -290,6 +351,60 @@ export function Charts() {
       cancelled = true;
     };
   }, [id, run]);
+
+  useEffect(() => {
+    if (!payload) return;
+    const metricFilter = distributionFilter === "all" ? dayFilter : distributionFilter;
+    const requests = [
+      ["distributions", distributionFilter],
+      ["metrics", metricFilter],
+      ["activity", dayFilter],
+      ["mobility-laws", dayFilter],
+      ["micro-activity", dayFilter],
+      ["time-use", dayFilter],
+      ["motifs", dayFilter],
+      ["stvd", dayFilter],
+      ...STATIC_SECTIONS.map((section) => [section, "all"]),
+    ].filter(([section, filter]) => {
+      const enabled = payload.enabled_sections ?? [...FILTERED_SECTIONS, ...STATIC_SECTIONS];
+      const key = sectionKey(section, filter);
+      return enabled.includes(section) && !loadedSections.has(key) && !loadingSections.has(key);
+    });
+    if (!requests.length) return;
+    let cancelled = false;
+    for (const [section, filter] of requests) {
+      const key = sectionKey(section, filter);
+      setLoadingSections((current) => new Set(current).add(key));
+      fetchChartSection(id, section, filter, run)
+        .then((next) => {
+          if (cancelled) return;
+          setPayload((current) => (current ? mergeChartPayload(current, next) : next));
+          setLoadedSections((current) => new Set(current).add(key));
+          setSectionErrors((current) => {
+            const copy = { ...current };
+            delete copy[key];
+            return copy;
+          });
+        })
+        .catch((e) => {
+          if (!cancelled) {
+            setSectionErrors((current) => ({ ...current, [key]: String(e) }));
+          }
+        })
+        .finally(() => {
+          if (!cancelled) {
+            setLoadingSections((current) => {
+              const copy = new Set(current);
+              copy.delete(key);
+              return copy;
+            });
+          }
+        });
+    }
+    return () => {
+      cancelled = true;
+    };
+  }, [payload, dayFilter, distributionFilter, id, run, loadedSections, loadingSections]);
 
   // Demographic-filter-only refetch: the sequential chain above already
   // covers the initial home-work fetch on mount/id/run change, so this only
@@ -335,17 +450,10 @@ export function Charts() {
   // special day like "emergency") are computed server-side and attached to
   // every group that's partitioned by day type; derive the toggle list from
   // whichever of those groups is present instead of hardcoding the 3 defaults.
-  const dayFilterGroups =
-    payload.mobility_laws?.groups ??
-    payload.activity?.groups ??
-    payload.micro_activity_usage?.groups ??
-    payload.time_use_comparison?.groups ??
-    payload.motifs?.groups ??
-    payload.stvd?.groups ??
-    null;
-  const dayFilters: FilterChoice[] = dayFilterGroups
-    ? dayFilterGroups.map((g) => ({ key: g.filter_key, label: g.filter_label }))
-    : DAY_FILTERS;
+  const dayFilters: FilterChoice[] = payload.available_filters ?? DAY_FILTERS;
+  const distributionFilters: FilterChoice[] =
+    payload.distribution_filters ??
+    [...dayFilters, ...PERIOD_FILTERS.filter((option) => option.key !== "all")];
   const dayFilterKeys = dayFilters.map((f) => f.key);
   const setSyncedDayFilter = (next: string) => {
     setDayFilter(next);
@@ -361,25 +469,32 @@ export function Charts() {
   };
   const ecdfGroup =
     payload.ecdf.groups.find((group) => group.filter_key === distributionFilter) ??
-    payload.ecdf.groups[0];
+    (distributionFilter === "all" ? payload.ecdf.groups[0] : undefined);
   const mobilityGroup =
     payload.mobility_laws?.groups.find((group) => group.filter_key === dayFilter) ??
-    payload.mobility_laws?.groups[0];
+    (dayFilter === "all" ? payload.mobility_laws?.groups[0] : undefined);
   const activityGroup =
     payload.activity?.groups.find((group) => group.filter_key === dayFilter) ??
-    payload.activity?.groups[0];
+    (dayFilter === "all" ? payload.activity?.groups[0] : undefined);
   const microActivityGroup =
     payload.micro_activity_usage?.groups.find((group) => group.filter_key === dayFilter) ??
-    payload.micro_activity_usage?.groups[0];
+    (dayFilter === "all" ? payload.micro_activity_usage?.groups[0] : undefined);
   const timeUseGroup =
     payload.time_use_comparison?.groups.find((group) => group.filter_key === dayFilter) ??
-    payload.time_use_comparison?.groups[0];
+    (dayFilter === "all" ? payload.time_use_comparison?.groups[0] : undefined);
   const motifGroup =
     payload.motifs?.groups.find((group) => group.filter_key === dayFilter) ??
-    payload.motifs?.groups[0];
+    (dayFilter === "all" ? payload.motifs?.groups[0] : undefined);
   const stvdGroup =
     payload.stvd?.groups.find((group) => group.filter_key === dayFilter) ??
-    payload.stvd?.groups[0];
+    (dayFilter === "all" ? payload.stvd?.groups[0] : undefined);
+  const isSectionLoading = (section: string, filter = "all") =>
+    loadingSections.has(sectionKey(section, filter));
+  const sectionError = (section: string, filter = "all") =>
+    sectionErrors[sectionKey(section, filter)];
+  const metricSectionFilter = distributionFilter === "all" ? dayFilter : distributionFilter;
+  const metricsLoading = isSectionLoading("metrics", metricSectionFilter);
+  const distributionFilterLoading = isSectionLoading("distributions", distributionFilter);
   const titleLabel =
     payload.mode === "comparison" && payload.labels.observed
       ? `${payload.labels.observed} vs synthetic`
@@ -417,6 +532,8 @@ export function Charts() {
           Synthetic-only mode. Add an observed comparison parquet to show Wasserstein,
           Jensen-Shannon and CPC metrics.
         </div>
+      ) : metricsLoading ? (
+        <div className="state">Building selected metrics…</div>
       ) : (
         <div className="metric-tables">
           <FilteredMetricTable title="Wasserstein distances" rows={metricRows.wasserstein} />
@@ -430,13 +547,19 @@ export function Charts() {
           <SegmentedControl
             label="Distribution filter"
             onChange={setDistributionFilter}
-            options={[...dayFilters, ...PERIOD_FILTERS.filter((option) => option.key !== "all")]}
+            options={distributionFilters}
             value={distributionFilter}
           />
         }
         title="Distribution comparisons"
       />
-      {ecdfGroup && (
+      {distributionFilterLoading && (
+        <div className="state">Building {distributionFilter} distribution…</div>
+      )}
+      {sectionError("distributions", distributionFilter) && (
+        <div className="state">Failed to load distribution: {sectionError("distributions", distributionFilter)}</div>
+      )}
+      {!distributionFilterLoading && ecdfGroup && (
         <div className="chart-grid">
           {Object.entries(ecdfGroup.blocks).map(([key, block]) => (
             <ChartCard key={key} title={`${ECDF_TITLES[key] ?? key} ECDF`} option={ecdfOption(block)} />
@@ -444,7 +567,8 @@ export function Charts() {
         </div>
       )}
 
-      {mobilityGroup && (
+      {isSectionLoading("mobility-laws", dayFilter) && <div className="state">Building mobility laws…</div>}
+      {!isSectionLoading("mobility-laws", dayFilter) && mobilityGroup && (
         <>
           <SectionHeading
             controls={
@@ -470,7 +594,8 @@ export function Charts() {
         </>
       )}
 
-      {activityGroup && (
+      {isSectionLoading("activity", dayFilter) && <div className="state">Building activity comparison…</div>}
+      {!isSectionLoading("activity", dayFilter) && activityGroup && (
         <>
           <SectionHeading
             controls={
@@ -499,7 +624,8 @@ export function Charts() {
         </>
       )}
 
-      {microActivityGroup && (
+      {isSectionLoading("micro-activity", dayFilter) && <div className="state">Building micro-activity usage…</div>}
+      {!isSectionLoading("micro-activity", dayFilter) && microActivityGroup && (
         <>
           <SectionHeading
             controls={
@@ -520,7 +646,8 @@ export function Charts() {
         </>
       )}
 
-      {timeUseGroup && (
+      {isSectionLoading("time-use", dayFilter) && <div className="state">Building time-use comparison…</div>}
+      {!isSectionLoading("time-use", dayFilter) && timeUseGroup && (
         <>
           <SectionHeading
             controls={
@@ -548,7 +675,8 @@ export function Charts() {
         </>
       )}
 
-      {motifGroup && (
+      {isSectionLoading("motifs", dayFilter) && <div className="state">Building motifs…</div>}
+      {!isSectionLoading("motifs", dayFilter) && motifGroup && (
         <>
           <SectionHeading
             controls={
@@ -567,7 +695,8 @@ export function Charts() {
         </>
       )}
 
-      {stvdGroup && (
+      {isSectionLoading("stvd", dayFilter) && <div className="state">Building STVD map…</div>}
+      {!isSectionLoading("stvd", dayFilter) && stvdGroup && (
         <>
           <SectionHeading
             controls={

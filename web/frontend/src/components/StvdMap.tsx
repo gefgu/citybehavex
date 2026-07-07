@@ -9,7 +9,10 @@ import type { StvdBlock } from "../api";
 // per feature in the backend, so we just paint each polygon with its colour.
 export function StvdMap({ block }: { block: StvdBlock }) {
   const resolutions = Object.keys(block.layers).sort();
-  const [res, setRes] = useState(resolutions[resolutions.length - 1] ?? resolutions[0]);
+  const defaultResolution = resolutions.includes("7")
+    ? "7"
+    : (resolutions[resolutions.length - 1] ?? resolutions[0]);
+  const [res, setRes] = useState(defaultResolution);
   const center: [number, number] = block.center
     ? [block.center[1], block.center[0]]
     : [0, 0];
