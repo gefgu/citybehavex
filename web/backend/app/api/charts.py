@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+from concurrent.futures import ThreadPoolExecutor
 from types import SimpleNamespace
 from typing import Any, Optional
 
@@ -12,9 +14,16 @@ from ..executor import get_executor
 from ..experiments import get_experiment
 from ..home_work_data import DemoFilter, GENDERS, JOBS, get_or_build_home_work, resolve_age_bracket
 from ..models import ApiResponseWrapper
-from ..payload import build_comparison_payload, build_network_validation_payload
+from ..payload import (
+    build_chart_base_payload,
+    build_chart_section_payload,
+    build_network_validation_payload,
+)
 
 router = APIRouter(tags=["charts"])
+_chart_executor = ThreadPoolExecutor(
+    max_workers=max(1, int(os.environ.get("CBX_WEB_REQUEST_THREADS", "8")))
+)
 
 
 def _picklable_nv_config(nv_cfg: Any) -> Any:
@@ -31,6 +40,37 @@ def _picklable_nv_config(nv_cfg: Any) -> Any:
     return nv_cfg
 
 
+def _observed_path(experiment) -> Optional[Any]:  # noqa: ANN001
+    return (
+        experiment.observed_path
+        if experiment.observed_path is not None and experiment.observed_path.exists()
+        else None
+    )
+
+
+def _time_use_path(experiment) -> Optional[Any]:  # noqa: ANN001
+    return (
+        experiment.time_use_path
+        if experiment.time_use_path is not None and experiment.time_use_path.exists()
+        else None
+    )
+
+
+def _chart_build_kwargs(experiment, selected, observed_path, time_use_path) -> dict[str, Any]:  # noqa: ANN001
+    return dict(
+        synthetic_path=str(selected.path),
+        observed_path=str(observed_path) if observed_path is not None else None,
+        observed_label=experiment.label,
+        synthetic_activities_path=str(selected.activities_path),
+        time_use_path=str(time_use_path) if time_use_path is not None else None,
+        time_use_label=experiment.time_use_label,
+        time_use_country=experiment.time_use_country,
+        time_use_survey=experiment.time_use_survey,
+        time_use_weight_col=experiment.time_use_weight_col,
+        special_days=experiment.special_days,
+    )
+
+
 @router.get("/experiments/{exp_id}/charts")
 async def get_charts(
     exp_id: str,
@@ -44,11 +84,7 @@ async def get_charts(
     selected = experiment.run(run)
     if selected is None:
         raise HTTPException(status_code=404, detail=f"no runs found for experiment {exp_id!r}")
-    observed_path = (
-        experiment.observed_path
-        if experiment.observed_path is not None and experiment.observed_path.exists()
-        else None
-    )
+    observed_path = _observed_path(experiment)
     road_nodes_path = (
         experiment.road_nodes_path
         if experiment.road_nodes_path is not None and experiment.road_nodes_path.exists()
@@ -59,33 +95,16 @@ async def get_charts(
         if experiment.road_edges_path is not None and experiment.road_edges_path.exists()
         else None
     )
-    time_use_path = (
-        experiment.time_use_path
-        if experiment.time_use_path is not None and experiment.time_use_path.exists()
-        else None
-    )
+    time_use_path = _time_use_path(experiment)
 
     payload = await get_or_build(
         exp_id,
         selected.run_id,
         selected.path,
         observed_path,
-        build_fn=build_comparison_payload,
-        build_kwargs=dict(
-            synthetic_path=str(selected.path),
-            observed_path=str(observed_path) if observed_path is not None else None,
-            observed_label=experiment.label,
-            synthetic_activities_path=str(selected.activities_path),
-            time_use_path=str(time_use_path) if time_use_path is not None else None,
-            time_use_label=experiment.time_use_label,
-            time_use_country=experiment.time_use_country,
-            time_use_survey=experiment.time_use_survey,
-            time_use_weight_col=experiment.time_use_weight_col,
-            road_nodes_path=str(road_nodes_path) if road_nodes_path is not None else None,
-            road_edges_path=str(road_edges_path) if road_edges_path is not None else None,
-            special_days=experiment.special_days,
-        ),
-        executor=get_executor(),
+        build_fn=build_chart_base_payload,
+        build_kwargs=_chart_build_kwargs(experiment, selected, observed_path, time_use_path),
+        executor=_chart_executor,
         refresh=refresh,
         extra_paths=tuple(
             p
@@ -100,6 +119,54 @@ async def get_charts(
             if p is not None
         ),
     )
+    payload = {**payload, "run_id": selected.run_id}
+    return ApiResponseWrapper(data=payload)
+
+
+@router.get("/experiments/{exp_id}/charts/{section}")
+async def get_chart_section(
+    exp_id: str,
+    section: str,
+    filter: str = Query("all", description="Filter key to build, e.g. all, weekday, morning."),
+    run: Optional[str] = Query(None, description="Run id (timestamp). Defaults to the latest run."),
+    refresh: bool = Query(False, description="Bypass the cache and recompute."),
+) -> ApiResponseWrapper[dict[str, Any]]:
+    experiment = get_experiment(exp_id)
+    if experiment is None:
+        raise HTTPException(status_code=404, detail=f"unknown experiment {exp_id!r}")
+
+    selected = experiment.run(run)
+    if selected is None:
+        raise HTTPException(status_code=404, detail=f"no runs found for experiment {exp_id!r}")
+    observed_path = _observed_path(experiment)
+    time_use_path = _time_use_path(experiment)
+
+    try:
+        payload = await get_or_build(
+            exp_id,
+            selected.run_id,
+            selected.path,
+            observed_path,
+            build_fn=build_chart_section_payload,
+            build_kwargs=dict(
+                **_chart_build_kwargs(experiment, selected, observed_path, time_use_path),
+                section=section,
+                filter_key=filter,
+            ),
+            executor=_chart_executor,
+            refresh=refresh,
+            extra_paths=tuple(
+                p
+                for p in (
+                    selected.activities_path,
+                    time_use_path,
+                )
+                if p is not None
+            ),
+            extra_key={"section": section, "filter": filter},
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
     payload = {**payload, "run_id": selected.run_id}
     return ApiResponseWrapper(data=payload)
 

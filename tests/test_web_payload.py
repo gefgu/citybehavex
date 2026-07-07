@@ -13,6 +13,9 @@ from web.backend.app.payload import (
     _filter_df,
     _load_social_network_sidecar,
     _special_day_filters,
+    build_chart_base_payload,
+    build_chart_filter_payload,
+    build_chart_section_payload,
     build_comparison_payload,
     build_network_validation_payload,
 )
@@ -337,6 +340,149 @@ def test_build_comparison_payload_supports_synthetic_only(monkeypatch, tmp_path)
     assert all_activity["transition_difference"]["matrix_mode"] == "raw"
     assert all_activity["daily_activity_difference"]["matrix_mode"] == "raw"
     assert len(all_activity["purpose"]["series"]) == 1
+
+
+def test_build_chart_base_payload_returns_only_all_filter(monkeypatch, tmp_path):
+    synthetic = tmp_path / "synthetic.parquet"
+    observed = tmp_path / "observed.parquet"
+    pd.DataFrame(
+        {
+            "uid": ["u1", "u1", "u1"],
+            "datetime": pd.to_datetime(["2026-01-01 03:00", "2026-01-01 10:00", "2026-01-01 18:00"]),
+            "lat": [48.85, 48.86, 48.87],
+            "lng": [2.35, 2.36, 2.37],
+            "purpose": ["HOME", "WORK", "SHOP"],
+            "dwell_minutes": [300.0, 120.0, 90.0],
+        }
+    ).to_parquet(synthetic, index=False)
+    pd.DataFrame(
+        {
+            "uid": ["u2", "u2", "u2"],
+            "datetime": pd.to_datetime(["2026-01-01 03:00", "2026-01-01 10:00", "2026-01-01 18:00"]),
+            "lat": [48.85, 48.86, 48.87],
+            "lng": [2.35, 2.36, 2.37],
+            "location_id": ["home", "work", "shop"],
+        }
+    ).to_parquet(observed, index=False)
+    monkeypatch.setattr(
+        "web.backend.app.payload.visits_per_user_wasserstein_distance",
+        lambda *args, **kwargs: (0.0, None),
+    )
+    monkeypatch.setattr("web.backend.app.payload._common_part_of_commuters", lambda *args, **kwargs: [])
+    monkeypatch.setattr(
+        "web.backend.app.payload._mobility_law_visits",
+        lambda *args, **kwargs: pl.DataFrame(
+            {
+                "user_id": ["u1", "u1"],
+                "timestamp": pl.Series(["2026-01-01 00:00", "2026-01-01 01:00"]).str.to_datetime(),
+                "location_id": ["a", "b"],
+                "lat": [48.85, 48.86],
+                "lng": [2.35, 2.36],
+            }
+        ),
+    )
+
+    payload = build_chart_base_payload(str(synthetic), str(observed), "observed")
+
+    assert payload["loaded_filters"] == []
+    assert payload["enabled_sections"] == [
+        "distributions",
+        "metrics",
+        "activity",
+        "mobility-laws",
+        "micro-activity",
+        "time-use",
+        "motifs",
+        "stvd",
+        "profiles",
+        "social-network",
+    ]
+    assert payload["ecdf"]["groups"] == []
+    assert payload["available_filters"] == [
+        {"key": "all", "label": "All"},
+        {"key": "weekday", "label": "Weekday"},
+        {"key": "weekend", "label": "Weekend"},
+    ]
+    assert any(option["key"] == "morning" for option in payload["distribution_filters"])
+
+    section = build_chart_section_payload(
+        "distributions",
+        "all",
+        synthetic_path=str(synthetic),
+        observed_path=str(observed),
+        observed_label="observed",
+    )
+    assert section["loaded_filters"] == ["all"]
+    assert [group["filter_key"] for group in section["ecdf"]["groups"]] == ["all"]
+
+
+def test_build_chart_filter_payload_returns_one_filter(monkeypatch, tmp_path):
+    synthetic = tmp_path / "synthetic.parquet"
+    pd.DataFrame(
+        {
+            "uid": ["u1", "u1", "u1"],
+            "datetime": pd.to_datetime(["2026-01-03 03:00", "2026-01-05 10:00", "2026-01-05 18:00"]),
+            "lat": [48.85, 48.86, 48.87],
+            "lng": [2.35, 2.36, 2.37],
+            "purpose": ["HOME", "WORK", "SHOP"],
+            "trip_duration_minutes": [10.0, 15.0, 20.0],
+            "dwell_minutes": [300.0, 120.0, 90.0],
+        }
+    ).to_parquet(synthetic, index=False)
+    monkeypatch.setattr(
+        "web.backend.app.payload._mobility_law_visits",
+        lambda *args, **kwargs: pl.DataFrame(
+            {
+                "user_id": ["u1", "u1"],
+                "timestamp": pl.Series(["2026-01-01 00:00", "2026-01-01 01:00"]).str.to_datetime(),
+                "location_id": ["a", "b"],
+                "lat": [48.85, 48.86],
+                "lng": [2.35, 2.36],
+            }
+        ),
+    )
+
+    payload = build_chart_filter_payload(str(synthetic), None, "observed", "weekday")
+
+    assert payload["loaded_filters"] == ["weekday"]
+    assert [group["filter_key"] for group in payload["ecdf"]["groups"]] == ["weekday"]
+    assert payload["activity"] is not None
+    assert [group["filter_key"] for group in payload["activity"]["groups"]] == ["weekday"]
+    assert payload["profiles"] is None
+    assert payload["social_network"] is None
+
+
+def test_build_chart_filter_payload_time_filter_only_builds_distribution(monkeypatch, tmp_path):
+    synthetic = tmp_path / "synthetic.parquet"
+    pd.DataFrame(
+        {
+            "uid": ["u1", "u1"],
+            "datetime": pd.to_datetime(["2026-01-01 07:00", "2026-01-01 10:00"]),
+            "lat": [48.85, 48.86],
+            "lng": [2.35, 2.36],
+            "purpose": ["HOME", "WORK"],
+            "dwell_minutes": [120.0, 90.0],
+        }
+    ).to_parquet(synthetic, index=False)
+    monkeypatch.setattr(
+        "web.backend.app.payload._mobility_law_visits",
+        lambda *args, **kwargs: pl.DataFrame(
+            {
+                "user_id": ["u1"],
+                "timestamp": pl.Series(["2026-01-01 00:00"]).str.to_datetime(),
+                "location_id": ["a"],
+                "lat": [48.85],
+                "lng": [2.35],
+            }
+        ),
+    )
+
+    payload = build_chart_filter_payload(str(synthetic), None, "observed", "morning")
+
+    assert payload["loaded_filters"] == ["morning"]
+    assert [group["filter_key"] for group in payload["ecdf"]["groups"]] == ["morning"]
+    assert payload["activity"] is None
+    assert payload["mobility_laws"] is None
 
 
 def test_special_day_filters_builds_date_range_metadata():

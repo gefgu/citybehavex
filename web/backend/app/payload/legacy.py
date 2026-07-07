@@ -15,6 +15,7 @@ arrays.
 from __future__ import annotations
 
 import json
+import os
 from datetime import timedelta
 from pathlib import Path
 from typing import Any, Optional
@@ -42,8 +43,8 @@ from skmob_vis.motifs import (
 )
 
 from citybehavex.activities import build_catalog
-from . import features
-from .filters import (
+from .. import features
+from ..filters import (
     FILTERS,
     _TIME_FILTERS,
     _empty_group,
@@ -52,7 +53,7 @@ from .filters import (
     _special_day_filters,
     _to_datetime,
 )
-from .reports_bridge import (
+from ..reports_bridge import (
     CAR_SPEED_KMH,
     PROFILE_METRICS,
     _ACTIVITY_CANDIDATES,
@@ -78,6 +79,12 @@ from .reports_bridge import (
 from citybehavex.reports.network_validation import build_network_validation
 from citybehavex.simulation.core import social_network_sidecar_path
 
+try:
+    from joblib import Parallel, delayed
+except Exception:  # pragma: no cover - dependency fallback for minimal installs
+    Parallel = None
+    delayed = None
+
 # STVD bivariate palette (volume-diff bin x peak-shift bin), matching
 # skmob_vis.stvd.STVD_COLORS so the map reads identically to the HTML report.
 STVD_COLORS = [
@@ -89,6 +96,7 @@ STVD_VOLUME_THRESHOLD = 3.0
 
 _MAX_ECDF_POINTS = 400
 _MAX_SCATTER_POINTS = 4000
+_BASE_FILTER_KEY = "all"
 TIME_USE_CATEGORIES = [
     "sleep",
     "eatdrink",
@@ -164,6 +172,45 @@ def _read_time_use_table(path: Path, required_columns: list[str]) -> pl.DataFram
     if suffix == ".csv":
         return pl.read_csv(path, columns=required_columns)
     raise ValueError(f"unsupported time-use file extension: {path.suffix}")
+
+
+def _section_threads() -> int:
+    value = os.environ.get("CBX_WEB_SECTION_THREADS")
+    if value:
+        return max(1, int(value))
+    return 4
+
+
+def _parallel_map(items: list[Any], fn) -> list[Any]:
+    workers = min(_section_threads(), len(items))
+    if workers <= 1 or Parallel is None or delayed is None:
+        return [fn(item) for item in items]
+    return Parallel(n_jobs=workers, prefer="threads")(delayed(fn)(item) for item in items)
+
+
+def _filter_options(special_days: Optional[list[dict[str, str]]] = None) -> list[dict[str, Any]]:
+    return [*FILTERS, *_special_day_filters(special_days)]
+
+
+def _distribution_filter_options(special_days: Optional[list[dict[str, str]]] = None) -> list[dict[str, Any]]:
+    return [*_filter_options(special_days), *_TIME_FILTERS]
+
+
+def _select_filter_metas(
+    available: list[dict[str, Any]],
+    filter_keys: Optional[list[str]],
+) -> list[dict[str, Any]]:
+    if filter_keys is None:
+        return available
+    by_key = {meta["key"]: meta for meta in available}
+    unknown = [key for key in filter_keys if key not in by_key]
+    if unknown:
+        raise ValueError(f"unknown comparison filter(s): {', '.join(sorted(unknown))}")
+    return [by_key[key] for key in filter_keys]
+
+
+def _public_filter(meta: dict[str, Any]) -> dict[str, str]:
+    return {"key": str(meta["key"]), "label": str(meta["label"])}
 
 
 def _load_mtus_time_use(
@@ -297,6 +344,7 @@ def _build_time_use_comparison_block(
     country: str | None,
     survey: int | None,
     weight_col: str,
+    filters: Optional[list[dict[str, Any]]] = None,
 ) -> dict[str, Any] | None:
     if time_use_path is None or synthetic_activities_path is None:
         return None
@@ -316,7 +364,9 @@ def _build_time_use_comparison_block(
     segments = _split_activity_segments(pl.read_parquet(activities_file))
 
     groups = []
-    for meta in FILTERS:
+    for meta in (filters or FILTERS):
+        if meta.get("kind") == "time":
+            continue
         observed_minutes = _time_use_observed_group(observed, meta, weight_col)
         synthetic_minutes = _time_use_synthetic_group(segments, meta)
         rows = []
@@ -598,9 +648,116 @@ def build_comparison_payload(
     road_snap_max_distance_m: float = 750.0,
     special_days: Optional[list[dict[str, str]]] = None,
 ) -> dict[str, Any]:
+    return _build_comparison_payload(
+        synthetic_path=synthetic_path,
+        observed_path=observed_path,
+        observed_label=observed_label,
+        synthetic_activities_path=synthetic_activities_path,
+        time_use_path=time_use_path,
+        time_use_label=time_use_label,
+        time_use_country=time_use_country,
+        time_use_survey=time_use_survey,
+        time_use_weight_col=time_use_weight_col,
+        road_snap_max_distance_m=road_snap_max_distance_m,
+        special_days=special_days,
+        filter_keys=None,
+        include_progressive_metadata=False,
+        include_social_network=True,
+        include_profiles=True,
+    )
+
+
+def build_chart_base_payload(
+    synthetic_path: str,
+    observed_path: Optional[str],
+    observed_label: str,
+    synthetic_activities_path: Optional[str] = None,
+    time_use_path: Optional[str] = None,
+    time_use_label: str = "time-use",
+    time_use_country: Optional[str] = None,
+    time_use_survey: Optional[int] = None,
+    time_use_weight_col: str = "propwt",
+    special_days: Optional[list[dict[str, str]]] = None,
+) -> dict[str, Any]:
+    return _build_comparison_payload(
+        synthetic_path=synthetic_path,
+        observed_path=observed_path,
+        observed_label=observed_label,
+        synthetic_activities_path=synthetic_activities_path,
+        time_use_path=time_use_path,
+        time_use_label=time_use_label,
+        time_use_country=time_use_country,
+        time_use_survey=time_use_survey,
+        time_use_weight_col=time_use_weight_col,
+        special_days=special_days,
+        filter_keys=[_BASE_FILTER_KEY],
+        include_progressive_metadata=True,
+        include_social_network=True,
+        include_profiles=True,
+    )
+
+
+def build_chart_filter_payload(
+    synthetic_path: str,
+    observed_path: Optional[str],
+    observed_label: str,
+    filter_key: str,
+    synthetic_activities_path: Optional[str] = None,
+    time_use_path: Optional[str] = None,
+    time_use_label: str = "time-use",
+    time_use_country: Optional[str] = None,
+    time_use_survey: Optional[int] = None,
+    time_use_weight_col: str = "propwt",
+    special_days: Optional[list[dict[str, str]]] = None,
+) -> dict[str, Any]:
+    if filter_key == _BASE_FILTER_KEY:
+        include_social_network = True
+        include_profiles = True
+    else:
+        include_social_network = False
+        include_profiles = False
+    return _build_comparison_payload(
+        synthetic_path=synthetic_path,
+        observed_path=observed_path,
+        observed_label=observed_label,
+        synthetic_activities_path=synthetic_activities_path,
+        time_use_path=time_use_path,
+        time_use_label=time_use_label,
+        time_use_country=time_use_country,
+        time_use_survey=time_use_survey,
+        time_use_weight_col=time_use_weight_col,
+        special_days=special_days,
+        filter_keys=[filter_key],
+        include_progressive_metadata=True,
+        include_social_network=include_social_network,
+        include_profiles=include_profiles,
+    )
+
+
+def _build_comparison_payload(
+    *,
+    synthetic_path: str,
+    observed_path: Optional[str],
+    observed_label: str,
+    synthetic_activities_path: Optional[str] = None,
+    time_use_path: Optional[str] = None,
+    time_use_label: str = "time-use",
+    time_use_country: Optional[str] = None,
+    time_use_survey: Optional[int] = None,
+    time_use_weight_col: str = "propwt",
+    road_snap_max_distance_m: float = 750.0,
+    special_days: Optional[list[dict[str, str]]] = None,
+    filter_keys: Optional[list[str]] = None,
+    include_progressive_metadata: bool = False,
+    include_social_network: bool = True,
+    include_profiles: bool = True,
+) -> dict[str, Any]:
     warnings: list[str] = []
-    filters = [*FILTERS, *_special_day_filters(special_days)]
-    distribution_filters = [*filters, *_TIME_FILTERS]
+    available_filters = _filter_options(special_days)
+    available_distribution_filters = _distribution_filter_options(special_days)
+    distribution_filters = _select_filter_metas(available_distribution_filters, filter_keys)
+    requested_keys = {meta["key"] for meta in distribution_filters}
+    filters = [meta for meta in available_filters if meta["key"] in requested_keys]
 
     def guard(section: str, fn):
         try:
@@ -655,8 +812,9 @@ def build_comparison_payload(
     # computation in this pipeline (also reused by the mobility-laws
     # section below, instead of it recomputing them a second time via a
     # different, non-road-aware code path as it used to).
-    road_nodes_path_obj = Path(road_nodes_path) if road_nodes_path else None
-    road_edges_path_obj = Path(road_edges_path) if road_edges_path else None
+    road_nodes_path_obj = None
+    road_edges_path_obj = None
+
     synth_jumps_rog = features.get_jumps_rog(
         Path(synthetic_path),
         uid_col=traj.uid_col,
@@ -886,6 +1044,7 @@ def build_comparison_payload(
             country=time_use_country,
             survey=time_use_survey,
             weight_col=time_use_weight_col,
+            filters=filters,
         ),
     )
 
@@ -944,13 +1103,16 @@ def build_comparison_payload(
                      **_distance_frequency_series(obs_law_visits, syn_law_visits, observed_label if obs_law_visits is not None else None)})
         blocks = {k: v for k, v in block.items() if v is not None}
         return {"filter_key": meta["key"], "filter_label": meta["label"], "blocks": blocks} if blocks else None
-    mobility_groups = [guard(f"mobility_laws.{m['key']}", lambda m=m: _mobility_laws_group(m)) for m in filters]
+    mobility_groups = _parallel_map(
+        filters,
+        lambda m: guard(f"mobility_laws.{m['key']}", lambda m=m: _mobility_laws_group(m)),
+    )
     mobility_groups = [g for g in mobility_groups if g is not None]
     mobility_laws = {"groups": mobility_groups} if mobility_groups else None
 
     # ---- profiles -------------------------------------------------------- #
     profiles = None
-    if synthetic_visits is not None and observed_visits is not None:
+    if include_profiles and synthetic_visits is not None and observed_visits is not None:
         profiles = guard("profiles", lambda: _build_profiles_block(
             observed_label, compute_profiles(observed_visits), compute_profiles(synthetic_visits)))
 
@@ -977,7 +1139,7 @@ def build_comparison_payload(
     stvd = None
     if mode == "comparison" and traj.lat_col and traj.lng_col and real_traj and real_traj.lat_col and real_traj.lng_col:
         stvd_groups = []
-        for meta in filters:
+        def _stvd_group(meta):
             def _stvd(meta=meta):
                 synth_df = _filter_df(traj.df, traj.datetime_col, meta)
                 real_group_df = _filter_df(real_df, real_dt_col, meta)
@@ -992,9 +1154,8 @@ def build_comparison_payload(
                         resolutions=[7, 9],
                     )),
                 }
-            group = guard(f"stvd.{meta['key']}", _stvd)
-            if group is not None:
-                stvd_groups.append(group)
+            return guard(f"stvd.{meta['key']}", _stvd)
+        stvd_groups = [g for g in _parallel_map(filters, _stvd_group) if g is not None]
         stvd = {"groups": stvd_groups} if stvd_groups else None
 
     if mode == "comparison" and real_traj is not None:
@@ -1019,9 +1180,12 @@ def build_comparison_payload(
     # route in web/backend/app/api/charts.py) so its build time -- still the
     # largest single section for shanghai/yjmob even after the Rust port --
     # doesn't block first paint of the rest of the charts.
-    social_network = guard("social_network", lambda: _load_social_network_sidecar(synthetic_path))
-
-    return {
+    social_network = (
+        guard("social_network", lambda: _load_social_network_sidecar(synthetic_path))
+        if include_social_network
+        else None
+    )
+    payload = {
         "mode": mode,
         "labels": labels,
         "metrics": {"wasserstein": wasserstein, "jsd": jsd, "cpc": cpc_metrics},
@@ -1036,6 +1200,13 @@ def build_comparison_payload(
         "social_network": social_network,
         "warnings": warnings,
     }
+    if include_progressive_metadata:
+        payload["available_filters"] = [_public_filter(meta) for meta in available_filters]
+        payload["distribution_filters"] = [
+            _public_filter(meta) for meta in available_distribution_filters
+        ]
+        payload["loaded_filters"] = [meta["key"] for meta in distribution_filters]
+    return payload
 
 
 def build_network_validation_payload(

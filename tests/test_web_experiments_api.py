@@ -224,7 +224,7 @@ def test_charts_endpoint_allows_missing_observed_path(monkeypatch, tmp_path):
             "warnings": [],
         }
 
-    monkeypatch.setattr(charts_mod, "build_comparison_payload", fake_build)
+    monkeypatch.setattr(charts_mod, "build_chart_base_payload", fake_build)
     # fake_build is a test-local closure, not picklable/importable by a real
     # ProcessPoolExecutor worker -- run inline (executor=None) instead, same
     # as get_or_build's non-process-pool fallback path.
@@ -233,6 +233,68 @@ def test_charts_endpoint_allows_missing_observed_path(monkeypatch, tmp_path):
     response = asyncio.run(charts_mod.get_charts("demo", run="20260101T010203", refresh=True))
 
     assert response.data["mode"] == "synthetic_only"
+    assert response.data["run_id"] == "20260101T010203"
+
+
+def test_chart_section_endpoint_passes_section_and_filter(monkeypatch, tmp_path):
+    run = tmp_path / "trajectories_20260101T010203.parquet"
+    pd.DataFrame({"uid": [1]}).to_parquet(run, index=False)
+    selected = SimpleNamespace(
+        run_id="20260101T010203",
+        path=run,
+        activities_path=tmp_path / "missing_activities.parquet",
+    )
+    experiment = SimpleNamespace(
+        observed_path=None,
+        label="observed",
+        run=lambda run_id=None: selected,
+        time_use_path=None,
+        time_use_label="time-use",
+        time_use_country=None,
+        time_use_survey=None,
+        time_use_weight_col="propwt",
+        special_days=[],
+    )
+    monkeypatch.setattr(charts_mod, "get_experiment", lambda exp_id: experiment)
+    calls = []
+
+    def fake_build(section, filter_key="all", **kwargs):
+        calls.append((section, filter_key, kwargs["observed_path"]))
+        return {
+            "mode": "synthetic_only",
+            "labels": {"synthetic": "synthetic"},
+            "available_filters": [{"key": "all", "label": "All"}],
+            "distribution_filters": [{"key": "all", "label": "All"}],
+            "enabled_sections": ["distributions"],
+            "loaded_filters": [filter_key],
+            "metrics": {"wasserstein": [], "jsd": [], "cpc": []},
+            "ecdf": {"groups": [{"filter_key": filter_key, "filter_label": "Weekday", "blocks": {}}]},
+            "mobility_laws": None,
+            "activity": None,
+            "micro_activity_usage": None,
+            "time_use_comparison": None,
+            "profiles": None,
+            "motifs": None,
+            "stvd": None,
+            "social_network": None,
+            "warnings": [],
+        }
+
+    monkeypatch.setattr(charts_mod, "build_chart_section_payload", fake_build)
+    monkeypatch.setattr(charts_mod, "_chart_executor", None)
+
+    response = asyncio.run(
+        charts_mod.get_chart_section(
+            "demo",
+            section="distributions",
+            filter="weekday",
+            run="20260101T010203",
+            refresh=True,
+        )
+    )
+
+    assert calls == [("distributions", "weekday", None)]
+    assert response.data["ecdf"]["groups"][0]["filter_key"] == "weekday"
     assert response.data["run_id"] == "20260101T010203"
 
 

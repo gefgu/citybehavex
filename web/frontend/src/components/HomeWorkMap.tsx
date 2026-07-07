@@ -7,7 +7,10 @@ import type { HomeWorkMapBlock, HomeWorkPanel } from "../api";
 
 function Panel({ title, panel }: { title: string; panel: HomeWorkPanel }) {
   const resolutions = Object.keys(panel.layers).sort();
-  const [res, setRes] = useState(resolutions[resolutions.length - 1] ?? resolutions[0]);
+  const defaultResolution = resolutions.includes("7")
+    ? "7"
+    : (resolutions[resolutions.length - 1] ?? resolutions[0]);
+  const [res, setRes] = useState(defaultResolution);
   const center: [number, number] = panel.center ? [panel.center[1], panel.center[0]] : [0, 0];
   const geojson = useMemo(() => panel.layers[res], [panel, res]);
 

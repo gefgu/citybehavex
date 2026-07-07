@@ -111,6 +111,20 @@ export function fetchCharts(id: string, run?: string): Promise<ChartPayload> {
   return getJson<ChartPayload>(`/api/experiments/${encodeURIComponent(id)}/charts${q}`);
 }
 
+export function fetchChartSection(
+  id: string,
+  section: string,
+  filter = "all",
+  run?: string,
+): Promise<ChartPayload> {
+  const q = new URLSearchParams();
+  q.set("filter", filter);
+  if (run) q.set("run", run);
+  return getJson<ChartPayload>(
+    `/api/experiments/${encodeURIComponent(id)}/charts/${encodeURIComponent(section)}?${q.toString()}`,
+  );
+}
+
 export interface HomeWorkFeatureCollection {
   type: string;
   features: {
@@ -549,6 +563,10 @@ export interface ChartPayload {
   mode: "comparison" | "synthetic_only";
   run_id: string;
   labels: { synthetic: string; observed?: string };
+  available_filters?: { key: string; label: string }[];
+  distribution_filters?: { key: string; label: string }[];
+  enabled_sections?: string[];
+  loaded_filters?: string[];
   metrics: {
     wasserstein: { filter_key: string; filter_label: string; metric_name: string; name?: string; value: number; unit?: string }[];
     jsd: { filter_key?: string; filter_label?: string; metric_name?: string; name?: string; value: number }[];
