@@ -1,6 +1,10 @@
 from __future__ import annotations
 
-from web.backend.app.cache import _key
+import asyncio
+import threading
+from concurrent.futures import ThreadPoolExecutor
+
+from web.backend.app.cache import _key, get_or_build
 
 
 def test_payload_cache_key_stays_within_filename_limits(tmp_path):
@@ -42,3 +46,81 @@ def test_payload_cache_key_changes_when_extra_inputs_change(tmp_path):
     key_b = _key("exp", "run", synthetic, observed, (extra_b,))
 
     assert key_a != key_b
+
+
+def test_payload_cache_key_changes_with_extra_key(tmp_path):
+    synthetic = tmp_path / "synthetic.parquet"
+    synthetic.write_text("x", encoding="utf-8")
+
+    key_a = _key("exp", "run", synthetic, None, extra_key={"demo": {"gender": "female"}})
+    key_b = _key("exp", "run", synthetic, None, extra_key={"demo": {"gender": "male"}})
+    key_same = _key("exp", "run", synthetic, None, extra_key={"demo": {"gender": "female"}})
+
+    assert key_a != key_b
+    assert key_a == key_same
+
+
+def test_get_or_build_reads_from_cache_without_calling_build(tmp_path, monkeypatch):
+    import web.backend.app.cache as cache_mod
+
+    monkeypatch.setattr(cache_mod, "CACHE_DIR", tmp_path)
+    synthetic = tmp_path / "synthetic.parquet"
+    synthetic.write_text("x", encoding="utf-8")
+
+    calls = []
+
+    def build():
+        calls.append(1)
+        return {"n": len(calls)}
+
+    first = asyncio.run(get_or_build("exp", "run", synthetic, None, build_fn=build))
+    second = asyncio.run(get_or_build("exp", "run", synthetic, None, build_fn=build))
+
+    assert first == {"n": 1}
+    assert second == {"n": 1}
+    assert len(calls) == 1
+
+
+def test_get_or_build_coalesces_concurrent_identical_calls(tmp_path, monkeypatch):
+    """Two concurrent callers for the same still-uncached key must trigger
+    exactly one build, not one each -- see cache.py's in-flight registry."""
+    import web.backend.app.cache as cache_mod
+
+    monkeypatch.setattr(cache_mod, "CACHE_DIR", tmp_path)
+    synthetic = tmp_path / "synthetic.parquet"
+    synthetic.write_text("x", encoding="utf-8")
+
+    calls = []
+    started = threading.Event()
+    release = threading.Event()
+
+    def slow_build():
+        calls.append(1)
+        started.set()
+        release.wait(timeout=5)
+        return {"ok": True}
+
+    async def run_two():
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            async def first():
+                return await get_or_build(
+                    "exp", "run", synthetic, None, build_fn=slow_build, executor=executor
+                )
+
+            async def second():
+                # Only start once the first call's build is actually running,
+                # so this exercises a genuine concurrent-with-an-in-flight-build
+                # call rather than two sequential ones.
+                await asyncio.get_event_loop().run_in_executor(None, started.wait, 5)
+                release.set()
+                return await get_or_build(
+                    "exp", "run", synthetic, None, build_fn=slow_build, executor=executor
+                )
+
+            return await asyncio.gather(first(), second())
+
+    results = asyncio.run(run_two())
+
+    assert results[0] == {"ok": True}
+    assert results[1] == {"ok": True}
+    assert len(calls) == 1

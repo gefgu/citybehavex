@@ -20,7 +20,6 @@ point into the display resolutions (7 and 9, matching STVD's
 from __future__ import annotations
 
 from dataclasses import dataclass
-from functools import lru_cache
 from pathlib import Path
 from typing import Any, Optional
 
@@ -449,40 +448,40 @@ def _bracket_key_for(age_min: Optional[int], age_max: Optional[int]) -> Optional
     return None
 
 
-@lru_cache(maxsize=64)
-def _cached_build(
-    synthetic_path_str: str,
-    synthetic_mtime: float,
-    observed_path_str: Optional[str],
-    observed_mtime: Optional[float],
-    profiles_path_str: Optional[str],
-    profiles_mtime: Optional[float],
-    demo: DemoFilter,
-) -> dict[str, Any]:
-    return build_home_work(
-        Path(synthetic_path_str),
-        Path(observed_path_str) if observed_path_str else None,
-        Path(profiles_path_str) if profiles_path_str else None,
-        demo,
-    )
-
-
-def get_or_build_home_work(
+async def get_or_build_home_work(
     synthetic_path: Path,
     observed_path: Optional[Path],
     profiles_path: Optional[Path],
     demo: DemoFilter,
     *,
+    exp_id: str,
+    run_id: str,
     refresh: bool = False,
 ) -> dict[str, Any]:
-    if refresh:
-        _cached_build.cache_clear()
-    return _cached_build(
-        str(synthetic_path),
-        synthetic_path.stat().st_mtime,
-        str(observed_path) if observed_path else None,
-        observed_path.stat().st_mtime if observed_path and observed_path.exists() else None,
-        str(profiles_path) if profiles_path else None,
-        profiles_path.stat().st_mtime if profiles_path and profiles_path.exists() else None,
-        demo,
+    from .cache import get_or_build
+    from .executor import get_executor
+
+    return await get_or_build(
+        f"{exp_id}__home_work",
+        run_id,
+        synthetic_path,
+        observed_path,
+        build_fn=build_home_work,
+        build_kwargs=dict(
+            synthetic_path=synthetic_path,
+            observed_path=observed_path,
+            profiles_path=profiles_path,
+            demo=demo,
+        ),
+        executor=get_executor(),
+        refresh=refresh,
+        extra_paths=(profiles_path,) if profiles_path else (),
+        extra_key={
+            "demo": {
+                "gender": demo.gender,
+                "age_min": demo.age_min,
+                "age_max": demo.age_max,
+                "job": demo.job,
+            }
+        },
     )

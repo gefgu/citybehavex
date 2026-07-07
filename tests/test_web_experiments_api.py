@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import yaml
 import pandas as pd
 from types import SimpleNamespace
@@ -224,8 +225,12 @@ def test_charts_endpoint_allows_missing_observed_path(monkeypatch, tmp_path):
         }
 
     monkeypatch.setattr(charts_mod, "build_comparison_payload", fake_build)
+    # fake_build is a test-local closure, not picklable/importable by a real
+    # ProcessPoolExecutor worker -- run inline (executor=None) instead, same
+    # as get_or_build's non-process-pool fallback path.
+    monkeypatch.setattr(charts_mod, "get_executor", lambda: None)
 
-    response = charts_mod.get_charts("demo", run="20260101T010203", refresh=True)
+    response = asyncio.run(charts_mod.get_charts("demo", run="20260101T010203", refresh=True))
 
     assert response.data["mode"] == "synthetic_only"
     assert response.data["run_id"] == "20260101T010203"
@@ -257,8 +262,11 @@ def test_network_validation_endpoint_is_independent_of_charts(monkeypatch, tmp_p
         return {"network_validation": {"synthetic_vs_random": None}, "warnings": []}
 
     monkeypatch.setattr(charts_mod, "build_network_validation_payload", fake_build)
+    monkeypatch.setattr(charts_mod, "get_executor", lambda: None)
 
-    response = charts_mod.get_network_validation("demo", run="20260101T010203", refresh=True)
+    response = asyncio.run(
+        charts_mod.get_network_validation("demo", run="20260101T010203", refresh=True)
+    )
 
     assert response.data["run_id"] == "20260101T010203"
     assert response.data["network_validation"] == {"synthetic_vs_random": None}

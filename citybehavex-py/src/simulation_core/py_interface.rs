@@ -40,7 +40,7 @@ pub fn batch_latlng_to_cells_py<'py>(
     }
     let res = Resolution::try_from(resolution)
         .map_err(|e| PyValueError::new_err(format!("invalid H3 resolution {resolution}: {e}")))?;
-    let cells = batch_latlng_to_cells(lat_slice, lng_slice, res);
+    let cells = py.detach(|| batch_latlng_to_cells(lat_slice, lng_slice, res));
     Ok(cells.into_pyarray(py))
 }
 
@@ -554,8 +554,9 @@ pub fn build_co_presence_edges_py<'py>(
             "day_codes, location_codes and nodes must have the same length",
         ));
     }
-    let (edge_from, edge_to, persistence, skipped_groups, skipped_rows) =
-        build_co_presence_edges(day, location, node, max_group_size, time_steps);
+    let (edge_from, edge_to, persistence, skipped_groups, skipped_rows) = py.detach(|| {
+        build_co_presence_edges(day, location, node, max_group_size, time_steps)
+    });
     Ok((
         edge_from.into_pyarray(py),
         edge_to.into_pyarray(py),
@@ -587,7 +588,7 @@ pub fn graph_metrics_py<'py>(
             "edge_from and edge_to must have the same length",
         ));
     }
-    let metrics = compute_graph_metrics(node_count, from, to);
+    let metrics = py.detach(|| compute_graph_metrics(node_count, from, to));
     Ok((
         metrics.clustering_coefficient.into_pyarray(py),
         metrics.topological_overlap.into_pyarray(py),
@@ -638,8 +639,10 @@ impl RoadNetworkHandle {
         from_nodes: PyReadonlyArray1<'py, i64>,
         to_nodes: PyReadonlyArray1<'py, i64>,
     ) -> PyResult<(Bound<'py, PyArray1<f64>>, Bound<'py, PyArray1<u8>>)> {
+        let from_slice = from_nodes.as_slice()?;
+        let to_slice = to_nodes.as_slice()?;
         let (dist, conn) =
-            batch_road_distances(&self.graph, from_nodes.as_slice()?, to_nodes.as_slice()?);
+            py.detach(|| batch_road_distances(&self.graph, from_slice, to_slice));
         let conn_u8: Vec<u8> = conn.into_iter().map(|b| b as u8).collect();
         Ok((dist.into_pyarray(py), conn_u8.into_pyarray(py)))
     }

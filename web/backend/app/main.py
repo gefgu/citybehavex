@@ -8,6 +8,7 @@ an SPA fallback — the mount is added only if that directory exists.
 
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, Request
@@ -18,8 +19,18 @@ from fastapi.staticfiles import StaticFiles
 
 from .api import api_router
 from .config import REPO_ROOT
+from .executor import init_executor, shutdown_executor
 
 _FRONTEND_DIST = REPO_ROOT / "web" / "frontend" / "dist"
+
+
+@asynccontextmanager
+async def _lifespan(app: FastAPI):
+    init_executor()
+    try:
+        yield
+    finally:
+        shutdown_executor()
 
 
 def create_app() -> FastAPI:
@@ -27,6 +38,7 @@ def create_app() -> FastAPI:
         title="CityBehavEx Web API",
         openapi_url="/api/openapi.json",
         docs_url="/api/docs",
+        lifespan=_lifespan,
     )
 
     app.add_middleware(

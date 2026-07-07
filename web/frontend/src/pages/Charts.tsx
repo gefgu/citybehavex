@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import type { EChartsOption } from "echarts";
@@ -234,27 +234,84 @@ export function Charts() {
     age_bracket: null,
     job: null,
   });
+  // demoFilter is read by the sequential chain below without being a
+  // dependency of it (see the comment on demoFilterRef), so the chain
+  // doesn't re-run on every filter tweak -- only the dedicated
+  // demoFilter-only effect further down does.
+  const demoFilterRef = useRef(demoFilter);
   useEffect(() => {
+    demoFilterRef.current = demoFilter;
+  }, [demoFilter]);
+
+  // Sequential on purpose (per-request server load, not just UI ergonomics):
+  // charts -> home-work -> network-validation run one after another instead
+  // of all three firing in parallel on mount, so a single tab doesn't triple
+  // the concurrent load on the backend's comparison-payload builder.
+  useEffect(() => {
+    let cancelled = false;
     setPayload(null);
     setError(null);
-    fetchCharts(id, run).then(setPayload).catch((e) => setError(String(e)));
-  }, [id, run]);
-
-  useEffect(() => {
-    fetchHomeWork(id, run, demoFilter).then(setHomeWork).catch(() => setHomeWork(null));
-  }, [id, run, demoFilter]);
-
-  // Fetched independently of the main charts payload -- network_validation
-  // is the single largest section to build for shanghai/yjmob-scale
-  // simulations, so it shouldn't block first paint of everything else (see
-  // web/backend/app/api/charts.py's /network-validation route).
-  useEffect(() => {
+    setHomeWork(null);
     setNetworkValidation(null);
     setNetworkValidationError(null);
-    fetchNetworkValidation(id, run)
-      .then(setNetworkValidation)
-      .catch((e) => setNetworkValidationError(String(e)));
+
+    (async () => {
+      let chartsResult: ChartPayload;
+      try {
+        chartsResult = await fetchCharts(id, run);
+      } catch (e) {
+        if (!cancelled) setError(String(e));
+        return; // nothing else is worth fetching if the main payload failed
+      }
+      if (cancelled) return;
+      setPayload(chartsResult);
+
+      try {
+        const hw = await fetchHomeWork(id, run, demoFilterRef.current);
+        if (!cancelled) setHomeWork(hw);
+      } catch {
+        if (!cancelled) setHomeWork(null);
+      }
+
+      // network_validation is the single largest section to build for
+      // shanghai/yjmob-scale simulations (see web/backend/app/api/charts.py's
+      // /network-validation route) -- still fetched last, independent of
+      // whether home-work succeeded, so one failing section doesn't block
+      // the other.
+      try {
+        const nv = await fetchNetworkValidation(id, run);
+        if (!cancelled) setNetworkValidation(nv);
+      } catch (e) {
+        if (!cancelled) setNetworkValidationError(String(e));
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
   }, [id, run]);
+
+  // Demographic-filter-only refetch: the sequential chain above already
+  // covers the initial home-work fetch on mount/id/run change, so this only
+  // needs to react to demoFilter changing on its own.
+  const isInitialDemoRender = useRef(true);
+  useEffect(() => {
+    if (isInitialDemoRender.current) {
+      isInitialDemoRender.current = false;
+      return;
+    }
+    let cancelled = false;
+    fetchHomeWork(id, run, demoFilter)
+      .then((hw) => {
+        if (!cancelled) setHomeWork(hw);
+      })
+      .catch(() => {
+        if (!cancelled) setHomeWork(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [demoFilter]);
 
   const fitSubtitle = useMemo(
     () => (fits: { label: string; params: Record<string, number> }[]) =>

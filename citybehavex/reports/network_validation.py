@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
-import pandas as pd
+import polars as pl
 from scipy.stats import wasserstein_distance
 
 from citybehavex import _core as _cbx_core
@@ -15,7 +15,7 @@ from citybehavex.simulation.core import social_network_sidecar_path
 _H3_INVALID_CELL = np.uint64(2**64 - 1)
 
 
-def _h3_cells(lat: pd.Series, lng: pd.Series, resolution: int) -> pd.api.extensions.ExtensionArray:
+def _h3_cells(lat: pl.Series, lng: pl.Series, resolution: int) -> pl.Series:
     """Vectorized lat/lng -> H3 cell index (nullable ``UInt64``), via the Rust
     extension instead of a per-row ``h3.latlng_to_cell`` Python loop -- see
     the twin helper in ``citybehavex.reports.comparison`` (duplicated rather
@@ -23,13 +23,13 @@ def _h3_cells(lat: pd.Series, lng: pd.Series, resolution: int) -> pd.api.extensi
     modules). Only used as a groupby/comparison key here, never displayed,
     so the numeric form is fine.
     """
-    lat_arr = pd.to_numeric(lat, errors="coerce").to_numpy(dtype="float64", na_value=np.nan)
-    lng_arr = pd.to_numeric(lng, errors="coerce").to_numpy(dtype="float64", na_value=np.nan)
+    lat_arr = lat.cast(pl.Float64, strict=False).to_numpy()
+    lng_arr = lng.cast(pl.Float64, strict=False).to_numpy()
     cells = _cbx_core.batch_latlng_to_cells(lat_arr, lng_arr, resolution)
-    result = pd.array(cells, dtype="UInt64")
-    invalid = cells == _H3_INVALID_CELL
+    result = pl.Series(cells, dtype=pl.UInt64)
+    invalid = pl.Series(cells == _H3_INVALID_CELL)
     if invalid.any():
-        result[invalid] = pd.NA
+        result = result.set(invalid, None)
     return result
 
 
@@ -84,7 +84,7 @@ def encounters_sidecar_path(output_path: str | Path) -> Path:
     return p.with_name(f"{p.stem}_encounters{p.suffix}")
 
 
-def _detect_column(df: pd.DataFrame, candidates: list[str]) -> str | None:
+def _detect_column(df: pl.DataFrame, candidates: list[str]) -> str | None:
     cols_lower = {str(c).lower(): c for c in df.columns}
     for candidate in candidates:
         if candidate.lower() in cols_lower:
@@ -149,7 +149,7 @@ def _social_edges(data: dict[str, Any]) -> set[tuple[int, int]]:
 
 
 def _encounter_edges_and_persistence(
-    encounters: pd.DataFrame,
+    encounters: pl.DataFrame,
     *,
     node_count: int,
 ) -> tuple[set[tuple[int, int]], np.ndarray, int]:
@@ -157,28 +157,29 @@ def _encounter_edges_and_persistence(
     missing = required - set(encounters.columns)
     if missing:
         raise ValueError(f"encounters table missing columns: {', '.join(sorted(missing))}")
-    if encounters.empty:
+    if encounters.is_empty():
         return set(), np.asarray([], dtype=float), 0
 
-    work = encounters[["agent", "contact", "ts"]].dropna().copy()
-    if work.empty:
+    work = encounters.select(["agent", "contact", "ts"]).drop_nulls()
+    if work.is_empty():
         return set(), np.asarray([], dtype=float), 0
-    work["agent"] = pd.to_numeric(work["agent"], errors="coerce")
-    work["contact"] = pd.to_numeric(work["contact"], errors="coerce")
-    work = work.dropna(subset=["agent", "contact", "ts"])
-    if work.empty:
+    work = work.with_columns(
+        pl.col("agent").cast(pl.Float64, strict=False),
+        pl.col("contact").cast(pl.Float64, strict=False),
+    ).drop_nulls(subset=["agent", "contact", "ts"])
+    if work.is_empty():
         return set(), np.asarray([], dtype=float), 0
 
-    time_steps = int(work["ts"].nunique())
+    time_steps = work["ts"].n_unique()
     if time_steps <= 0:
         return set(), np.asarray([], dtype=float), 0
 
     pair_steps: dict[tuple[int, int], set[Any]] = {}
-    for row in work.itertuples(index=False):
-        edge = _normal_edge(row.agent, row.contact, node_count)
+    for agent, contact, ts in work.iter_rows():
+        edge = _normal_edge(agent, contact, node_count)
         if edge is None:
             continue
-        pair_steps.setdefault(edge, set()).add(row.ts)
+        pair_steps.setdefault(edge, set()).add(ts)
 
     edges = set(pair_steps)
     persistence = np.asarray(
@@ -447,7 +448,7 @@ def _synthetic_validation_block(
     enc_path = encounters_sidecar_path(synthetic)
     if enc_path.exists():
         encounter_edges, persistence, time_steps = _encounter_edges_and_persistence(
-            pd.read_parquet(enc_path),
+            pl.read_parquet(enc_path),
             node_count=node_count,
         )
         edges |= encounter_edges
@@ -469,12 +470,12 @@ def _synthetic_validation_block(
 
 
 def _resolve_observed_location(
-    df: pd.DataFrame,
+    df: pl.DataFrame,
     *,
     location_mode: str,
     location_col: str | None,
     h3_resolution: int,
-) -> tuple[pd.Series, str]:
+) -> tuple[pl.Series, str]:
     if location_mode not in {"auto", "location_col", "h3"}:
         raise ValueError(f"unsupported network validation location_mode: {location_mode}")
 
@@ -484,22 +485,34 @@ def _resolve_observed_location(
     if location_mode == "location_col" and chosen is None:
         raise ValueError(f"network validation location_col not found: {location_col!r}")
     if chosen is not None and location_mode != "h3":
-        return df[chosen].astype(str), chosen
+        return df[chosen].cast(pl.Utf8), chosen
 
     lat_col = _detect_column(df, _LAT_CANDIDATES)
     lng_col = _detect_column(df, _LNG_CANDIDATES)
     if lat_col is None or lng_col is None:
         raise ValueError("h3 network validation requires latitude/longitude columns")
-    lat = pd.to_numeric(df[lat_col], errors="coerce")
-    lng = pd.to_numeric(df[lng_col], errors="coerce")
-    valid = lat.between(-90, 90) & lng.between(-180, 180)
-    cells = pd.Series(pd.array([pd.NA] * len(df), dtype="UInt64"), index=df.index)
-    cells.loc[valid] = _h3_cells(lat.loc[valid], lng.loc[valid], int(h3_resolution))
+    lat = df[lat_col].cast(pl.Float64, strict=False)
+    lng = df[lng_col].cast(pl.Float64, strict=False)
+    valid = lat.is_between(-90, 90) & lng.is_between(-180, 180)
+    cells = pl.Series([None] * len(df), dtype=pl.UInt64)
+    valid_idx = valid.arg_true()
+    if len(valid_idx):
+        computed = _h3_cells(lat.filter(valid), lng.filter(valid), int(h3_resolution))
+        cells = cells.scatter(valid_idx, computed)
     return cells, f"h3_{h3_resolution}"
 
 
+def _to_day(col: pl.Series) -> pl.Series:
+    """Coerce a datetime-ish column (string or already-parsed) to midnight-truncated datetimes."""
+    if col.dtype == pl.Utf8:
+        col = col.str.to_datetime(strict=False)
+    elif not isinstance(col.dtype, pl.Datetime):
+        col = col.cast(pl.Datetime, strict=False)
+    return col.dt.truncate("1d")
+
+
 def _observed_edges_and_persistence(
-    df: pd.DataFrame,
+    df: pl.DataFrame,
     *,
     uid_col: str,
     datetime_col: str,
@@ -515,40 +528,38 @@ def _observed_edges_and_persistence(
     if missing:
         raise ValueError(f"observed network validation missing columns: {', '.join(map(str, missing))}")
 
-    work = pd.DataFrame(
-        {
-            "uid": df[uid_col],
-            "day": pd.to_datetime(df[datetime_col], errors="coerce").dt.normalize(),
-        }
-    )
-    work["location"], location_source = _resolve_observed_location(
+    location, location_source = _resolve_observed_location(
         df,
         location_mode=location_mode,
         location_col=location_col,
         h3_resolution=h3_resolution,
     )
-    work = work.dropna(subset=["uid", "day", "location"])
-    if work.empty:
+    work = pl.DataFrame(
+        {"uid": df[uid_col], "day": _to_day(df[datetime_col]), "location": location}
+    ).drop_nulls(subset=["uid", "day", "location"])
+    if work.is_empty():
         return _empty_graph(0), np.asarray([], dtype=float), 0, [f"observed network has no valid rows using {location_source}"]
 
-    uid_codes, uid_values = pd.factorize(work["uid"], sort=True)
-    work = work.assign(node=uid_codes.astype(np.int64))
-    node_count = int(len(uid_values))
-    day_codes, day_values = pd.factorize(work["day"], sort=True)
-    work = work.assign(day_code=day_codes.astype(np.int64))
-    time_steps = int(len(day_values))
-    location_codes, _location_values = pd.factorize(work["location"], sort=False)
-    work = work.assign(location_code=location_codes.astype(np.int64))
+    uid_map = work.select(pl.col("uid").unique().sort()).with_row_index("node")
+    work = work.join(uid_map, on="uid", how="left")
+    node_count = uid_map.height
 
-    dedup = work.drop_duplicates(["day_code", "location_code", "node"])
+    day_map = work.select(pl.col("day").unique().sort()).with_row_index("day_code")
+    work = work.join(day_map, on="day", how="left")
+    time_steps = day_map.height
+
+    location_map = work.select(pl.col("location").unique()).with_row_index("location_code")
+    work = work.join(location_map, on="location", how="left")
+
+    dedup = work.unique(subset=["day_code", "location_code", "node"])
     # Pair generation + per-edge day-persistence via the Rust extension --
     # was an itertools.combinations loop into a dict[edge, set[day]]
     # (measured: 150s on shanghai's ~65M raw pair-instances, plus the
     # O(sum of degree^2) metric computation that followed from it).
     edge_from, edge_to, persistence, skipped_groups, skipped_rows = _cbx_core.build_co_presence_edges(
-        dedup["day_code"].to_numpy(dtype=np.int64),
-        dedup["location_code"].to_numpy(dtype=np.int64),
-        dedup["node"].to_numpy(dtype=np.int64),
+        dedup["day_code"].cast(pl.Int64).to_numpy(),
+        dedup["location_code"].cast(pl.Int64).to_numpy(),
+        dedup["node"].cast(pl.Int64).to_numpy(),
         max_group_size,
         time_steps,
     )
@@ -564,7 +575,7 @@ def _observed_edges_and_persistence(
 
 
 def _observed_validation_block(
-    observed_df: pd.DataFrame,
+    observed_df: pl.DataFrame,
     *,
     uid_col: str | None = None,
     datetime_col: str | None = None,
@@ -604,7 +615,7 @@ def _observed_validation_block(
 def build_network_validation(
     synthetic_path: str | Path,
     *,
-    observed_df: pd.DataFrame | None = None,
+    observed_df: pl.DataFrame | None = None,
     observed_uid_col: str | None = None,
     observed_datetime_col: str | None = None,
     enabled: bool = True,
