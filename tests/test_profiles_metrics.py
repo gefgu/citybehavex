@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import pandas as pd
+import polars as pl
 
 from citybehavex.profiles.agents import load_profiles
 from citybehavex.profiles.metrics import _cluster_and_label
@@ -10,7 +11,7 @@ def test_cluster_and_label_ranks_kmeans_clusters_by_degree_of_return() -> None:
     """Unit test for the GaussianMixture -> KMeans swap: clusters must still
     group similar [intermittency, degree_of_return] points together and be
     labeled Routiner/Regular/Scouter in descending degree_of_return order."""
-    profiles = pd.DataFrame(
+    profiles = pl.DataFrame(
         {
             "uid": [
                 "routiner_0", "routiner_1", "routiner_2",
@@ -23,7 +24,7 @@ def test_cluster_and_label_ranks_kmeans_clusters_by_degree_of_return() -> None:
     )
 
     labeled = _cluster_and_label(profiles, n_clusters=3, random_state=0)
-    labels = labeled.set_index("uid")["agent_type"]
+    labels = dict(zip(labeled["uid"].to_list(), labeled["agent_type"].to_list()))
 
     assert len({labels[f"routiner_{i}"] for i in range(3)}) == 1
     assert len({labels[f"regular_{i}"] for i in range(3)}) == 1

@@ -4,6 +4,7 @@ import json
 from types import SimpleNamespace
 
 import pandas as pd
+import polars as pl
 
 from citybehavex.reports.network_validation import encounters_sidecar_path
 from citybehavex.simulation.core import social_network_sidecar_path
@@ -178,10 +179,10 @@ def test_build_comparison_payload_groups_activity_and_micro_usage(monkeypatch, t
     )
     monkeypatch.setattr(
         "web.backend.app.payload._mobility_law_visits",
-        lambda *args, **kwargs: pd.DataFrame(
+        lambda *args, **kwargs: pl.DataFrame(
             {
                 "user_id": ["u1", "u1"],
-                "timestamp": pd.to_datetime(["2026-01-01 00:00", "2026-01-01 01:00"]),
+                "timestamp": pl.Series(["2026-01-01 00:00", "2026-01-01 01:00"]).str.to_datetime(),
                 "location_id": ["a", "b"],
                 "lat": [48.85, 48.86],
                 "lng": [2.35, 2.36],
@@ -261,10 +262,10 @@ def test_build_comparison_payload_includes_time_use_comparison(monkeypatch, tmp_
 
     monkeypatch.setattr(
         "web.backend.app.payload._mobility_law_visits",
-        lambda *args, **kwargs: pd.DataFrame(
+        lambda *args, **kwargs: pl.DataFrame(
             {
                 "user_id": ["u1"],
-                "timestamp": pd.to_datetime(["2026-01-01 00:00"]),
+                "timestamp": pl.Series(["2026-01-01 00:00"]).str.to_datetime(),
                 "location_id": ["a"],
                 "lat": [48.85],
                 "lng": [2.35],
@@ -314,10 +315,10 @@ def test_build_comparison_payload_supports_synthetic_only(monkeypatch, tmp_path)
 
     monkeypatch.setattr(
         "web.backend.app.payload._mobility_law_visits",
-        lambda *args, **kwargs: pd.DataFrame(
+        lambda *args, **kwargs: pl.DataFrame(
             {
                 "user_id": ["u1", "u1"],
-                "timestamp": pd.to_datetime(["2026-01-01 00:00", "2026-01-01 01:00"]),
+                "timestamp": pl.Series(["2026-01-01 00:00", "2026-01-01 01:00"]).str.to_datetime(),
                 "location_id": ["a", "b"],
                 "lat": [48.85, 48.86],
                 "lng": [2.35, 2.36],
@@ -355,17 +356,17 @@ def test_special_day_filters_builds_date_range_metadata():
 
 
 def test_filter_df_date_range_keeps_only_rows_inside_window():
-    df = pd.DataFrame(
+    df = pl.DataFrame(
         {
-            "datetime": pd.to_datetime(
+            "datetime": pl.Series(
                 ["2019-11-13 12:00", "2019-11-14 00:00", "2019-11-20 08:00", "2019-11-29 00:00"]
-            ),
+            ).str.to_datetime(),
             "value": [1, 2, 3, 4],
         }
     )
     meta = {"key": "emergency", "kind": "date_range", "start": "2019-11-14", "end": "2019-11-28"}
     filtered = _filter_df(df, "datetime", meta)
-    assert filtered["value"].tolist() == [2, 3]
+    assert filtered["value"].to_list() == [2, 3]
 
 
 def test_build_comparison_payload_includes_special_day_filter_group(monkeypatch, tmp_path):
@@ -387,10 +388,10 @@ def test_build_comparison_payload_includes_special_day_filter_group(monkeypatch,
 
     monkeypatch.setattr(
         "web.backend.app.payload._mobility_law_visits",
-        lambda *args, **kwargs: pd.DataFrame(
+        lambda *args, **kwargs: pl.DataFrame(
             {
                 "user_id": ["u1", "u1"],
-                "timestamp": pd.to_datetime(["2026-01-01 00:00", "2026-01-01 01:00"]),
+                "timestamp": pl.Series(["2026-01-01 00:00", "2026-01-01 01:00"]).str.to_datetime(),
                 "location_id": ["a", "b"],
                 "lat": [48.85, 48.86],
                 "lng": [2.35, 2.36],

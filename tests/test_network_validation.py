@@ -4,6 +4,7 @@ import json
 
 import numpy as np
 import pandas as pd
+import polars as pl
 
 from citybehavex.reports.network_validation import (
     build_network_validation,
@@ -124,12 +125,12 @@ def test_build_network_validation_can_be_disabled(tmp_path):
 def test_observed_validation_uses_location_day_contacts(tmp_path):
     synthetic = tmp_path / "synthetic.parquet"
     pd.DataFrame({"uid": [1]}).to_parquet(synthetic, index=False)
-    observed = pd.DataFrame(
+    observed = pl.DataFrame(
         {
             "user_id": ["a", "b", "a", "b", "c"],
-            "timestamp": pd.to_datetime(
+            "timestamp": pl.Series(
                 ["2026-01-01 08:00", "2026-01-01 09:00", "2026-01-02 08:00", "2026-01-02 09:00", "2026-01-02 10:00"]
-            ),
+            ).str.to_datetime(),
             "venueId": ["x", "x", "x", "x", "x"],
             "lat": [0.0] * 5,
             "lon": [0.0] * 5,
@@ -157,10 +158,10 @@ def test_observed_validation_uses_location_day_contacts(tmp_path):
 def test_observed_validation_skips_oversized_groups(tmp_path):
     synthetic = tmp_path / "synthetic.parquet"
     pd.DataFrame({"uid": [1]}).to_parquet(synthetic, index=False)
-    observed = pd.DataFrame(
+    observed = pl.DataFrame(
         {
             "uid": [1, 2, 3],
-            "timestamp": pd.to_datetime(["2026-01-01 08:00"] * 3),
+            "timestamp": pl.Series(["2026-01-01 08:00"] * 3).str.to_datetime(),
             "location_id": ["x", "x", "x"],
         }
     )
@@ -183,10 +184,10 @@ def test_observed_validation_skips_oversized_groups(tmp_path):
 def test_observed_validation_uses_h3_contacts(tmp_path):
     synthetic = tmp_path / "synthetic.parquet"
     pd.DataFrame({"uid": [1]}).to_parquet(synthetic, index=False)
-    observed = pd.DataFrame(
+    observed = pl.DataFrame(
         {
             "uid": [1, 2, 3],
-            "timestamp": pd.to_datetime(["2026-01-01 08:00", "2026-01-01 09:00", "2026-01-01 10:00"]),
+            "timestamp": pl.Series(["2026-01-01 08:00", "2026-01-01 09:00", "2026-01-01 10:00"]).str.to_datetime(),
             "lat": [35.0, 35.0, 35.5],
             "lon": [137.0, 137.0, 137.5],
         }

@@ -14,11 +14,27 @@ from __future__ import annotations
 
 import numpy as np
 import pandas as pd
+import polars as pl
 
 from citybehavex.roads import haversine_m, snap_locations_to_graph
 
 
-def build_road_network_handle(edges_df: pd.DataFrame):
+def _as_polars(df: pd.DataFrame | pl.DataFrame) -> pl.DataFrame:
+    """Accept either a pandas or a polars frame during the pandas->polars
+    migration (some callers of this module haven't migrated yet); drop once
+    every caller passes polars directly.
+    """
+    return df if isinstance(df, pl.DataFrame) else pl.from_pandas(df)
+
+
+def _as_pandas(df: pd.DataFrame | pl.DataFrame) -> pd.DataFrame:
+    """``snap_locations_to_graph`` (citybehavex.roads) is pandas-typed and
+    out of scope for this migration -- convert right at the call boundary.
+    """
+    return df if isinstance(df, pd.DataFrame) else df.to_pandas()
+
+
+def build_road_network_handle(edges_df: pd.DataFrame | pl.DataFrame):
     """Prepare a contraction hierarchy from a cached road graph's edges.
 
     Build once per report/payload invocation and reuse across every
@@ -27,11 +43,12 @@ def build_road_network_handle(edges_df: pd.DataFrame):
     """
     from citybehavex import _core
 
+    edges_df = _as_polars(edges_df)
     return _core.RoadNetworkHandle(
-        edges_df["from_node"].to_numpy(dtype=np.int64),
-        edges_df["to_node"].to_numpy(dtype=np.int64),
-        edges_df["weight_ds"].to_numpy(dtype=np.int64),
-        edges_df["length_m"].to_numpy(dtype=np.float64),
+        edges_df["from_node"].to_numpy().astype(np.int64),
+        edges_df["to_node"].to_numpy().astype(np.int64),
+        edges_df["weight_ds"].to_numpy().astype(np.int64),
+        edges_df["length_m"].to_numpy().astype(np.float64),
     )
 
 
@@ -53,14 +70,14 @@ def _road_or_haversine_km(
 
 
 def jump_lengths_km(
-    df: pd.DataFrame,
+    df: pd.DataFrame | pl.DataFrame,
     *,
     uid_col: str,
     lat_col: str,
     lng_col: str,
     datetime_col: str,
     handle,
-    nodes_df: pd.DataFrame,
+    nodes_df: pd.DataFrame | pl.DataFrame,
     snap_max_distance_m: float = 750.0,
 ) -> np.ndarray:
     """Road-network jump lengths (km): distance between consecutive stops
@@ -70,13 +87,18 @@ def jump_lengths_km(
     straight-line, falling back to Haversine per-pair when unsnapped or
     disconnected.
     """
-    sorted_df = df.sort_values([uid_col, datetime_col], kind="stable").reset_index(drop=True)
+    sorted_df = _as_polars(df).sort([uid_col, datetime_col], maintain_order=True)
+    nodes_pd = _as_pandas(nodes_df)
     node_idx = snap_locations_to_graph(
-        sorted_df, nodes_df, snap_max_distance_m, lat_col=lat_col, lng_col=lng_col
+        _as_pandas(sorted_df.select([lat_col, lng_col])),
+        nodes_pd,
+        snap_max_distance_m,
+        lat_col=lat_col,
+        lng_col=lng_col,
     )
     uid_arr = sorted_df[uid_col].to_numpy()
-    lat_arr = sorted_df[lat_col].to_numpy(dtype=float)
-    lng_arr = sorted_df[lng_col].to_numpy(dtype=float)
+    lat_arr = sorted_df[lat_col].cast(pl.Float64).to_numpy()
+    lng_arr = sorted_df[lng_col].cast(pl.Float64).to_numpy()
 
     same_uid = uid_arr[1:] == uid_arr[:-1]
     from_node = node_idx[:-1][same_uid]
@@ -96,15 +118,15 @@ def jump_lengths_km(
 
 
 def radius_of_gyration_km(
-    df: pd.DataFrame,
+    df: pd.DataFrame | pl.DataFrame,
     *,
     uid_col: str,
     lat_col: str,
     lng_col: str,
     handle,
-    nodes_df: pd.DataFrame,
+    nodes_df: pd.DataFrame | pl.DataFrame,
     snap_max_distance_m: float = 750.0,
-) -> pd.DataFrame:
+) -> pl.DataFrame:
     """Road-network radius of gyration (km) per user: RMS road-network
     distance from each of a user's stops to the arithmetic-mean centroid of
     their stops -- mirrors skmob2's unweighted-centroid formula
@@ -112,36 +134,52 @@ def radius_of_gyration_km(
     road network instead of straight-line. Returns a
     ``DataFrame[[uid_col, "radius_of_gyration"]]`` matching skmob2's shape.
     """
-    if df.empty:
-        return pd.DataFrame({uid_col: pd.Series(dtype=df[uid_col].dtype), "radius_of_gyration": pd.Series(dtype=float)})
+    df = _as_polars(df)
+    if df.is_empty():
+        return pl.DataFrame(
+            [
+                pl.Series(uid_col, [], dtype=df.schema[uid_col]),
+                pl.Series("radius_of_gyration", [], dtype=pl.Float64),
+            ]
+        )
 
-    centroid = df.groupby(uid_col, sort=False)[[lat_col, lng_col]].mean().reset_index()
+    nodes_pd = _as_pandas(nodes_df)
+
+    centroid = df.group_by(uid_col, maintain_order=True).agg(
+        [pl.col(lat_col).mean(), pl.col(lng_col).mean()]
+    )
     centroid_node = snap_locations_to_graph(
-        centroid, nodes_df, snap_max_distance_m, lat_col=lat_col, lng_col=lng_col
+        _as_pandas(centroid.select([lat_col, lng_col])),
+        nodes_pd,
+        snap_max_distance_m,
+        lat_col=lat_col,
+        lng_col=lng_col,
     )
-    centroid = centroid.assign(_centroid_node=centroid_node).rename(
-        columns={lat_col: "_centroid_lat", lng_col: "_centroid_lng"}
-    )
+    centroid = centroid.with_columns(
+        pl.Series("_centroid_node", centroid_node)
+    ).rename({lat_col: "_centroid_lat", lng_col: "_centroid_lng"})
 
-    merged = df.merge(centroid, on=uid_col, how="left")
+    merged = df.join(centroid, on=uid_col, how="left")
     stop_node = snap_locations_to_graph(
-        merged, nodes_df, snap_max_distance_m, lat_col=lat_col, lng_col=lng_col
+        _as_pandas(merged.select([lat_col, lng_col])),
+        nodes_pd,
+        snap_max_distance_m,
+        lat_col=lat_col,
+        lng_col=lng_col,
     )
 
     dist_km = _road_or_haversine_km(
         handle,
         stop_node,
-        merged["_centroid_node"].to_numpy(dtype=np.int64),
-        merged[lat_col].to_numpy(dtype=float),
-        merged[lng_col].to_numpy(dtype=float),
-        merged["_centroid_lat"].to_numpy(dtype=float),
-        merged["_centroid_lng"].to_numpy(dtype=float),
+        merged["_centroid_node"].to_numpy().astype(np.int64),
+        merged[lat_col].cast(pl.Float64).to_numpy(),
+        merged[lng_col].cast(pl.Float64).to_numpy(),
+        merged["_centroid_lat"].cast(pl.Float64).to_numpy(),
+        merged["_centroid_lng"].cast(pl.Float64).to_numpy(),
     )
 
     return (
-        pd.DataFrame({uid_col: merged[uid_col].to_numpy(), "_dist_km": dist_km})
-        .groupby(uid_col, sort=False)["_dist_km"]
-        .apply(lambda s: float(np.sqrt(np.mean(np.square(s)))))
-        .reset_index()
-        .rename(columns={"_dist_km": "radius_of_gyration"})
+        pl.DataFrame({uid_col: merged[uid_col], "_dist_km": dist_km})
+        .group_by(uid_col, maintain_order=True)
+        .agg((pl.col("_dist_km") ** 2).mean().sqrt().alias("radius_of_gyration"))
     )

@@ -5,11 +5,11 @@ from dataclasses import dataclass
 from datetime import datetime as _dt
 from html import escape
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 import h3
 import numpy as np
-import pandas as pd
+import polars as pl
 from citybehavex import _core as _cbx_core
 import plotly.graph_objects as go
 import skmob2
@@ -90,12 +90,12 @@ ALL_REPORT_SECTIONS = ACTIVITY_JSD_SECTIONS | {"cpc", "stvd", "micro_activity", 
 
 @dataclass(frozen=True)
 class ActivityVisitsResult:
-    visits: pd.DataFrame
+    visits: pl.DataFrame
     used_heuristic: bool
     warning: Optional[str] = None
 
 
-def detect_column(df: pd.DataFrame, candidates: list[str]) -> Optional[str]:
+def detect_column(df: pl.DataFrame, candidates: list[str]) -> Optional[str]:
     cols_lower = {c.lower(): c for c in df.columns}
     for candidate in candidates:
         if candidate.lower() in cols_lower:
@@ -115,41 +115,55 @@ def waiting_times_minutes(traj: skmob2.TrajDataFrame) -> list:
     return [s / 60 for s in secs]
 
 
+def _to_datetime(col: pl.Series) -> pl.Series:
+    """Coerce a datetime-ish column (string or already-parsed) to polars
+    ``Datetime``, coercing unparsable values to null."""
+    if col.dtype == pl.Utf8:
+        return col.str.to_datetime(strict=False)
+    if isinstance(col.dtype, pl.Datetime):
+        return col
+    return col.cast(pl.Datetime, strict=False)
+
+
 def _trajectory_od_matrix(
-    df: pd.DataFrame,
+    df: pl.DataFrame,
     *,
     uid_col: str,
     datetime_col: str,
     lat_col: str,
     lng_col: str,
     resolution: int,
-) -> pd.DataFrame:
-    points = df[[uid_col, datetime_col, lat_col, lng_col]].copy()
-    points["_datetime"] = pd.to_datetime(points[datetime_col], errors="coerce")
-    points["_lat"] = pd.to_numeric(points[lat_col], errors="coerce")
-    points["_lng"] = pd.to_numeric(points[lng_col], errors="coerce")
-    points = points.dropna(subset=[uid_col, "_datetime", "_lat", "_lng"])
-    points = points[
-        points["_lat"].between(-90, 90)
-        & points["_lng"].between(-180, 180)
-    ]
-    points = points.sort_values([uid_col, "_datetime"], kind="mergesort")
-    points["origin"] = [
-        h3.latlng_to_cell(lat, lng, resolution)
-        for lat, lng in zip(points["_lat"], points["_lng"])
-    ]
-    points["destination"] = points.groupby(uid_col)["origin"].shift(-1)
-    trips = points.dropna(subset=["destination"])
-    trips = trips[trips["origin"] != trips["destination"]]
+) -> pl.DataFrame:
+    points = df.select([uid_col, datetime_col, lat_col, lng_col]).with_columns(
+        _to_datetime(df[datetime_col]).alias("_datetime"),
+        pl.col(lat_col).cast(pl.Float64, strict=False).alias("_lat"),
+        pl.col(lng_col).cast(pl.Float64, strict=False).alias("_lng"),
+    )
+    points = points.drop_nulls(subset=[uid_col, "_datetime", "_lat", "_lng"])
+    points = points.filter(
+        pl.col("_lat").is_between(-90, 90) & pl.col("_lng").is_between(-180, 180)
+    )
+    points = points.sort([uid_col, "_datetime"])
+    points = points.with_columns(
+        pl.struct(["_lat", "_lng"])
+        .map_elements(
+            lambda row: h3.latlng_to_cell(row["_lat"], row["_lng"], resolution),
+            return_dtype=pl.Utf8,
+        )
+        .alias("origin")
+    )
+    points = points.with_columns(pl.col("origin").shift(-1).over(uid_col).alias("destination"))
+    trips = points.drop_nulls(subset=["destination"])
+    trips = trips.filter(pl.col("origin") != pl.col("destination"))
 
-    if trips.empty:
-        return pd.DataFrame(dtype=float)
+    if trips.is_empty():
+        return pl.DataFrame()
 
     flows = (
-        trips.groupby(["origin", "destination"])
-        .size()
-        .unstack(fill_value=0)
-        .astype(float)
+        trips.group_by(["origin", "destination"])
+        .agg(pl.len().cast(pl.Float64).alias("count"))
+        .pivot(on="destination", index="origin", values="count")
+        .fill_null(0.0)
     )
     return flows
 
@@ -310,26 +324,26 @@ def _network_validation_section_html(network_validation: Optional[dict]) -> str:
 _H3_INVALID_CELL = np.uint64(2**64 - 1)
 
 
-def _h3_cells(lat: pd.Series, lng: pd.Series, resolution: int) -> pd.api.extensions.ExtensionArray:
+def _h3_cells(lat: pl.Series, lng: pl.Series, resolution: int) -> pl.Series:
     """Vectorized lat/lng -> H3 cell index, via the Rust extension instead of
     a per-row ``h3.latlng_to_cell`` Python loop -- the difference is
     meaningful at real dataset scale (~100x measured on 100M+ rows). Returns
-    a nullable ``UInt64`` array (not the hex-string form ``h3.latlng_to_cell``
+    a nullable ``UInt64`` series (not the hex-string form ``h3.latlng_to_cell``
     returns) since callers only group/compare locations, never display them;
-    invalid/non-finite coordinates map to ``pd.NA``.
+    invalid/non-finite coordinates map to null.
     """
-    lat_arr = pd.to_numeric(lat, errors="coerce").to_numpy(dtype="float64", na_value=np.nan)
-    lng_arr = pd.to_numeric(lng, errors="coerce").to_numpy(dtype="float64", na_value=np.nan)
+    lat_arr = lat.cast(pl.Float64, strict=False).to_numpy()
+    lng_arr = lng.cast(pl.Float64, strict=False).to_numpy()
     cells = _cbx_core.batch_latlng_to_cells(lat_arr, lng_arr, resolution)
-    result = pd.array(cells, dtype="UInt64")
-    invalid = cells == _H3_INVALID_CELL
+    result = pl.Series(cells, dtype=pl.UInt64)
+    invalid = pl.Series(cells == _H3_INVALID_CELL)
     if invalid.any():
-        result[invalid] = pd.NA
+        result = result.set(invalid, None)
     return result
 
 
 def _visits_for_comparison(
-    df: pd.DataFrame,
+    df: pl.DataFrame,
     *,
     uid_col: str,
     datetime_col: str,
@@ -339,30 +353,36 @@ def _visits_for_comparison(
     end_col: Optional[str] = None,
     lat_col: Optional[str] = None,
     lng_col: Optional[str] = None,
-) -> pd.DataFrame:
-    visits = pd.DataFrame(
+) -> pl.DataFrame:
+    visits = pl.DataFrame(
         {
             "uid": df[uid_col],
-            "start_timestamp": pd.to_datetime(df[datetime_col]),
+            "start_timestamp": _to_datetime(df[datetime_col]),
         }
     )
     if activity_col:
-        visits["purpose"] = df[activity_col]
+        visits = visits.with_columns(df[activity_col].alias("purpose"))
 
     if location_col:
-        visits["location_id"] = df[location_col].astype(str)
+        visits = visits.with_columns(df[location_col].cast(pl.Utf8).alias("location_id"))
     else:
         lat_name = lat_col or detect_column(df, _LAT_CANDIDATES) or "lat"
         lng_name = lng_col or detect_column(df, _LNG_CANDIDATES) or "lng"
-        visits["location_id"] = _h3_cells(df[lat_name], df[lng_name], location_resolution)
+        visits = visits.with_columns(
+            _h3_cells(df[lat_name], df[lng_name], location_resolution).alias("location_id")
+        )
 
     if end_col:
-        visits["end_timestamp"] = pd.to_datetime(df[end_col])
+        visits = visits.with_columns(_to_datetime(df[end_col]).alias("end_timestamp"))
     else:
-        visits = visits.sort_values(["uid", "start_timestamp"]).reset_index(drop=True)
-        visits["end_timestamp"] = visits.groupby("uid")["start_timestamp"].shift(-1)
-        visits["end_timestamp"] = visits["end_timestamp"].fillna(
-            visits["start_timestamp"].dt.normalize() + pd.Timedelta(days=1)
+        visits = visits.sort(["uid", "start_timestamp"])
+        visits = visits.with_columns(
+            pl.col("start_timestamp").shift(-1).over("uid").alias("end_timestamp")
+        )
+        visits = visits.with_columns(
+            pl.col("end_timestamp").fill_null(
+                pl.col("start_timestamp").dt.truncate("1d") + pl.duration(days=1)
+            )
         )
     return visits
 
@@ -375,65 +395,79 @@ def _collapse_purpose_group(value: object) -> str:
     return "OTHER"
 
 
-def _collapse_explicit_purposes(visits: pd.DataFrame) -> pd.DataFrame:
-    grouped = visits.copy()
-    grouped["purpose"] = grouped["purpose"].map(_collapse_purpose_group)
-    return grouped
+def _collapse_explicit_purposes(visits: pl.DataFrame) -> pl.DataFrame:
+    return visits.with_columns(
+        pl.col("purpose").map_elements(
+            _collapse_purpose_group, return_dtype=pl.Utf8, skip_nulls=False
+        )
+    )
 
 
-def _modal_location_per_user(candidates: pd.DataFrame) -> pd.Series:
+def _modal_location_per_user(candidates: pl.DataFrame) -> pl.DataFrame:
     """Per-``uid`` most-frequent ``location_id`` among ``candidates`` rows.
 
     Ties (equal visit counts) are broken by ascending ``location_id`` for a
     deterministic result, matching the ``ORDER BY cnt DESC, fine_cell``
     convention already used by the equivalent DuckDB heuristic in
     ``web/backend/app/home_work_data.py`` (``_observed_density_heuristic``).
-    Returns a Series indexed by ``uid``; users with no candidate rows are
-    absent from the result (callers should treat a missing ``uid`` as "no
-    home/work location found", not as a match against ``NaN``).
+    Returns a ``[uid, location_id]`` lookup table; users with no candidate
+    rows are absent from the result (callers should treat a missing ``uid``
+    as "no home/work location found", not as a match against null).
     """
-    if candidates.empty:
-        return pd.Series(dtype=object)
+    if candidates.is_empty():
+        return candidates.select(["uid", "location_id"])
     counts = (
-        candidates.groupby(["uid", "location_id"], sort=False)
-        .size()
-        .rename("_count")
-        .reset_index()
+        candidates.group_by(["uid", "location_id"], maintain_order=True)
+        .agg(pl.len().alias("_count"))
+        .sort(["uid", "_count", "location_id"], descending=[False, True, False])
     )
-    counts = counts.sort_values(
-        ["uid", "_count", "location_id"], ascending=[True, False, True]
+    return counts.unique(subset=["uid"], keep="first", maintain_order=True).select(
+        ["uid", "location_id"]
     )
-    return counts.drop_duplicates("uid", keep="first").set_index("uid")["location_id"]
 
 
-def _derive_purpose_groups_from_heuristic(visits: pd.DataFrame) -> pd.DataFrame:
+def _derive_purpose_groups_from_heuristic(visits: pl.DataFrame) -> pl.DataFrame:
     """Assign HOME/WORK/OTHER per row from time-of-day + repeated-location
     anchors, vectorized across all users at once (no per-user Python loop):
     HOME is a user's most-visited location during hour 2-5, WORK is their
     most-visited location (other than HOME) during hour 10 or 14-16.
     """
-    derived = visits.copy()
-    hour = derived["start_timestamp"].dt.hour
+    derived = visits.with_row_index("_row")
+    hour = derived["start_timestamp"].dt.hour()
 
-    home_loc = _modal_location_per_user(derived.loc[hour.between(2, 5)])
+    home_loc = _modal_location_per_user(derived.filter(hour.is_between(2, 5))).rename(
+        {"location_id": "_home_loc"}
+    )
 
-    work_candidates = derived.loc[hour.eq(10) | hour.between(14, 16)].copy()
-    work_home = work_candidates["uid"].map(home_loc)
-    work_candidates = work_candidates[
-        work_home.isna() | work_candidates["location_id"].ne(work_home)
-    ]
-    work_loc = _modal_location_per_user(work_candidates)
+    work_mask = hour.eq(10) | hour.is_between(14, 16)
+    work_candidates = derived.filter(work_mask).join(home_loc, on="uid", how="left")
+    work_candidates = work_candidates.filter(
+        pl.col("_home_loc").is_null() | (pl.col("location_id") != pl.col("_home_loc"))
+    )
+    work_loc = _modal_location_per_user(
+        work_candidates.select(["uid", "location_id"])
+    ).rename({"location_id": "_work_loc"})
 
-    derived_home = derived["uid"].map(home_loc)
-    derived_work = derived["uid"].map(work_loc)
-    is_home = derived_home.notna() & derived["location_id"].eq(derived_home)
-    is_work = derived_work.notna() & derived["location_id"].eq(derived_work)
-    derived["purpose"] = np.where(is_home, "HOME", np.where(is_work, "WORK", "OTHER"))
+    derived = derived.join(home_loc, on="uid", how="left").join(work_loc, on="uid", how="left")
+    is_home = pl.col("_home_loc").is_not_null() & (pl.col("location_id") == pl.col("_home_loc"))
+    is_work = pl.col("_work_loc").is_not_null() & (pl.col("location_id") == pl.col("_work_loc"))
+    derived = (
+        derived.with_columns(
+            pl.when(is_home)
+            .then(pl.lit("HOME"))
+            .when(is_work)
+            .then(pl.lit("WORK"))
+            .otherwise(pl.lit("OTHER"))
+            .alias("purpose")
+        )
+        .sort("_row")
+        .drop(["_row", "_home_loc", "_work_loc"])
+    )
     return derived
 
 
 def _prepare_activity_visits(
-    df: pd.DataFrame,
+    df: pl.DataFrame,
     *,
     label: str,
     uid_col: Optional[str],
@@ -464,10 +498,8 @@ def _prepare_activity_visits(
         lat_col=lat_col,
         lng_col=lng_col,
     )
-    visits = visits.dropna(
-        subset=["uid", "start_timestamp", "location_id"]
-    ).reset_index(drop=True)
-    if visits.empty:
+    visits = visits.drop_nulls(subset=["uid", "start_timestamp", "location_id"])
+    if visits.is_empty():
         return None
 
     if resolved_activity_col:
@@ -485,13 +517,13 @@ def _prepare_activity_visits(
 
 
 def _collapse_to_stays(
-    df: pd.DataFrame,
+    df: pl.DataFrame,
     *,
     uid_col: str,
     lat_col: str,
     lng_col: str,
     datetime_col: str,
-) -> pd.DataFrame:
+) -> pl.DataFrame:
     """Collapse a slot-by-slot trajectory into one row per stay episode.
 
     The synthetic trajectory emits a record per time slot, so consecutive slots
@@ -499,31 +531,28 @@ def _collapse_to_stays(
     maximal same-location run per user makes "visits per user" count distinct
     stays, comparable to the observed stay-event table instead of slot density.
     """
-    ordered = df.sort_values([uid_col, datetime_col])
+    ordered = df.sort([uid_col, datetime_col])
     same_user = ordered[uid_col].eq(ordered[uid_col].shift())
     same_loc = ordered[lat_col].eq(ordered[lat_col].shift()) & ordered[lng_col].eq(
         ordered[lng_col].shift()
     )
-    new_stay = ~(same_user & same_loc)
-    return ordered[new_stay].reset_index(drop=True)
+    new_stay = ~(same_user & same_loc).fill_null(False)
+    return ordered.filter(new_stay)
 
 
-def _motif_visits(visits: pd.DataFrame) -> pd.DataFrame:
-    motif_visits = visits.copy()
-    motif_visits["purpose"] = motif_visits["purpose"].where(
-        motif_visits["purpose"].eq("HOME"),
-        "VISIT",
+def _motif_visits(visits: pl.DataFrame) -> pl.DataFrame:
+    return visits.with_columns(
+        pl.when(pl.col("purpose") == "HOME").then(pl.col("purpose")).otherwise(pl.lit("VISIT")).alias("purpose")
     )
-    return motif_visits
 
 
 def _location_resolution(
-    df: pd.DataFrame,
+    df: pl.DataFrame,
     location_col: Optional[str],
     default: int = 10,
 ) -> int:
     if location_col:
-        for value in df[location_col].dropna().astype(str):
+        for value in df[location_col].drop_nulls().cast(pl.Utf8):
             try:
                 return h3.get_resolution(value)
             except ValueError:
@@ -531,49 +560,77 @@ def _location_resolution(
     return default
 
 
-def _compute_stvd_layers(
-    traj: skmob2.TrajDataFrame,
-    real_traj: skmob2.TrajDataFrame,
+_STVD_ALL_HOURS = list(range(24))
+_STVD_HOUR_COLS = [str(h) for h in _STVD_ALL_HOURS]
+
+
+def _stvd_hourly_histogram(
+    df: pl.DataFrame,
+    *,
+    lat_col: str,
+    lng_col: str,
+    datetime_col: str,
     resolutions: list[int],
-) -> dict[int, dict]:
-    """Compute per-H3-zone volume diff and peak shift for the STVD visualisation."""
-    syn = traj.df[[traj.uid_col, traj.lat_col, traj.lng_col, traj.datetime_col]].copy()
-    real = real_traj.df[[real_traj.uid_col, real_traj.lat_col, real_traj.lng_col, real_traj.datetime_col]].copy()
+) -> dict[int, pl.DataFrame]:
+    """Per-H3-cell, per-hour-of-day row count, one table per resolution and
+    per trajectory -- the tier-1 half of the STVD computation (pure
+    per-trajectory binning, reusable across every comparison this trajectory
+    participates in). ``_diff_stvd_layers`` is the tier-2 half: diffing two
+    already-binned tables into the GeoJSON volume-diff/peak-shift map.
+    """
+    work = df.select([lat_col, lng_col, datetime_col]).with_columns(
+        _to_datetime(df[datetime_col]).alias("_dt")
+    )
+    work = work.drop_nulls(subset=["_dt", lat_col, lng_col])
+    work = work.with_columns(pl.col("_dt").dt.hour().alias("_hour"))
 
-    syn["_dt"] = pd.to_datetime(syn[traj.datetime_col], errors="coerce")
-    real["_dt"] = pd.to_datetime(real[real_traj.datetime_col], errors="coerce")
-    syn = syn.dropna(subset=["_dt", traj.lat_col, traj.lng_col])
-    real = real.dropna(subset=["_dt", real_traj.lat_col, real_traj.lng_col])
-    syn["_hour"] = syn["_dt"].dt.hour
-    real["_hour"] = real["_dt"].dt.hour
-
-    layers: dict[int, dict] = {}
+    layers: dict[int, pl.DataFrame] = {}
     for res in resolutions:
         # Per-row H3 binning via the Rust extension (see ``_h3_cells``) --
         # only the small number of *unique* cells below pay the h3-py string
         # round-trip (for ``cell_to_boundary``/the "area" property), not
         # every row.
-        syn["_cell"] = _h3_cells(syn[traj.lat_col], syn[traj.lng_col], res)
-        real["_cell"] = _h3_cells(real[real_traj.lat_col], real[real_traj.lng_col], res)
+        cells = _h3_cells(work[lat_col], work[lng_col], res)
+        binned = work.with_columns(pl.Series("_cell", cells)).select(["_cell", "_hour"])
+        binned = binned.drop_nulls(subset=["_cell"])
 
-        all_hours = list(range(24))
-        syn_hourly = (
-            syn.groupby(["_cell", "_hour"]).size().unstack(fill_value=0).reindex(columns=all_hours, fill_value=0)
+        hourly = (
+            binned.group_by(["_cell", "_hour"])
+            .agg(pl.len().alias("_count"))
+            .pivot(on="_hour", index="_cell", values="_count")
         )
-        real_hourly = (
-            real.groupby(["_cell", "_hour"]).size().unstack(fill_value=0).reindex(columns=all_hours, fill_value=0)
-        )
+        missing = [h for h in _STVD_HOUR_COLS if h not in hourly.columns]
+        if missing:
+            hourly = hourly.with_columns([pl.lit(0).alias(h) for h in missing])
+        layers[res] = hourly.select(["_cell", *_STVD_HOUR_COLS]).fill_null(0)
 
-        all_cells = set(syn_hourly.index) | set(real_hourly.index)
+    return layers
+
+
+def _diff_stvd_layers(
+    syn_hourly: dict[int, pl.DataFrame],
+    real_hourly: dict[int, pl.DataFrame],
+    resolutions: list[int],
+) -> dict[int, dict]:
+    """Volume-diff / peak-shift classification + GeoJSON emission from two
+    already-binned per-trajectory hourly tables (see ``_stvd_hourly_histogram``).
+    """
+    zero_row = {h: 0 for h in _STVD_HOUR_COLS}
+    layers: dict[int, dict] = {}
+    for res in resolutions:
+        syn_lookup = {row["_cell"]: row for row in syn_hourly[res].iter_rows(named=True)}
+        real_lookup = {row["_cell"]: row for row in real_hourly[res].iter_rows(named=True)}
+        all_cells = set(syn_lookup) | set(real_lookup)
+
         features = []
         for cell in all_cells:
-            syn_row = syn_hourly.loc[cell] if cell in syn_hourly.index else pd.Series(0, index=all_hours)
-            real_row = real_hourly.loc[cell] if cell in real_hourly.index else pd.Series(0, index=all_hours)
+            syn_row = syn_lookup.get(cell, zero_row)
+            real_row = real_lookup.get(cell, zero_row)
 
-            syn_vol = float(syn_row.sum())
-            real_vol = float(real_row.sum())
-            syn_peak = int(syn_row.idxmax()) if syn_vol > 0 else 0
-            real_peak = int(real_row.idxmax()) if real_vol > 0 else 0
+            syn_vol = float(sum(syn_row[h] for h in _STVD_HOUR_COLS))
+            real_vol = float(sum(real_row[h] for h in _STVD_HOUR_COLS))
+            syn_peak = max(_STVD_ALL_HOURS, key=lambda h: syn_row[str(h)]) if syn_vol > 0 else 0
+            real_peak = max(_STVD_ALL_HOURS, key=lambda h: real_row[str(h)]) if real_vol > 0 else 0
 
             volume_diff_pct = (syn_vol - real_vol) / max(real_vol, 1.0) * 100.0
             raw_shift = abs(syn_peak - real_peak)
@@ -600,9 +657,49 @@ def _compute_stvd_layers(
     return layers
 
 
+def _compute_stvd_layers(
+    traj: skmob2.TrajDataFrame,
+    real_traj: skmob2.TrajDataFrame,
+    resolutions: list[int],
+) -> dict[int, dict]:
+    """Compute per-H3-zone volume diff and peak shift for the STVD
+    visualisation -- thin composition of ``_stvd_hourly_histogram`` (tier-1)
+    and ``_diff_stvd_layers`` (tier-2), kept as a single call for the
+    standalone HTML report path (``generate_comparison_report``), which has
+    no per-filter-group caching need.
+    """
+    syn_hourly = _stvd_hourly_histogram(
+        traj.df,
+        lat_col=traj.lat_col,
+        lng_col=traj.lng_col,
+        datetime_col=traj.datetime_col,
+        resolutions=resolutions,
+    )
+    real_hourly = _stvd_hourly_histogram(
+        real_traj.df,
+        lat_col=real_traj.lat_col,
+        lng_col=real_traj.lng_col,
+        datetime_col=real_traj.datetime_col,
+        resolutions=resolutions,
+    )
+    return _diff_stvd_layers(syn_hourly, real_hourly, resolutions)
+
+
+def _split_transition_matrix_categories(matrix: Any) -> tuple[Any, list[Any] | None]:
+    """``skmob2.activity_transition_matrix`` returns activity labels in the
+    index for a pandas result, but embeds them in an explicit ``activity``
+    column for other backends (its own documented behavior) -- split that
+    column out here so ``activity_transition_matrix_jensen_shannon_divergence``
+    gets a pure numeric matrix (with categories passed explicitly) either way.
+    """
+    if isinstance(matrix, pl.DataFrame) and "activity" in matrix.columns:
+        return matrix.drop("activity"), matrix["activity"].to_list()
+    return matrix, None
+
+
 def _motif_distribution_jsd(
-    left: pd.DataFrame,
-    right: pd.DataFrame,
+    left: pl.DataFrame,
+    right: pl.DataFrame,
 ) -> float:
     left_counts = dict(zip(left["motif_id"], left["count"]))
     right_counts = dict(zip(right["motif_id"], right["count"]))
@@ -614,8 +711,8 @@ def _motif_distribution_jsd(
 
 
 def _activity_comparison_section_html(
-    observed_visits: Optional[pd.DataFrame],
-    synthetic_visits: Optional[pd.DataFrame],
+    observed_visits: Optional[pl.DataFrame],
+    synthetic_visits: Optional[pl.DataFrame],
     observed_label: str,
     warnings: Optional[list[str]] = None,
 ) -> str:
@@ -670,7 +767,7 @@ def _activities_sidecar_path(synthetic_path: str) -> str:
 
 
 def _micro_activity_daily_usage_figure(
-    activities: pd.DataFrame,
+    activities: pl.DataFrame,
     *,
     bin_size_minutes: int = 10,
 ) -> go.Figure:
@@ -704,10 +801,12 @@ def _micro_activity_daily_usage_figure(
 
 
 def _micro_activity_daily_usage_data(
-    activities: pd.DataFrame,
+    activities: pl.DataFrame,
     *,
     bin_size_minutes: int = 10,
 ) -> dict[str, object]:
+    from datetime import timedelta
+
     required = ["uid", "activity", "arrival", "departure"]
     missing = sorted(set(required) - set(activities.columns))
     if missing:
@@ -715,13 +814,14 @@ def _micro_activity_daily_usage_data(
     if bin_size_minutes <= 0 or 1440 % bin_size_minutes != 0:
         raise ValueError("bin_size_minutes must be a positive divisor of 1440")
 
-    work = activities[required].copy()
-    work["arrival"] = pd.to_datetime(work["arrival"], errors="coerce")
-    work["departure"] = pd.to_datetime(work["departure"], errors="coerce")
-    work["activity"] = pd.to_numeric(work["activity"], errors="coerce")
-    work = work.dropna(subset=["arrival", "departure", "activity"])
-    work = work[work["departure"] > work["arrival"]]
-    if work.empty:
+    work = activities.select(required).with_columns(
+        _to_datetime(activities["arrival"]).alias("arrival"),
+        _to_datetime(activities["departure"]).alias("departure"),
+        pl.col("activity").cast(pl.Float64, strict=False),
+    )
+    work = work.drop_nulls(subset=["arrival", "departure", "activity"])
+    work = work.filter(pl.col("departure") > pl.col("arrival"))
+    if work.is_empty():
         raise ValueError("activities table has no valid intervals")
 
     catalog = build_catalog()
@@ -732,25 +832,24 @@ def _micro_activity_daily_usage_data(
     id_to_row = {activity_id: row for row, activity_id in enumerate(activity_ids)}
 
     bin_seconds = bin_size_minutes * 60
-    for row in work.itertuples(index=False):
-        activity_id = int(row.activity)
+    one_day = timedelta(days=1)
+    for row in work.iter_rows(named=True):
+        activity_id = int(row["activity"])
         if activity_id not in id_to_row:
             continue
-        arrival = row.arrival.to_pydatetime()
-        departure = row.departure.to_pydatetime()
-        current = pd.Timestamp(arrival)
-        end = pd.Timestamp(departure)
+        current = row["arrival"]
+        end = row["departure"]
         while current < end:
-            midnight = current.normalize()
-            next_midnight = midnight + pd.Timedelta(days=1)
+            midnight = current.replace(hour=0, minute=0, second=0, microsecond=0)
+            next_midnight = midnight + one_day
             segment_end = min(end, next_midnight)
             start_second = int((current - midnight).total_seconds())
             end_second = int((segment_end - midnight).total_seconds())
             start_bin = start_second // bin_seconds
             end_bin = max(start_bin, (end_second - 1) // bin_seconds)
             for bin_idx in range(start_bin, min(end_bin + 1, n_bins)):
-                bin_start = midnight + pd.Timedelta(seconds=bin_idx * bin_seconds)
-                bin_end = bin_start + pd.Timedelta(seconds=bin_seconds)
+                bin_start = midnight + timedelta(seconds=bin_idx * bin_seconds)
+                bin_end = bin_start + timedelta(seconds=bin_seconds)
                 overlap = (min(segment_end, bin_end) - max(current, bin_start)).total_seconds()
                 if overlap > 0:
                     seconds[id_to_row[activity_id], bin_idx] += overlap
@@ -790,8 +889,8 @@ def _micro_activity_section_html(activities_path: Optional[str]) -> str:
         typer.echo(f"Warning: micro-activity chart skipped: {path} not found", err=True)
         return ""
     try:
-        activities = pd.read_parquet(path)
-        if activities.empty:
+        activities = pl.read_parquet(path)
+        if activities.is_empty():
             raise ValueError("activities table is empty")
         fig = _micro_activity_daily_usage_figure(activities)
     except Exception as exc:
@@ -806,7 +905,7 @@ def _micro_activity_section_html(activities_path: Optional[str]) -> str:
 
 
 def _mobility_law_visits(
-    df: pd.DataFrame,
+    df: pl.DataFrame,
     *,
     uid_col: str,
     datetime_col: str,
@@ -815,23 +914,24 @@ def _mobility_law_visits(
     location_col: Optional[str] = None,
     activity_col: Optional[str] = None,
     location_resolution: int = 10,
-) -> pd.DataFrame:
+) -> pl.DataFrame:
     columns = [uid_col, datetime_col, lat_col, lng_col]
     if location_col:
         columns.append(location_col)
     if activity_col:
         columns.append(activity_col)
 
-    source = df[columns].copy()
-    source[datetime_col] = pd.to_datetime(source[datetime_col], errors="coerce")
-    source[lat_col] = pd.to_numeric(source[lat_col], errors="coerce")
-    source[lng_col] = pd.to_numeric(source[lng_col], errors="coerce")
-    source = source.dropna(subset=[uid_col, datetime_col, lat_col, lng_col])
-    source = source[
-        source[lat_col].between(-90, 90) & source[lng_col].between(-180, 180)
-    ]
+    source = df.select(columns).with_columns(
+        _to_datetime(df[datetime_col]).alias(datetime_col),
+        pl.col(lat_col).cast(pl.Float64, strict=False),
+        pl.col(lng_col).cast(pl.Float64, strict=False),
+    )
+    source = source.drop_nulls(subset=[uid_col, datetime_col, lat_col, lng_col])
+    source = source.filter(
+        pl.col(lat_col).is_between(-90, 90) & pl.col(lng_col).is_between(-180, 180)
+    )
 
-    visits = pd.DataFrame(
+    visits = pl.DataFrame(
         {
             "user_id": source[uid_col],
             "timestamp": source[datetime_col],
@@ -840,32 +940,36 @@ def _mobility_law_visits(
         }
     )
     if location_col:
-        location_id = source[location_col].astype(str)
-        missing = source[location_col].isna()
+        missing = source[location_col].is_null()
+        location_id = source[location_col].cast(pl.Utf8)
         # Only pay for H3 conversion on rows that actually need the
         # fallback -- e.g. shanghai/yjmob always have a populated location
         # column here, so this is skipped entirely for them.
         if missing.any():
-            fallback = _h3_cells(visits.loc[missing, "lat"], visits.loc[missing, "lng"], location_resolution)
-            location_id = location_id.where(~missing, pd.Series(fallback, index=visits.index[missing]).astype(str))
-        visits["location_id"] = location_id
+            fallback = _h3_cells(
+                visits["lat"].filter(missing), visits["lng"].filter(missing), location_resolution
+            ).cast(pl.Utf8)
+            location_id = location_id.scatter(missing.arg_true(), fallback)
+        visits = visits.with_columns(location_id.alias("location_id"))
     else:
-        visits["location_id"] = _h3_cells(visits["lat"], visits["lng"], location_resolution)
+        visits = visits.with_columns(
+            _h3_cells(visits["lat"], visits["lng"], location_resolution).alias("location_id")
+        )
     if activity_col:
-        visits["purpose"] = source[activity_col].to_numpy()
-    return visits.reset_index(drop=True)
+        visits = visits.with_columns(source[activity_col].alias("purpose"))
+    return visits
 
 
 def _daily_location_lognormal_dataset(
-    visits: pd.DataFrame,
+    visits: pl.DataFrame,
     label: str,
 ) -> tuple[np.ndarray, np.ndarray, float, float, str]:
     daily = (
-        visits.assign(date=visits["timestamp"].dt.normalize())
-        .groupby(["user_id", "date"])["location_id"]
-        .nunique()
+        visits.with_columns(pl.col("timestamp").dt.truncate("1d").alias("date"))
+        .group_by(["user_id", "date"])
+        .agg(pl.col("location_id").n_unique().alias("_count"))
     )
-    values = daily.to_numpy(dtype=float)
+    values = daily["_count"].cast(pl.Float64).to_numpy()
     values = values[np.isfinite(values) & (values > 0)]
     if values.size < 2:
         raise ValueError("at least two daily location counts are required")
@@ -896,7 +1000,7 @@ def _truncated_powerlaw_dataset(
 
 
 def _distance_frequency_dataset(
-    visits: pd.DataFrame,
+    visits: pl.DataFrame,
     label: str,
 ) -> tuple[np.ndarray, np.ndarray, float, float, str]:
     purpose_col = "purpose" if "purpose" in visits.columns else None
@@ -940,8 +1044,8 @@ def _fit_parameters_html(
 
 def _mobility_laws_section_html(
     *,
-    observed_visits: pd.DataFrame,
-    synthetic_visits: pd.DataFrame,
+    observed_visits: pl.DataFrame,
+    synthetic_visits: pl.DataFrame,
     observed_jumps: list | np.ndarray,
     synthetic_jumps: list | np.ndarray,
     observed_rog: list | np.ndarray,
@@ -1054,7 +1158,7 @@ def _mobility_laws_section_html(
 
 
 def load_trajectory(path: str) -> skmob2.TrajDataFrame:
-    df = pd.read_parquet(path)
+    df = pl.read_parquet(path)
     datetime_col = detect_column(df, _DATETIME_CANDIDATES)
     lat_col = detect_column(df, _LAT_CANDIDATES)
     lng_col = detect_column(df, _LNG_CANDIDATES)
@@ -1116,8 +1220,8 @@ def generate_comparison_report(
     synthetic_activities_path: Optional[str] = None,
     json_output_path: Optional[str] = None,
     sections: Optional[list[str]] = None,
-    road_nodes_df: Optional[pd.DataFrame] = None,
-    road_edges_df: Optional[pd.DataFrame] = None,
+    road_nodes_df: Optional[pl.DataFrame] = None,
+    road_edges_df: Optional[pl.DataFrame] = None,
     road_snap_max_distance_m: float = 750.0,
     network_validation_config: Optional[object] = None,
 ) -> None:
@@ -1132,10 +1236,10 @@ def generate_comparison_report(
     need_activity_visits = bool(enabled_sections & ACTIVITY_JSD_SECTIONS)
     metrics: dict = {"wasserstein": {}, "jsd": {}}
     typer.echo(f"Loading observed trajectories from {real_path} ...")
-    real_df = pd.read_parquet(real_path)
+    real_df = pl.read_parquet(real_path)
     _dt_col = detect_column(real_df, _DATETIME_CANDIDATES)
-    if _dt_col and not pd.api.types.is_datetime64_any_dtype(real_df[_dt_col]):
-        real_df[_dt_col] = pd.to_datetime(real_df[_dt_col])
+    if _dt_col and not isinstance(real_df.schema[_dt_col], pl.Datetime):
+        real_df = real_df.with_columns(_to_datetime(real_df[_dt_col]).alias(_dt_col))
     real_traj = skmob2.TrajDataFrame(
         real_df,
         datetime_col=_dt_col,
@@ -1178,8 +1282,13 @@ def generate_comparison_report(
             snap_max_distance_m=road_snap_max_distance_m,
         )
     else:
-        synth_jumps = traj.jump_lengths(merge=True)
-        real_jumps = real_traj.jump_lengths(merge=True)
+        # jump_lengths(merge=True) returns "a backend-appropriate array
+        # object" per skmob2's own docs -- for a polars-backed TrajDataFrame
+        # that's an Arrow-backed array whose elements are pyarrow scalars,
+        # not plain floats, so normalize to a numpy array before any
+        # downstream arithmetic/comparisons.
+        synth_jumps = np.asarray(traj.jump_lengths(merge=True), dtype=float)
+        real_jumps = np.asarray(real_traj.jump_lengths(merge=True), dtype=float)
     w_jump = wasserstein_distance(synth_jumps, real_jumps)
     metrics["wasserstein"]["jump_lengths_km"] = w_jump
 
@@ -1193,8 +1302,8 @@ def generate_comparison_report(
         lng_col=traj.lng_col,
         datetime_col=traj.datetime_col,
     )
-    synth_visits = synth_stays[traj.uid_col].value_counts().to_list()
-    real_visits = real_traj.df[real_traj.uid_col].value_counts().to_list()
+    synth_visits = synth_stays[traj.uid_col].value_counts()["count"].to_list()
+    real_visits = real_traj.df[real_traj.uid_col].value_counts()["count"].to_list()
     w_visits, _ = visits_per_user_wasserstein_distance(
         synth_stays,
         real_df,
@@ -1241,11 +1350,11 @@ def generate_comparison_report(
     # present (NOT inter-event gaps, which on a sparse visit table span days).
     duration_col = detect_column(real_df, _DURATION_CANDIDATES)
     if "dwell_minutes" in traj.df.columns:
-        synth_dwell = [d for d in traj.df["dwell_minutes"].dropna().tolist() if d >= 0]
+        synth_dwell = [d for d in traj.df["dwell_minutes"].drop_nulls().to_list() if d >= 0]
     else:
         synth_dwell = waiting_times_minutes(traj)
     if duration_col:
-        real_dwell = real_df[duration_col].dropna().tolist()
+        real_dwell = real_df[duration_col].drop_nulls().to_list()
     else:
         real_dwell = waiting_times_minutes(real_traj)
     w_dwell = wasserstein_distance(synth_dwell, real_dwell)
@@ -1256,11 +1365,11 @@ def generate_comparison_report(
     # so the real comparator is a car-time proxy from real jump lengths at the same
     # speed (km / CAR_SPEED_KMH * 60), making both sides directly comparable.
     if "trip_duration_minutes" in traj.df.columns:
-        synth_trip = [t for t in traj.df["trip_duration_minutes"].dropna().tolist() if t > 0]
+        synth_trip = [t for t in traj.df["trip_duration_minutes"].drop_nulls().to_list() if t > 0]
         real_trip = [(j / CAR_SPEED_KMH) * 60.0 for j in real_jumps if j > 0]
         w_trip = wasserstein_distance(synth_trip, real_trip) if synth_trip and real_trip else None
     elif duration_col:
-        real_trip = real_df[duration_col].dropna().tolist()
+        real_trip = real_df[duration_col].drop_nulls().to_list()
         synth_trip = waiting_times_minutes(traj)
         w_trip = wasserstein_distance(synth_trip, real_trip)
     else:
@@ -1360,10 +1469,17 @@ def generate_comparison_report(
                 "",
             )
         )
-        synth_transition = activity_transition_matrix(synthetic_visits)
-        real_transition = activity_transition_matrix(observed_visits)
+        synth_transition, synth_transition_categories = _split_transition_matrix_categories(
+            activity_transition_matrix(synthetic_visits)
+        )
+        real_transition, real_transition_categories = _split_transition_matrix_categories(
+            activity_transition_matrix(observed_visits)
+        )
         activity_transitions_jsd = activity_transition_matrix_jensen_shannon_divergence(
-            synth_transition, real_transition
+            synth_transition,
+            real_transition,
+            categories1=synth_transition_categories,
+            categories2=real_transition_categories,
         )
         metrics["jsd"]["activity_transitions"] = activity_transitions_jsd
         js_rows.append(

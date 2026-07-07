@@ -13,7 +13,7 @@ adapted to the stay-level schema produced by reports._visits_for_comparison
 
 from __future__ import annotations
 
-import pandas as pd
+import polars as pl
 from skmob2.measures.individual.diversity import diversity as _diversity
 from skmob2.measures.individual.entropy import trajectory_entropy as _entropy
 from skmob2.measures.individual.mobility_profiling import (
@@ -25,51 +25,64 @@ from skmob2.measures.individual.regularity import regularity as _regularity
 PROFILE_METRICS = ("regularity", "diversity", "stationarity", "entropy")
 
 
-def _stationarity(visits: pd.DataFrame) -> pd.DataFrame:
+def _stationarity(visits: pl.DataFrame) -> pl.DataFrame:
     """Fraction of observed time each user spends stationary (port of
     compute_netmob_stationarity; the simulation-step factor cancels out)."""
-    df = visits.copy()
-    df["duration_minutes"] = (
-        pd.to_datetime(df["end_timestamp"]) - pd.to_datetime(df["start_timestamp"])
-    ).dt.total_seconds() / 60.0
-    df = df[df["duration_minutes"] > 0]
-    span = (
-        df.groupby("uid")["end_timestamp"].max() - df.groupby("uid")["start_timestamp"].min()
-    ).dt.total_seconds() / 60.0
-    dwell = df.groupby("uid")["duration_minutes"].sum()
-    stationarity = (dwell / span.replace(0.0, pd.NA)).rename("stationarity")
-    return stationarity.reset_index()
+    df = visits.with_columns(
+        (
+            (pl.col("end_timestamp") - pl.col("start_timestamp")).dt.total_seconds() / 60.0
+        ).alias("duration_minutes")
+    )
+    df = df.filter(pl.col("duration_minutes") > 0)
+    per_user = df.group_by("uid", maintain_order=True).agg(
+        [
+            (pl.col("end_timestamp").max() - pl.col("start_timestamp").min())
+            .dt.total_seconds()
+            .__truediv__(60.0)
+            .alias("span"),
+            pl.col("duration_minutes").sum().alias("dwell"),
+        ]
+    )
+    return per_user.select(
+        "uid",
+        pl.when(pl.col("span") == 0.0)
+        .then(None)
+        .otherwise(pl.col("dwell") / pl.col("span"))
+        .alias("stationarity"),
+    )
 
 
 def _cluster_and_label(
-    profiles: pd.DataFrame, *, n_clusters: int = 3, random_state: int = 0
-) -> pd.DataFrame:
+    profiles: pl.DataFrame, *, n_clusters: int = 3, random_state: int = 0
+) -> pl.DataFrame:
     """Cluster users on [intermittency, degree_of_return] with KMeans and
     label clusters Routiner/Regular/Scouter by descending degree-of-return centroid."""
     from sklearn.cluster import KMeans
     from sklearn.preprocessing import StandardScaler
 
-    features = profiles[["intermittency", "degree_of_return"]].to_numpy()
+    features = profiles.select(["intermittency", "degree_of_return"]).to_numpy()
     scaler = StandardScaler()
     kmeans = KMeans(n_clusters=n_clusters, random_state=random_state, n_init=10)
-    profiles = profiles.copy()
-    profiles["cluster"] = kmeans.fit_predict(scaler.fit_transform(features))
+    cluster = kmeans.fit_predict(scaler.fit_transform(features))
+    profiles = profiles.with_columns(pl.Series("cluster", cluster))
 
     cluster_order = (
-        profiles.groupby("cluster")["degree_of_return"]
-        .mean()
-        .sort_values(ascending=False)
-        .index.tolist()
+        profiles.group_by("cluster")
+        .agg(pl.col("degree_of_return").mean())
+        .sort("degree_of_return", descending=True)["cluster"]
+        .to_list()
     )
     names = ["Routiner", "Regular", "Scouter"]
-    mapping = {cluster: names[rank] for rank, cluster in enumerate(cluster_order)}
-    profiles["agent_type"] = profiles["cluster"].map(mapping)
-    return profiles.drop(columns=["cluster"])
+    mapping = {cluster_id: names[rank] for rank, cluster_id in enumerate(cluster_order)}
+    profiles = profiles.with_columns(
+        pl.col("cluster").replace_strict(mapping).alias("agent_type")
+    )
+    return profiles.drop("cluster")
 
 
 def compute_profiles(
-    visits: pd.DataFrame, *, n_clusters: int = 3, random_state: int = 0
-) -> pd.DataFrame:
+    visits: pl.DataFrame, *, n_clusters: int = 3, random_state: int = 0
+) -> pl.DataFrame:
     """Compute per-user mobility-profile metrics and assign profile labels.
 
     Parameters
@@ -81,18 +94,20 @@ def compute_profiles(
 
     Returns
     -------
-    pandas.DataFrame
+    polars.DataFrame
         One row per clustered user with columns ``uid``, ``intermittency``,
         ``degree_of_return``, ``regularity``, ``diversity``, ``stationarity``,
         ``entropy`` and ``agent_type``.
     """
-    df = visits.copy()
-    df["location_token"] = df["location_id"].astype(str) + "_" + df["purpose"].astype(str)
-    df = df.sort_values(["uid", "start_timestamp"]).reset_index(drop=True)
+    df = visits.with_columns(
+        (pl.col("location_id").cast(pl.Utf8) + "_" + pl.col("purpose").cast(pl.Utf8)).alias(
+            "location_token"
+        )
+    ).sort(["uid", "start_timestamp"])
 
     profiles = _intermittance_and_degree_of_return(
         df, user_id_col="uid", location_id_col="location_token", impute_gaps=True
-    )[["uid", "intermittency", "degree_of_return"]]
+    ).select(["uid", "intermittency", "degree_of_return"])
 
     for metric_df in (
         _regularity(df, user_id_col="uid", location_id_col="location_id", location_type_col="purpose"),
@@ -106,10 +121,10 @@ def compute_profiles(
         ),
         _stationarity(df),
     ):
-        profiles = profiles.merge(metric_df, on="uid", how="left")
+        profiles = profiles.join(metric_df, on="uid", how="left")
 
     # KMeans needs finite clustering features; sparse single-visit users may lack them.
-    profiles = profiles.dropna(subset=["intermittency", "degree_of_return"]).reset_index(drop=True)
+    profiles = profiles.drop_nulls(subset=["intermittency", "degree_of_return"])
     if len(profiles) < n_clusters:
         raise ValueError(
             f"need at least {n_clusters} users with finite profiling metrics, got {len(profiles)}"

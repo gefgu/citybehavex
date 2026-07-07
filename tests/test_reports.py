@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime, timedelta
 from types import SimpleNamespace
 
 import h3
 import pandas as pd
+import polars as pl
 import pytest
 import skmob2
 
@@ -78,10 +80,10 @@ def test_load_trajectory_detects_common_column_names(tmp_path):
 
 
 def test_trajectory_od_matrix_orders_users_and_excludes_invalid_and_self_loops():
-    source = pd.DataFrame(
+    source = pl.DataFrame(
         {
             "uid": ["u1", "u2", "u1", "u1", "u2", "u1"],
-            "datetime": pd.to_datetime(
+            "datetime": pl.Series(
                 [
                     "2026-01-01 10:00:00",
                     "2026-01-01 09:00:00",
@@ -90,7 +92,7 @@ def test_trajectory_od_matrix_orders_users_and_excludes_invalid_and_self_loops()
                     "2026-01-01 08:00:00",
                     "2026-01-01 11:00:00",
                 ]
-            ),
+            ).str.to_datetime(),
             "lat": [48.90, 48.90, 48.85, 48.85, 48.85, 999.0],
             "lng": [2.45, 2.45, 2.35, 2.35, 2.35, 2.50],
         }
@@ -107,8 +109,9 @@ def test_trajectory_od_matrix_orders_users_and_excludes_invalid_and_self_loops()
 
     origin = h3.latlng_to_cell(48.85, 2.35, 9)
     destination = h3.latlng_to_cell(48.90, 2.45, 9)
-    assert matrix.loc[origin, destination] == 2.0
-    assert float(matrix.to_numpy().sum()) == 2.0
+    row = matrix.filter(pl.col("origin") == origin)
+    assert row[destination][0] == 2.0
+    assert float(matrix.select(pl.exclude("origin")).sum_horizontal().sum()) == 2.0
     assert origin not in matrix.columns
 
 
@@ -160,12 +163,12 @@ def test_metrics_section_html_shows_cpc_at_all_resolutions():
 
 
 def test_motif_visits_use_h3_locations_and_binary_purposes():
-    source = pd.DataFrame(
+    source = pl.DataFrame(
         {
             "uid": [1, 1],
-            "datetime": pd.to_datetime(
+            "datetime": pl.Series(
                 ["2026-01-01 00:00:00", "2026-01-01 08:00:00"]
-            ),
+            ).str.to_datetime(),
             "lat": [48.85, 48.86],
             "lng": [2.35, 2.36],
             "purpose": ["HOME", "WORK"],
@@ -188,12 +191,12 @@ def test_motif_visits_use_h3_locations_and_binary_purposes():
         h3.str_to_int(h3.latlng_to_cell(lat, lng, 10))
         for lat, lng in zip(source["lat"], source["lng"])
     ]
-    assert motif_visits["location_id"].tolist() == expected_cells
-    assert motif_visits["purpose"].tolist() == ["HOME", "VISIT"]
+    assert motif_visits["location_id"].to_list() == expected_cells
+    assert motif_visits["purpose"].to_list() == ["HOME", "VISIT"]
 
 
 def test_explicit_purpose_collapse_uses_home_work_other_only():
-    visits = pd.DataFrame(
+    visits = pl.DataFrame(
         {
             "purpose": ["HOME", " work ", "SHOP", "PURCHASE", None, "unknown"],
         }
@@ -201,7 +204,7 @@ def test_explicit_purpose_collapse_uses_home_work_other_only():
 
     grouped = _collapse_explicit_purposes(visits)
 
-    assert grouped["purpose"].tolist() == [
+    assert grouped["purpose"].to_list() == [
         "HOME",
         "WORK",
         "OTHER",
@@ -212,10 +215,10 @@ def test_explicit_purpose_collapse_uses_home_work_other_only():
 
 
 def test_heuristic_purpose_derivation_uses_time_location_anchors():
-    visits = pd.DataFrame(
+    visits = pl.DataFrame(
         {
             "uid": ["u1"] * 5,
-            "start_timestamp": pd.to_datetime(
+            "start_timestamp": pl.Series(
                 [
                     "2026-01-01 02:30",
                     "2026-01-01 05:00",
@@ -223,14 +226,14 @@ def test_heuristic_purpose_derivation_uses_time_location_anchors():
                     "2026-01-01 15:00",
                     "2026-01-01 20:00",
                 ]
-            ),
+            ).str.to_datetime(),
             "location_id": ["home", "home", "work", "work", "shop"],
         }
     )
 
     derived = _derive_purpose_groups_from_heuristic(visits)
 
-    assert derived["purpose"].tolist() == ["HOME", "HOME", "WORK", "WORK", "OTHER"]
+    assert derived["purpose"].to_list() == ["HOME", "HOME", "WORK", "WORK", "OTHER"]
 
 
 def test_heuristic_purpose_derivation_scopes_masks_per_user():
@@ -239,10 +242,10 @@ def test_heuristic_purpose_derivation_scopes_masks_per_user():
     per user instead of being scoped to that user's own rows). Rows are
     interleaved across users and use a non-contiguous index to make sure
     per-user grouping and index alignment both hold regardless of row order."""
-    visits = pd.DataFrame(
+    visits = pl.DataFrame(
         {
             "uid": ["u1", "u2", "u1", "u2", "u1", "u2"],
-            "start_timestamp": pd.to_datetime(
+            "start_timestamp": pl.Series(
                 [
                     "2026-01-01 02:30",
                     "2026-01-01 03:00",
@@ -251,31 +254,30 @@ def test_heuristic_purpose_derivation_scopes_masks_per_user():
                     "2026-01-01 20:00",
                     "2026-01-01 21:00",
                 ]
-            ),
+            ).str.to_datetime(),
             # u2 never visits "home_a"/"work_a" (u1's anchors) and u1 never
             # visits "home_b"/"work_b" (u2's anchors) -- any cross-user mask
             # leak would mislabel these as OTHER instead of HOME/WORK, or
             # vice versa.
             "location_id": ["home_a", "home_b", "work_a", "work_b", "shop", "shop"],
         },
-        index=[10, 20, 30, 40, 50, 60],
     )
 
     derived = _derive_purpose_groups_from_heuristic(visits)
 
-    u1 = derived[derived["uid"] == "u1"]["purpose"].tolist()
-    u2 = derived[derived["uid"] == "u2"]["purpose"].tolist()
+    u1 = derived.filter(pl.col("uid") == "u1")["purpose"].to_list()
+    u2 = derived.filter(pl.col("uid") == "u2")["purpose"].to_list()
     assert u1 == ["HOME", "WORK", "OTHER"]
     assert u2 == ["HOME", "WORK", "OTHER"]
 
 
 def test_prepare_activity_visits_warns_when_using_heuristic():
-    source = pd.DataFrame(
+    source = pl.DataFrame(
         {
             "uid": ["u1", "u1", "u1"],
-            "datetime": pd.to_datetime(
+            "datetime": pl.Series(
                 ["2026-01-01 03:00", "2026-01-01 10:00", "2026-01-01 18:00"]
-            ),
+            ).str.to_datetime(),
             "location_id": ["home", "work", "shop"],
         }
     )
@@ -401,12 +403,12 @@ def test_activity_comparison_section_requires_both_datasets():
 
 
 def test_mobility_law_visits_use_existing_locations_or_h3_fallback():
-    source = pd.DataFrame(
+    source = pl.DataFrame(
         {
             "uid": ["u1", "u1"],
-            "datetime": pd.to_datetime(
+            "datetime": pl.Series(
                 ["2026-01-01 08:00:00", "2026-01-01 10:00:00"]
-            ),
+            ).str.to_datetime(),
             "lat": [48.85, 48.86],
             "lng": [2.35, 2.36],
             "tile_id": ["home", None],
@@ -435,22 +437,22 @@ def test_mobility_law_visits_use_existing_locations_or_h3_fallback():
     # _h3_cells): existing["location_id"] stays str-typed (it's built from
     # the string tile_id column with a per-row H3 fallback stringified to
     # match), while the no-location_col path is UInt64 throughout.
-    expected_row1_cell = str(h3.str_to_int(h3.latlng_to_cell(source["lat"].iloc[1], source["lng"].iloc[1], 10)))
+    expected_row1_cell = str(h3.str_to_int(h3.latlng_to_cell(source["lat"][1], source["lng"][1], 10)))
     expected_cells = [
         h3.str_to_int(h3.latlng_to_cell(lat, lng, 10))
         for lat, lng in zip(source["lat"], source["lng"])
     ]
-    assert existing["location_id"].iloc[0] == "home"
-    assert existing["location_id"].iloc[1] == expected_row1_cell
-    assert existing["purpose"].tolist() == ["HOME", "WORK"]
-    assert fallback["location_id"].tolist() == expected_cells
+    assert existing["location_id"][0] == "home"
+    assert existing["location_id"][1] == expected_row1_cell
+    assert existing["purpose"].to_list() == ["HOME", "WORK"]
+    assert fallback["location_id"].to_list() == expected_cells
 
 
 def test_daily_location_lognormal_dataset_counts_distinct_locations():
-    visits = pd.DataFrame(
+    visits = pl.DataFrame(
         {
             "user_id": ["u1", "u1", "u1", "u1", "u2", "u2"],
-            "timestamp": pd.to_datetime(
+            "timestamp": pl.Series(
                 [
                     "2026-01-01 08:00:00",
                     "2026-01-01 09:00:00",
@@ -459,7 +461,7 @@ def test_daily_location_lognormal_dataset_counts_distinct_locations():
                     "2026-01-01 08:00:00",
                     "2026-01-01 09:00:00",
                 ]
-            ),
+            ).str.to_datetime(),
             "location_id": ["home", "work", "work", "home", "home", "shop"],
         }
     )
@@ -617,12 +619,12 @@ def test_activities_sidecar_path_uses_synthetic_stem():
 
 
 def test_micro_activity_daily_usage_figure_uses_catalog_labels():
-    activities = pd.DataFrame(
+    activities = pl.DataFrame(
         {
             "uid": [1, 1],
             "activity": [0, 3],
-            "arrival": pd.to_datetime(["2026-01-01 00:00", "2026-01-01 08:00"]),
-            "departure": pd.to_datetime(["2026-01-01 01:00", "2026-01-01 09:00"]),
+            "arrival": pl.Series(["2026-01-01 00:00", "2026-01-01 08:00"]).str.to_datetime(),
+            "departure": pl.Series(["2026-01-01 01:00", "2026-01-01 09:00"]).str.to_datetime(),
         }
     )
 
@@ -666,7 +668,7 @@ def _build_report_fixture(tmp_path):
         base_lat, base_lng = 48.85 + uid * 0.01, 2.35 + uid * 0.01
         for i in range(n_stops):
             lat, lng = base_lat + (i % 3) * 0.01, base_lng + (i % 3) * 0.01
-            ts = pd.Timestamp("2026-01-01") + pd.Timedelta(hours=4 * i)
+            ts = datetime(2026, 1, 1) + timedelta(hours=4 * i)
             synth_rows.append(
                 {
                     "uid": uid,
@@ -679,7 +681,7 @@ def _build_report_fixture(tmp_path):
                     "location_id": h3.latlng_to_cell(lat, lng, 9),
                 }
             )
-    synth_df = pd.DataFrame(synth_rows)
+    synth_df = pl.DataFrame(synth_rows)
     traj = skmob2.TrajDataFrame(
         synth_df, datetime_col="datetime", lat_col="lat", lng_col="lng", uid_col="uid"
     )
@@ -689,7 +691,7 @@ def _build_report_fixture(tmp_path):
         base_lat, base_lng = 48.86 + uid * 0.001, 2.36 + uid * 0.001
         for i in range(n_stops):
             lat, lng = base_lat + (i % 3) * 0.01, base_lng + (i % 3) * 0.01
-            ts = pd.Timestamp("2026-01-01") + pd.Timedelta(hours=4 * i)
+            ts = datetime(2026, 1, 1) + timedelta(hours=4 * i)
             real_rows.append(
                 {
                     "uid": uid,
@@ -701,16 +703,16 @@ def _build_report_fixture(tmp_path):
                     "location_id": h3.latlng_to_cell(lat, lng, 9),
                 }
             )
-    real_df = pd.DataFrame(real_rows)
+    real_df = pl.DataFrame(real_rows)
     real_path = tmp_path / "observed.parquet"
-    real_df.to_parquet(real_path, index=False)
+    real_df.write_parquet(real_path)
     return traj, str(real_path)
 
 
 def test_generate_comparison_report_writes_json_metrics(tmp_path):
     traj, real_path = _build_report_fixture(tmp_path)
     synthetic_path = tmp_path / "synthetic.parquet"
-    traj.df.to_parquet(synthetic_path, index=False)
+    traj.df.write_parquet(synthetic_path)
     social_network_sidecar_path(synthetic_path).write_text(
         json.dumps(
             {
@@ -807,12 +809,10 @@ def test_generate_comparison_report_uses_road_network_distance_when_provided(tmp
     from citybehavex.roads import haversine_m
 
     traj, real_path = _build_report_fixture(tmp_path)
-    real_df = pd.read_parquet(real_path)
+    real_df = pl.read_parquet(real_path)
 
-    coords = (
-        pd.concat([traj.df[["lat", "lng"]], real_df[["lat", "lng"]]], ignore_index=True)
-        .drop_duplicates()
-        .reset_index(drop=True)
+    coords = pl.concat([traj.df.select(["lat", "lng"]), real_df.select(["lat", "lng"])]).unique(
+        maintain_order=True
     )
     lat = coords["lat"].to_numpy()
     lng = coords["lng"].to_numpy()
@@ -822,8 +822,8 @@ def test_generate_comparison_report_uses_road_network_distance_when_provided(tmp
     length_m = haversine_m(lat[from_node], lng[from_node], lat[to_node], lng[to_node]) * 2.0
     weight_ds = np.maximum(1, np.round(length_m)).astype(np.int64)
 
-    road_nodes_df = pd.DataFrame({"node_idx": np.arange(len(coords), dtype=np.int64), "lat": lat, "lng": lng})
-    road_edges_df = pd.DataFrame(
+    road_nodes_df = pl.DataFrame({"node_idx": np.arange(len(coords), dtype=np.int64), "lat": lat, "lng": lng})
+    road_edges_df = pl.DataFrame(
         {"from_node": from_node, "to_node": to_node, "length_m": length_m, "weight_ds": weight_ds}
     )
 

@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
 from typing import Any, Optional
 
 from fastapi import APIRouter, HTTPException, Query
 
 from ..cache import get_or_build
+from ..executor import get_executor
 from ..experiments import get_experiment
 from ..home_work_data import DemoFilter, GENDERS, JOBS, get_or_build_home_work, resolve_age_bracket
 from ..models import ApiResponseWrapper
@@ -15,8 +17,22 @@ from ..payload import build_comparison_payload, build_network_validation_payload
 router = APIRouter(tags=["charts"])
 
 
+def _picklable_nv_config(nv_cfg: Any) -> Any:
+    """``network_validation_config`` is a pydantic model, already picklable
+    on its own -- convert to a plain ``SimpleNamespace`` defensively anyway,
+    so a `ProcessPoolExecutor` dispatch never depends on that being true and
+    ``getattr(nv_cfg, "x", default)`` call sites in ``build_network_validation_payload``
+    keep working unchanged either way.
+    """
+    if nv_cfg is None:
+        return None
+    if hasattr(nv_cfg, "model_dump"):
+        return SimpleNamespace(**nv_cfg.model_dump())
+    return nv_cfg
+
+
 @router.get("/experiments/{exp_id}/charts")
-def get_charts(
+async def get_charts(
     exp_id: str,
     run: Optional[str] = Query(None, description="Run id (timestamp). Defaults to the latest run."),
     refresh: bool = Query(False, description="Bypass the cache and recompute."),
@@ -49,15 +65,16 @@ def get_charts(
         else None
     )
 
-    payload = get_or_build(
+    payload = await get_or_build(
         exp_id,
         selected.run_id,
         selected.path,
         observed_path,
-        build=lambda: build_comparison_payload(
-            str(selected.path),
-            str(observed_path) if observed_path is not None else None,
-            experiment.label,
+        build_fn=build_comparison_payload,
+        build_kwargs=dict(
+            synthetic_path=str(selected.path),
+            observed_path=str(observed_path) if observed_path is not None else None,
+            observed_label=experiment.label,
             synthetic_activities_path=str(selected.activities_path),
             time_use_path=str(time_use_path) if time_use_path is not None else None,
             time_use_label=experiment.time_use_label,
@@ -68,6 +85,7 @@ def get_charts(
             road_edges_path=str(road_edges_path) if road_edges_path is not None else None,
             special_days=experiment.special_days,
         ),
+        executor=get_executor(),
         refresh=refresh,
         extra_paths=tuple(
             p
@@ -87,7 +105,7 @@ def get_charts(
 
 
 @router.get("/experiments/{exp_id}/network-validation")
-def get_network_validation(
+async def get_network_validation(
     exp_id: str,
     run: Optional[str] = Query(None, description="Run id (timestamp). Defaults to the latest run."),
     refresh: bool = Query(False, description="Bypass the cache and recompute."),
@@ -112,16 +130,20 @@ def get_network_validation(
         else None
     )
 
-    payload = get_or_build(
+    payload = await get_or_build(
         f"{exp_id}__network_validation",
         selected.run_id,
         selected.path,
         observed_path,
-        build=lambda: build_network_validation_payload(
-            str(selected.path),
-            str(observed_path) if observed_path is not None else None,
-            getattr(experiment, "network_validation_config", None),
+        build_fn=build_network_validation_payload,
+        build_kwargs=dict(
+            synthetic_path=str(selected.path),
+            observed_path=str(observed_path) if observed_path is not None else None,
+            network_validation_config=_picklable_nv_config(
+                getattr(experiment, "network_validation_config", None)
+            ),
         ),
+        executor=get_executor(),
         refresh=refresh,
         extra_paths=tuple(
             p
@@ -137,7 +159,7 @@ def get_network_validation(
 
 
 @router.get("/experiments/{exp_id}/home-work")
-def get_home_work(
+async def get_home_work(
     exp_id: str,
     run: Optional[str] = Query(None, description="Run id (timestamp). Defaults to the latest run."),
     gender: Optional[str] = Query(None),
@@ -168,11 +190,13 @@ def get_home_work(
         else None
     )
     demo = DemoFilter(gender=gender, age_min=age_min, age_max=age_max, job=job)
-    payload = get_or_build_home_work(
+    payload = await get_or_build_home_work(
         selected.path,
         observed_path,
         experiment.profiles_path,
         demo,
+        exp_id=exp_id,
+        run_id=selected.run_id,
         refresh=refresh,
     )
     payload = {**payload, "run_id": selected.run_id}

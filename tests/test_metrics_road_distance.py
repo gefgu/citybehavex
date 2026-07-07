@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import numpy as np
-import pandas as pd
+import polars as pl
 import pytest
 
 from citybehavex.metrics import (
@@ -17,14 +17,14 @@ def _tiny_road_graph():
     physically shorter direct 0 -> 3 edge, both directions -- mirrors the
     Rust `shortest_path_length_over_a_chain` fixture, so routing must prefer
     the chain (and its length, 3 * 2000m) over the direct edge's length."""
-    nodes_df = pd.DataFrame(
+    nodes_df = pl.DataFrame(
         {
             "node_idx": [0, 1, 2, 3],
             "lat": [48.85, 48.85, 48.85, 48.85],
             "lng": [2.35, 2.36, 2.37, 2.38],
         }
     )
-    edges_df = pd.DataFrame(
+    edges_df = pl.DataFrame(
         {
             "from_node": [0, 1, 2, 3, 2, 1, 0, 3],
             "to_node": [1, 2, 3, 2, 1, 0, 3, 0],
@@ -39,10 +39,10 @@ def test_jump_lengths_km_uses_road_distance_not_haversine():
     nodes_df, edges_df = _tiny_road_graph()
     handle = build_road_network_handle(edges_df)
 
-    df = pd.DataFrame(
+    df = pl.DataFrame(
         {
             "uid": [1, 1],
-            "datetime": pd.to_datetime(["2026-01-01 08:00", "2026-01-01 09:00"]),
+            "datetime": pl.Series(["2026-01-01 08:00", "2026-01-01 09:00"]).str.to_datetime(),
             "lat": [48.85, 48.85],
             "lng": [2.35, 2.38],
         }
@@ -66,10 +66,10 @@ def test_jump_lengths_km_falls_back_to_haversine_when_unsnapped():
 
     # Both stops are far (>> snap_max_distance_m) from any graph node, so
     # both endpoints are unsnapped and the pair must fall back to Haversine.
-    df = pd.DataFrame(
+    df = pl.DataFrame(
         {
             "uid": [1, 1],
-            "datetime": pd.to_datetime(["2026-01-01 08:00", "2026-01-01 09:00"]),
+            "datetime": pl.Series(["2026-01-01 08:00", "2026-01-01 09:00"]).str.to_datetime(),
             "lat": [10.0, 10.0],
             "lng": [10.0, 10.1],
         }
@@ -86,7 +86,7 @@ def test_radius_of_gyration_km_uses_road_distance():
     nodes_df, edges_df = _tiny_road_graph()
     handle = build_road_network_handle(edges_df)
 
-    df = pd.DataFrame(
+    df = pl.DataFrame(
         {
             "uid": [1, 1],
             "lat": [48.85, 48.85],
@@ -97,9 +97,9 @@ def test_radius_of_gyration_km_uses_road_distance():
         df, uid_col="uid", lat_col="lat", lng_col="lng",
         handle=handle, nodes_df=nodes_df, snap_max_distance_m=750.0,
     )
-    assert list(rog.columns) == ["uid", "radius_of_gyration"]
+    assert rog.columns == ["uid", "radius_of_gyration"]
     assert len(rog) == 1
-    assert rog["radius_of_gyration"].iloc[0] > 0.0
+    assert rog["radius_of_gyration"][0] > 0.0
 
     # Road-network RoG should never be smaller than a straight-line RoG
     # computed against the same (unsnapped) points and centroid, since road
@@ -113,4 +113,4 @@ def test_radius_of_gyration_km_uses_road_distance():
             )
         )
     )
-    assert rog["radius_of_gyration"].iloc[0] >= haversine_rog
+    assert rog["radius_of_gyration"][0] >= haversine_rog
