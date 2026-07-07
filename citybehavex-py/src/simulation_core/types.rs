@@ -59,6 +59,8 @@ pub(crate) struct AgentState {
     /// actual distinct visits, matching `visited_locs`) is the correct
     /// asymptotic representation.
     pub(crate) visit_counts: FxHashMap<usize, u32>,
+    pub(crate) poi_type_counts: FxHashMap<usize, u32>,
+    pub(crate) visited_poi_types: Vec<usize>,
     pub(crate) total_visits: f64,
     pub(crate) s: f64,
     pub(crate) norm_sq: f64,
@@ -72,6 +74,8 @@ impl AgentState {
             work_location: 0,
             visited_locs: Vec::with_capacity(200),
             visit_counts: FxHashMap::with_capacity_and_hasher(200, Default::default()),
+            poi_type_counts: FxHashMap::with_capacity_and_hasher(32, Default::default()),
+            visited_poi_types: Vec::with_capacity(32),
             total_visits: 0.0,
             s: 0.0,
             norm_sq: 0.0,
@@ -88,6 +92,14 @@ impl AgentState {
         }
         *entry += 1;
         self.total_visits += 1.0;
+    }
+
+    pub(crate) fn visit_poi_type(&mut self, semantic_cluster: usize) {
+        let entry = self.poi_type_counts.entry(semantic_cluster).or_insert(0);
+        if *entry == 0 {
+            self.visited_poi_types.push(semantic_cluster);
+        }
+        *entry += 1;
     }
 }
 

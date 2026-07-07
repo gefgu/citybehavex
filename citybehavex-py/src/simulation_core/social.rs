@@ -3,13 +3,28 @@ use rustc_hash::FxHashMap;
 use skmob2_core::models::od::CachedGravityOdRows;
 use skmob2_core::models::shared::cdf_choice;
 
-use crate::simulation_core::inputs::{LocationInputs, SimulationParams};
+use crate::simulation_core::inputs::{ActivityInputs, LocationInputs, SimulationParams};
 use crate::simulation_core::types::{
     AgentState, DiaryState, Encounter, GRAVITY_REJECTION_ATTEMPTS, Scratch, SocialMode, WORK_CODE,
 };
 
 fn count_at(counts: &FxHashMap<usize, u32>, loc: usize) -> u32 {
     counts.get(&loc).copied().unwrap_or(0)
+}
+
+fn location_matches_semantic_cluster(
+    locations: &LocationInputs<'_>,
+    loc: usize,
+    target_semantic_cluster: Option<usize>,
+) -> bool {
+    match target_semantic_cluster {
+        Some(target) => locations
+            .semantic_cluster_ids
+            .get(loc)
+            .copied()
+            .is_some_and(|cluster| cluster == target),
+        None => true,
+    }
 }
 
 fn cosine_similarity_sparse(
@@ -59,6 +74,8 @@ fn cdf_sample(rng: &mut impl Rng, candidates: &[usize], cdf: &[f64]) -> usize {
 fn make_individual_return(
     agent: usize,
     agents: &[AgentState],
+    locations: &LocationInputs<'_>,
+    target_semantic_cluster: Option<usize>,
     rng: &mut impl Rng,
     scratch: &mut Scratch,
 ) -> Option<usize> {
@@ -67,6 +84,9 @@ fn make_individual_return(
         scratch,
         a.visited_locs
             .iter()
+            .filter(|&&loc| {
+                location_matches_semantic_cluster(locations, loc, target_semantic_cluster)
+            })
             .map(|&loc| (loc, count_at(&a.visit_counts, loc) as f64)),
     );
     if scratch.candidates.is_empty() {
@@ -84,6 +104,7 @@ fn social_exploration(
     n_locations: usize,
     rng: &mut impl Rng,
     scratch: &mut Scratch,
+    target_semantic_cluster: Option<usize>,
 ) -> Option<usize> {
     let src = agents[agent].current_location;
     let home = agents[agent].home_location;
@@ -96,7 +117,15 @@ fn social_exploration(
             if total.is_finite() && total > 0.0 {
                 for _ in 0..GRAVITY_REJECTION_ATTEMPTS {
                     let loc = cdf_choice(rng, &row);
-                    if !visit_counts.contains_key(&loc) && loc != src && loc != home {
+                    if !visit_counts.contains_key(&loc)
+                        && loc != src
+                        && loc != home
+                        && location_matches_semantic_cluster(
+                            locations,
+                            loc,
+                            target_semantic_cluster,
+                        )
+                    {
                         return Some(loc);
                     }
                 }
@@ -125,6 +154,11 @@ fn social_exploration(
                         !visit_counts.contains_key(&j)
                             && j != src
                             && j != home
+                            && location_matches_semantic_cluster(
+                                locations,
+                                j,
+                                target_semantic_cluster,
+                            )
                             && weight.is_finite()
                     }),
             );
@@ -142,6 +176,9 @@ fn social_exploration(
     let mut cumsum = 0.0_f64;
     for j in 0..n_locations {
         if visit_counts.contains_key(&j) || j == src || j == home {
+            continue;
+        }
+        if !location_matches_semantic_cluster(locations, j, target_semantic_cluster) {
             continue;
         }
         let d = locations.distances[src * n_locations + j].max(0.001);
@@ -194,6 +231,8 @@ struct SocialActionContext<'a, R: Rng> {
     mode: SocialMode,
     rng: &'a mut R,
     scratch: &'a mut Scratch,
+    locations: &'a LocationInputs<'a>,
+    target_semantic_cluster: Option<usize>,
 }
 
 fn make_social_action_local<R: Rng>(ctx: SocialActionContext<'_, R>) -> Option<(usize, usize)> {
@@ -230,12 +269,26 @@ fn make_social_action_local<R: Rng>(ctx: SocialActionContext<'_, R>) -> Option<(
             contact_locs
                 .iter()
                 .filter(|&&loc| !agent_counts.contains_key(&loc))
+                .filter(|&&loc| {
+                    location_matches_semantic_cluster(
+                        ctx.locations,
+                        loc,
+                        ctx.target_semantic_cluster,
+                    )
+                })
                 .map(|&loc| (loc, count_at(contact_counts, loc) as f64)),
         ),
         SocialMode::Return => populate_scratchpad(
             ctx.scratch,
             agent_locs
                 .iter()
+                .filter(|&&loc| {
+                    location_matches_semantic_cluster(
+                        ctx.locations,
+                        loc,
+                        ctx.target_semantic_cluster,
+                    )
+                })
                 .map(|&loc| (loc, count_at(contact_counts, loc) as f64)),
         ),
     }
@@ -259,8 +312,10 @@ pub(crate) struct LocationChoiceContext<'a, R: Rng> {
     pub(crate) n_locations: usize,
     pub(crate) current_ts: i64,
     pub(crate) locations: &'a LocationInputs<'a>,
+    pub(crate) activities: &'a ActivityInputs<'a>,
     pub(crate) od_rows: Option<&'a CachedGravityOdRows<'a>>,
     pub(crate) diary_abs_locs: &'a [i32],
+    pub(crate) diary_block_ids: &'a [i32],
     pub(crate) scratch: &'a mut Scratch,
     pub(crate) encounters: &'a mut Vec<Encounter>,
 }
@@ -268,6 +323,7 @@ pub(crate) struct LocationChoiceContext<'a, R: Rng> {
 fn social_action_for_choice<R: Rng>(
     ctx: &mut LocationChoiceContext<'_, R>,
     mode: SocialMode,
+    target_semantic_cluster: Option<usize>,
 ) -> Option<usize> {
     make_social_action_local(SocialActionContext {
         agent: ctx.agent,
@@ -277,6 +333,8 @@ fn social_action_for_choice<R: Rng>(
         mode,
         rng: ctx.rng,
         scratch: ctx.scratch,
+        locations: ctx.locations,
+        target_semantic_cluster,
     })
     .map(|(loc, contact)| {
         ctx.encounters.push(Encounter {
@@ -289,7 +347,10 @@ fn social_action_for_choice<R: Rng>(
     })
 }
 
-fn exploration_for_choice<R: Rng>(ctx: &mut LocationChoiceContext<'_, R>) -> Option<usize> {
+fn exploration_for_choice<R: Rng>(
+    ctx: &mut LocationChoiceContext<'_, R>,
+    target_semantic_cluster: Option<usize>,
+) -> Option<usize> {
     social_exploration(
         ctx.agent,
         ctx.agents,
@@ -298,11 +359,158 @@ fn exploration_for_choice<R: Rng>(ctx: &mut LocationChoiceContext<'_, R>) -> Opt
         ctx.n_locations,
         ctx.rng,
         ctx.scratch,
+        target_semantic_cluster,
     )
 }
 
-fn return_for_choice<R: Rng>(ctx: &mut LocationChoiceContext<'_, R>) -> Option<usize> {
-    make_individual_return(ctx.agent, ctx.agents, ctx.rng, ctx.scratch)
+fn return_for_choice<R: Rng>(
+    ctx: &mut LocationChoiceContext<'_, R>,
+    target_semantic_cluster: Option<usize>,
+) -> Option<usize> {
+    make_individual_return(
+        ctx.agent,
+        ctx.agents,
+        ctx.locations,
+        target_semantic_cluster,
+        ctx.rng,
+        ctx.scratch,
+    )
+}
+
+fn poi_type_alignment_factor(
+    agent: usize,
+    block_id: i32,
+    semantic_cluster: usize,
+    activities: &ActivityInputs<'_>,
+    locations: &LocationInputs<'_>,
+) -> f64 {
+    if block_id < 0
+        || semantic_cluster >= locations.poi_type_n_clusters
+        || locations.poi_type_n_blocks == 0
+        || locations.poi_type_n_clusters == 0
+    {
+        return 0.0;
+    }
+    let profile_cluster = activities.cluster_labels.get(agent).copied().unwrap_or(0);
+    let block = block_id as usize;
+    if block >= locations.poi_type_n_blocks {
+        return 0.0;
+    }
+    let idx = ((profile_cluster * locations.poi_type_n_blocks + block)
+        * locations.poi_type_n_clusters)
+        + semantic_cluster;
+    let score = locations
+        .poi_type_scores
+        .get(idx)
+        .copied()
+        .unwrap_or(0.0)
+        .clamp(0.0, 1.0);
+    score.max(1.0e-9).powf(1.0 / locations.poi_type_temperature)
+}
+
+fn sample_poi_semantic_cluster<R: Rng>(
+    ctx: &mut LocationChoiceContext<'_, R>,
+    explore: bool,
+) -> Option<usize> {
+    if !ctx.locations.poi_type_choice_enabled
+        || ctx.locations.poi_type_scores.is_empty()
+        || ctx.locations.semantic_cluster_ids.len() != ctx.n_locations
+    {
+        return None;
+    }
+    let block_id = ctx.diary.current_block_id(ctx.diary_block_ids);
+    let agent_state = &ctx.agents[ctx.agent];
+    ctx.scratch.candidates.clear();
+    ctx.scratch.cdf.clear();
+    let mut cumsum = 0.0_f64;
+
+    if explore {
+        for &semantic_cluster in ctx.locations.semantic_cluster_ids {
+            if semantic_cluster >= ctx.locations.poi_type_n_clusters
+                || ctx.scratch.candidates.contains(&semantic_cluster)
+            {
+                continue;
+            }
+            let count = agent_state
+                .poi_type_counts
+                .get(&semantic_cluster)
+                .copied()
+                .unwrap_or(0) as f64;
+            let alignment = poi_type_alignment_factor(
+                ctx.agent,
+                block_id,
+                semantic_cluster,
+                ctx.activities,
+                ctx.locations,
+            );
+            let weight = (ctx.locations.poi_type_alpha + count) * alignment;
+            if weight > 0.0 {
+                ctx.scratch.candidates.push(semantic_cluster);
+                cumsum += weight;
+                ctx.scratch.cdf.push(cumsum);
+            }
+        }
+    } else {
+        for &semantic_cluster in &agent_state.visited_poi_types {
+            if semantic_cluster >= ctx.locations.poi_type_n_clusters {
+                continue;
+            }
+            let count = agent_state
+                .poi_type_counts
+                .get(&semantic_cluster)
+                .copied()
+                .unwrap_or(0) as f64;
+            let alignment = poi_type_alignment_factor(
+                ctx.agent,
+                block_id,
+                semantic_cluster,
+                ctx.activities,
+                ctx.locations,
+            );
+            let weight = count * alignment;
+            if weight > 0.0 {
+                ctx.scratch.candidates.push(semantic_cluster);
+                cumsum += weight;
+                ctx.scratch.cdf.push(cumsum);
+            }
+        }
+    }
+
+    if ctx.scratch.candidates.is_empty() {
+        None
+    } else {
+        Some(cdf_sample(
+            ctx.rng,
+            &ctx.scratch.candidates,
+            &ctx.scratch.cdf,
+        ))
+    }
+}
+
+fn choose_location_with_filter<R: Rng>(
+    ctx: &mut LocationChoiceContext<'_, R>,
+    explore: bool,
+    social: bool,
+    target_semantic_cluster: Option<usize>,
+) -> Option<usize> {
+    match (explore, social) {
+        (true, true) => {
+            social_action_for_choice(ctx, SocialMode::Exploration, target_semantic_cluster)
+                .or_else(|| exploration_for_choice(ctx, target_semantic_cluster))
+                .or_else(|| return_for_choice(ctx, target_semantic_cluster))
+        }
+        (true, false) => exploration_for_choice(ctx, target_semantic_cluster)
+            .or_else(|| {
+                social_action_for_choice(ctx, SocialMode::Exploration, target_semantic_cluster)
+            })
+            .or_else(|| return_for_choice(ctx, target_semantic_cluster)),
+        (false, true) => social_action_for_choice(ctx, SocialMode::Return, target_semantic_cluster)
+            .or_else(|| return_for_choice(ctx, target_semantic_cluster))
+            .or_else(|| exploration_for_choice(ctx, target_semantic_cluster)),
+        (false, false) => return_for_choice(ctx, target_semantic_cluster)
+            .or_else(|| social_action_for_choice(ctx, SocialMode::Return, target_semantic_cluster))
+            .or_else(|| exploration_for_choice(ctx, target_semantic_cluster)),
+    }
 }
 
 pub(crate) fn choose_location_local<R: Rng>(mut ctx: LocationChoiceContext<'_, R>) -> usize {
@@ -319,20 +527,15 @@ pub(crate) fn choose_location_local<R: Rng>(mut ctx: LocationChoiceContext<'_, R
     let explore = ctx.rng.gen_range(0.0_f64..1.0) < p_explore;
     let social = ctx.rng.gen_range(0.0_f64..1.0) < ctx.params.alpha;
 
-    let location = match (explore, social) {
-        (true, true) => social_action_for_choice(&mut ctx, SocialMode::Exploration)
-            .or_else(|| exploration_for_choice(&mut ctx))
-            .or_else(|| return_for_choice(&mut ctx)),
-        (true, false) => exploration_for_choice(&mut ctx)
-            .or_else(|| social_action_for_choice(&mut ctx, SocialMode::Exploration))
-            .or_else(|| return_for_choice(&mut ctx)),
-        (false, true) => social_action_for_choice(&mut ctx, SocialMode::Return)
-            .or_else(|| return_for_choice(&mut ctx))
-            .or_else(|| exploration_for_choice(&mut ctx)),
-        (false, false) => return_for_choice(&mut ctx)
-            .or_else(|| social_action_for_choice(&mut ctx, SocialMode::Return))
-            .or_else(|| exploration_for_choice(&mut ctx)),
-    };
+    let target_semantic_cluster = sample_poi_semantic_cluster(&mut ctx, explore);
+    let location = choose_location_with_filter(&mut ctx, explore, social, target_semantic_cluster)
+        .or_else(|| {
+            if target_semantic_cluster.is_some() {
+                choose_location_with_filter(&mut ctx, explore, social, None)
+            } else {
+                None
+            }
+        });
 
     location.unwrap_or(ctx.agents[ctx.agent].current_location)
 }

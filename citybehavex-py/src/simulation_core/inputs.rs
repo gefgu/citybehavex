@@ -31,6 +31,13 @@ pub(crate) struct LocationInputs<'a> {
     pub(crate) lngs: &'a [f64],
     pub(crate) relevances: &'a [f64],
     pub(crate) distances: &'a [f64],
+    pub(crate) semantic_cluster_ids: &'a [usize],
+    pub(crate) poi_type_scores: &'a [f64],
+    pub(crate) poi_type_choice_enabled: bool,
+    pub(crate) poi_type_n_clusters: usize,
+    pub(crate) poi_type_n_blocks: usize,
+    pub(crate) poi_type_temperature: f64,
+    pub(crate) poi_type_alpha: f64,
 }
 
 pub(crate) struct SocialGraphInputs<'a> {

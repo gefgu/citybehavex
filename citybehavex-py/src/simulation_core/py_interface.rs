@@ -94,6 +94,10 @@ fn opt_i64_as_usize_vec(v: &Option<PyReadonlyArray1<'_, i64>>) -> PyResult<Optio
     poi_semantic_scores=None, location_semantic_cluster_ids=None,
     poi_mask_starts=None, poi_mask_activities=None,
     poi_semantic_clusters=0usize,
+    poi_type_choice_enabled=false,
+    poi_type_alignment_scores=None, poi_type_alignment_blocks=0usize,
+    poi_type_alignment_clusters=0usize, poi_type_choice_temperature=0.5f64,
+    poi_type_choice_alpha=1.0f64,
     activity_history_weight=1.0f64,
     materialize_travel=true,
     road_edge_from=None, road_edge_to=None, road_edge_weight_ds=None,
@@ -159,6 +163,12 @@ pub fn simulation_core_simulate_agents<'py>(
     poi_mask_starts: Option<PyReadonlyArray1<'py, i64>>,
     poi_mask_activities: Option<PyReadonlyArray1<'py, i64>>,
     poi_semantic_clusters: usize,
+    poi_type_choice_enabled: bool,
+    poi_type_alignment_scores: Option<PyReadonlyArray1<'py, f64>>,
+    poi_type_alignment_blocks: usize,
+    poi_type_alignment_clusters: usize,
+    poi_type_choice_temperature: f64,
+    poi_type_choice_alpha: f64,
     activity_history_weight: f64,
     materialize_travel: bool,
     road_edge_from: Option<PyReadonlyArray1<'py, i64>>,
@@ -259,6 +269,7 @@ pub fn simulation_core_simulate_agents<'py>(
     let profile_act_sims_s = opt_slice(&profile_act_sims)?;
     let activity_alignment_scores_s = opt_slice(&activity_alignment_scores)?;
     let poi_semantic_scores_s = opt_slice(&poi_semantic_scores)?;
+    let poi_type_alignment_scores_s = opt_slice(&poi_type_alignment_scores)?;
     let activity_cluster_labels_v =
         opt_i64_as_usize_vec(&activity_cluster_labels)?.unwrap_or_default();
     let location_semantic_cluster_ids_v =
@@ -414,6 +425,13 @@ pub fn simulation_core_simulate_agents<'py>(
                 lngs,
                 relevances: rels,
                 distances: dists,
+                semantic_cluster_ids: &location_semantic_cluster_ids_v,
+                poi_type_scores: poi_type_alignment_scores_s,
+                poi_type_choice_enabled,
+                poi_type_n_clusters: poi_type_alignment_clusters,
+                poi_type_n_blocks: poi_type_alignment_blocks,
+                poi_type_temperature: poi_type_choice_temperature,
+                poi_type_alpha: poi_type_choice_alpha,
             },
             social_graph: SocialGraphInputs {
                 neighbor_starts: &ns,

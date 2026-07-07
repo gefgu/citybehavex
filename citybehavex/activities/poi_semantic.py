@@ -122,3 +122,21 @@ def semantic_cluster_ids_for_categories(
         .fillna(UNKNOWN_SEMANTIC_CLUSTER_ID)
         .to_numpy(dtype=np.int64)
     )
+
+
+def example_categories_by_semantic_cluster(
+    data: PoiSemanticActivityData,
+    limit: int = 12,
+) -> dict[str, list[str]]:
+    examples: dict[str, list[str]] = {cluster: [] for cluster in data.semantic_clusters}
+    for category, cluster in data.category_to_cluster.items():
+        if cluster in examples and len(examples[cluster]) < limit:
+            examples[cluster].append(category)
+    return examples
+
+
+def available_semantic_cluster_ids(location_semantic_cluster_ids: np.ndarray) -> np.ndarray:
+    if location_semantic_cluster_ids.size == 0:
+        return np.empty(0, dtype=np.int64)
+    values = np.asarray(location_semantic_cluster_ids, dtype=np.int64)
+    return np.unique(values[values >= 0]).astype(np.int64, copy=False)
