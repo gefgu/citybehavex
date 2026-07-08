@@ -6,6 +6,7 @@ import json
 import math
 import os
 import re
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable, Sequence
@@ -22,6 +23,7 @@ class TrainingPair:
     day_type: str
     profile_text: str
     diary_text: str
+    schedule_features: str = ""
 
 
 def parse_alignment_payload(payload: Any) -> float:
@@ -80,6 +82,53 @@ def load_diaries(paths: Sequence[str | Path]) -> list[tuple[str, object]]:
     return diaries
 
 
+def _minutes(value: str) -> int:
+    hour, minute = (int(part) for part in value.split(":", maxsplit=1))
+    return 24 * 60 if hour == 24 else hour * 60 + minute
+
+
+def _schedule_features(diary: object) -> str:
+    episodes = diary.episodes
+    purpose_minutes = {"HOME": 0, "WORK": 0, "OTHER": 0}
+    non_home_stops = 0
+    first_departure = "none"
+    last_return = "none"
+    excursions = 0
+    in_away = False
+    for episode in episodes:
+        duration = _minutes(episode.end) - _minutes(episode.start)
+        purpose_minutes[episode.purpose] = purpose_minutes.get(episode.purpose, 0) + duration
+        if episode.purpose != "HOME":
+            non_home_stops += 1
+            if first_departure == "none":
+                first_departure = episode.start
+            in_away = True
+        elif in_away:
+            excursions += 1
+            last_return = episode.start
+            in_away = False
+    if in_away:
+        excursions += 1
+    return (
+        f"stop_count={len(episodes)}; non_home_stops={non_home_stops}; "
+        f"home_minutes={purpose_minutes.get('HOME', 0)}; "
+        f"work_minutes={purpose_minutes.get('WORK', 0)}; "
+        f"other_minutes={purpose_minutes.get('OTHER', 0)}; "
+        f"first_departure={first_departure}; last_return={last_return}; "
+        f"home_anchored_excursions={excursions}"
+    )
+
+
+def _variation_score(diary: object) -> tuple[int, int, int]:
+    features = _schedule_features(diary)
+    values = dict(item.split("=", maxsplit=1) for item in features.split("; "))
+    return (
+        int(values["non_home_stops"]),
+        int(values["home_anchored_excursions"]),
+        int(values["stop_count"]),
+    )
+
+
 def build_training_pairs(
     profiles: Sequence[object],
     diaries: Sequence[tuple[str, object]],
@@ -104,7 +153,12 @@ def build_training_pairs(
         profile = profiles[int(rng.integers(len(profiles)))]
         day_type = day_types[i % len(day_types)]
         diary_bucket = by_day_type[day_type]
-        diary = diary_bucket[int(rng.integers(len(diary_bucket)))]
+        if i % 4 == 0:
+            diary = min(diary_bucket, key=_variation_score)
+        elif i % 4 == 1:
+            diary = max(diary_bucket, key=_variation_score)
+        else:
+            diary = diary_bucket[int(rng.integers(len(diary_bucket)))]
         pairs.append(
             TrainingPair(
                 profile_uid=profile.uid,
@@ -112,6 +166,7 @@ def build_training_pairs(
                 day_type=day_type,
                 profile_text=profile_to_narrative(profile),
                 diary_text=diary_to_prose(diary),
+                schedule_features=_schedule_features(diary),
             )
         )
     return pairs
@@ -123,9 +178,28 @@ def alignment_prompt(pair: TrainingPair) -> str:
         "demographic and mobility profile. Return strictly valid JSON with the "
         "keys in this order: reason, score. The score must be a number from 0 "
         "to 1, where 0 means incompatible and 1 means highly aligned.\n\n"
+        "Scoring guidance: consider schedule variation explicitly. Realistic "
+        "non-home stops, excursions, first departure/last return timing, and "
+        "HOME/WORK/OTHER time balance should raise the score when they fit the "
+        "profile and day type. All-HOME or very low-variation schedules should "
+        "score high only for profiles that plausibly stay home that day; do not "
+        "penalize them globally.\n\n"
         f"Profile:\n{pair.profile_text}\n\n"
-        f"Schedule:\n{pair.diary_text}"
+        f"Schedule:\n{pair.diary_text}\n\n"
+        f"Schedule variation features:\n{pair.schedule_features}"
     )
+
+
+def _pair_row(pair: TrainingPair, score: float) -> dict[str, Any]:
+    return {
+        "profile_uid": pair.profile_uid,
+        "diary_id": pair.diary_id,
+        "day_type": pair.day_type,
+        "profile_text": pair.profile_text,
+        "diary_text": pair.diary_text,
+        "schedule_features": pair.schedule_features,
+        "score": score,
+    }
 
 
 def label_pairs(
@@ -136,12 +210,14 @@ def label_pairs(
     api_key: str | None,
     timeout: float,
     retries: int,
+    concurrency: int = 1,
+    progress_interval: int = 0,
 ) -> pd.DataFrame:
     headers = {"Content-Type": "application/json"}
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
-    rows: list[dict[str, Any]] = []
-    for pair in pairs:
+
+    def score_pair(pair: TrainingPair) -> dict[str, Any]:
         last_error: Exception | None = None
         for _attempt in range(max(1, retries)):
             try:
@@ -164,23 +240,36 @@ def label_pairs(
                 )
                 resp.raise_for_status()
                 score = parse_alignment_payload(_parse_chat_json(resp.json()))
-                rows.append(
-                    {
-                        "profile_uid": pair.profile_uid,
-                        "diary_id": pair.diary_id,
-                        "day_type": pair.day_type,
-                        "profile_text": pair.profile_text,
-                        "diary_text": pair.diary_text,
-                        "score": score,
-                    }
-                )
-                break
+                return _pair_row(pair, score)
             except Exception as exc:  # noqa: BLE001 - retry with final failure.
                 last_error = exc
-        else:
-            raise RuntimeError(
-                f"failed to label profile={pair.profile_uid} diary={pair.diary_id}: {last_error}"
-            ) from last_error
+        raise RuntimeError(
+            f"failed to label profile={pair.profile_uid} diary={pair.diary_id}: {last_error}"
+        ) from last_error
+
+    if concurrency <= 1:
+        rows = []
+        for idx, pair in enumerate(pairs, start=1):
+            rows.append(score_pair(pair))
+            if progress_interval > 0 and idx % progress_interval == 0:
+                print(f"Labeled {idx}/{len(pairs)} pairs", flush=True)
+        return pd.DataFrame(rows)
+
+    rows: list[dict[str, Any] | None] = [None] * len(pairs)
+    completed = 0
+    with ThreadPoolExecutor(max_workers=concurrency) as executor:
+        futures = {
+            executor.submit(score_pair, pair): idx
+            for idx, pair in enumerate(pairs)
+        }
+        for future in as_completed(futures):
+            idx = futures[future]
+            rows[idx] = future.result()
+            completed += 1
+            if progress_interval > 0 and completed % progress_interval == 0:
+                print(f"Labeled {completed}/{len(pairs)} pairs", flush=True)
+    if any(row is None for row in rows):
+        raise RuntimeError("labeling finished with missing rows")
     return pd.DataFrame(rows)
 
 
@@ -248,6 +337,18 @@ def parse_args(argv: Iterable[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--llm-api-key")
     parser.add_argument("--llm-timeout-seconds", type=float, default=120.0)
     parser.add_argument("--llm-retries", type=int, default=3)
+    parser.add_argument(
+        "--llm-concurrency",
+        type=int,
+        default=8,
+        help="Concurrent LLM labeling requests. Increase when the serving backend has batching headroom.",
+    )
+    parser.add_argument(
+        "--llm-progress-interval",
+        type=int,
+        default=100,
+        help="Print labeling progress every N completed pairs. Set to 0 to disable.",
+    )
     parser.add_argument("--dataset-output", default="data/schedule_alignment_scores.parquet")
     parser.add_argument("--output-model-path", default="models/modernbert-schedule-aligner")
     parser.add_argument("--sample-size", type=int, default=1000)
@@ -290,6 +391,8 @@ def main(argv: Iterable[str] | None = None) -> None:
             api_key=args.llm_api_key,
             timeout=args.llm_timeout_seconds,
             retries=args.llm_retries,
+            concurrency=args.llm_concurrency,
+            progress_interval=args.llm_progress_interval,
         )
         _write_dataset(dataset, dataset_path)
     if args.label_only:

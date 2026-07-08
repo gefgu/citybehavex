@@ -188,6 +188,7 @@ def test_simulation_config_rejects_tessellation_and_bbox():
         {"location_count_sigma": -0.5},
         {"max_locations": 7},
         {"max_locations": 0},
+        {"max_one_location_diaries": -1},
     ],
 )
 def test_diaries_config_rejects_invalid_location_distribution(kwargs):

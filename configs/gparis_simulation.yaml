@@ -61,6 +61,7 @@ diaries:
   location_count_mu: 1
   location_count_sigma: 0.75
   max_locations: 6
+  max_one_location_diaries: 1
   motif_exploration_rate: 0.5
 
 embedding:

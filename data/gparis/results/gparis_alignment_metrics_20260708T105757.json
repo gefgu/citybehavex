@@ -1,0 +1,55 @@
+{
+  "wasserstein": {
+    "jump_lengths_km": 2.6386747178751024,
+    "visits_per_user": 4.057412698412626,
+    "radius_of_gyration_km": 1.1436225333575611,
+    "dwell_time_min": 69.0417217063734,
+    "trip_duration_min": 5.996452850385178
+  },
+  "jsd": {
+    "activity_distribution": 0.07396194200340475,
+    "activity_transitions": 0.22062577971055353,
+    "daily_activity_profile": 0.36257234771717445,
+    "daily_motifs": 0.2602201783169564
+  },
+  "cpc": {
+    "h3_7": 0.07150661648658492,
+    "h3_8": 0.01233721727210418,
+    "h3_9": 0.0024024601191620218
+  },
+  "transport_spatial": {
+    "synthetic": {
+      "total_trips": 12214,
+      "modes": [
+        {
+          "mode": "walk",
+          "count": 3096,
+          "percent": 25.34796135582119,
+          "mean_jump_km": 0.3090889940543607,
+          "mean_duration_min": 3.8634205426356596
+        },
+        {
+          "mode": "bike",
+          "count": 827,
+          "percent": 6.770918617979368,
+          "mean_jump_km": 2.110575465872664,
+          "mean_duration_min": 8.44167674324869
+        },
+        {
+          "mode": "car",
+          "count": 7110,
+          "percent": 58.21188799738005,
+          "mean_jump_km": 13.707827554765508,
+          "mean_duration_min": 14.307358180965776
+        },
+        {
+          "mode": "rail",
+          "count": 1181,
+          "percent": 9.669232028819387,
+          "mean_jump_km": 25.19497690014532,
+          "mean_duration_min": 35.245879198419416
+        }
+      ]
+    }
+  }
+}

@@ -1105,9 +1105,20 @@ def _build_comparison_payload(
             lng_col=traj.lng_col, datetime_col=traj.datetime_col,
         )
         synth_visits_count = synth_stays[traj.uid_col].value_counts()["count"].to_list()
-        real_visits_count = (
-            real_group_df[real_traj.uid_col].value_counts()["count"].to_list()
+        # Real check-in-style datasets can have many consecutive rows at the
+        # same location; collapse into stay episodes like the synthetic side
+        # so both sides count distinct visits, not raw row density.
+        real_stays = (
+            _collapse_to_stays(
+                real_group_df, uid_col=real_traj.uid_col, lat_col=real_traj.lat_col,
+                lng_col=real_traj.lng_col, datetime_col=real_traj.datetime_col,
+            )
             if real_group_df is not None and real_traj is not None
+            else None
+        )
+        real_visits_count = (
+            real_stays[real_traj.uid_col].value_counts()["count"].to_list()
+            if real_stays is not None
             else None
         )
         synth_rog = np.asarray(synth_jumps_rog[meta["key"]]["rog"], dtype=float)
@@ -1150,7 +1161,7 @@ def _build_comparison_payload(
             for row in (
                 _metric_row(meta, "Jump lengths", wasserstein_distance(synth_jumps, real_jumps), "km") if real_jumps is not None and len(real_jumps) else None,
                 _metric_row(meta, "Visits per user", visits_per_user_wasserstein_distance(
-                    synth_stays, real_group_df,
+                    synth_stays, real_stays,
                     user_id_col1=traj.uid_col, user_id_col2=real_traj.uid_col,
                 )[0], "visits"),
                 _metric_row(meta, "Radius of gyration", wasserstein_distance(synth_rog, real_rog), "km") if real_rog is not None and len(real_rog) else None,

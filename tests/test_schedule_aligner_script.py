@@ -82,6 +82,23 @@ def test_build_training_pairs_stratifies_day_types():
     assert {pair.day_type for pair in pairs} == {"weekday", "weekend"}
     assert all(pair.profile_text for pair in pairs)
     assert all(pair.diary_text for pair in pairs)
+    assert all("non_home_stops=" in pair.schedule_features for pair in pairs)
+
+
+def test_alignment_prompt_includes_schedule_variation_features():
+    pair = aligner.TrainingPair(
+        profile_uid=1,
+        diary_id="d1",
+        day_type="weekday",
+        profile_text="profile",
+        diary_text="schedule",
+        schedule_features="stop_count=3; non_home_stops=1",
+    )
+
+    prompt = aligner.alignment_prompt(pair)
+
+    assert "schedule variation" in prompt.lower()
+    assert "non_home_stops=1" in prompt
 
 
 def test_label_pairs_does_not_persist_reason(monkeypatch):
@@ -130,6 +147,7 @@ def test_label_pairs_does_not_persist_reason(monkeypatch):
         "day_type",
         "profile_text",
         "diary_text",
+        "schedule_features",
         "score",
     ]
     assert df.loc[0, "score"] == 0.42

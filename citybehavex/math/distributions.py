@@ -42,6 +42,7 @@ def allocate_location_counts(
     sigma: float,
     max_locations: int,
     n: int,
+    max_one_location: int | None = None,
 ) -> list[int]:
     """Allocate ``n`` diaries to a truncated rounded log-normal distribution."""
     if n <= 0:
@@ -56,6 +57,29 @@ def allocate_location_counts(
     for count in remainder[: n - assigned]:
         counts[count] += 1
         assigned += 1
+    if max_one_location is not None and max_one_location >= 0 and counts.get(1, 0) > max_one_location:
+        excess = counts[1] - max_one_location
+        counts[1] = max_one_location
+        destinations = [count for count in sorted(counts) if count != 1]
+        if not destinations:
+            counts[1] += excess
+        else:
+            total = sum(probabilities[count] for count in destinations)
+            raw_extra = {
+                count: probabilities[count] / total * excess
+                for count in destinations
+            }
+            extras = {count: int(value) for count, value in raw_extra.items()}
+            assigned_extra = sum(extras.values())
+            extra_remainder = sorted(
+                destinations,
+                key=lambda count: (raw_extra[count] - extras[count], probabilities[count]),
+                reverse=True,
+            )
+            for count in extra_remainder[: excess - assigned_extra]:
+                extras[count] += 1
+            for count, extra in extras.items():
+                counts[count] += extra
     out: list[int] = []
     for k in sorted(counts):
         out.extend([k] * counts[k])

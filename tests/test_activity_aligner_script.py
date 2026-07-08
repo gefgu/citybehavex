@@ -84,9 +84,35 @@ def test_build_training_pairs_uses_only_valid_activities():
     assert len(pairs) == 30
     assert all(pair.context_text for pair in pairs)
     assert all(pair.activity_text for pair in pairs)
+    assert all("Period group:" in pair.context_text for pair in pairs)
     for pair in pairs:
         purpose = {"HOME": 0, "WORK": 1}.get(pair.purpose, 2)
         assert purpose in by_idx[pair.activity_idx].eligible_purposes
+
+
+def test_alignment_prompt_includes_period_sensitive_guidance():
+    pair = aligner.TrainingPair(
+        profile_uid=1,
+        cluster_id=None,
+        diary_id="d1",
+        block_id=0,
+        block_index=0,
+        purpose="HOME",
+        start="00:00",
+        end="08:00",
+        previous_activity_idx=-1,
+        previous_activity="start",
+        activity_idx=0,
+        activity="sleep",
+        profile_text="profile",
+        context_text="Context with Period group: HOME blocks mostly in the 00-06 period.",
+        activity_text="sleep: Sleeping or resting at home",
+    )
+
+    prompt = aligner.alignment_prompt(pair)
+
+    assert "HOME 00-06" in prompt
+    assert "Avoid inflating" in prompt
 
 
 def test_label_pairs_does_not_persist_reason(monkeypatch):

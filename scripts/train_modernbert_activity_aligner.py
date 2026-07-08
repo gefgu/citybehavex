@@ -131,6 +131,30 @@ def _previous_activity_text(previous_idx: int, catalog: Sequence[object]) -> str
     return "previous micro-activity is unknown"
 
 
+_PERIODS: tuple[tuple[int, int, str], ...] = (
+    (0, 6 * 60, "00-06"),
+    (6 * 60, 12 * 60, "06-12"),
+    (12 * 60, 18 * 60, "12-18"),
+    (18 * 60, 24 * 60, "18-24"),
+)
+
+
+def _minutes(value: str) -> int:
+    hour, minute = (int(part) for part in value.split(":", maxsplit=1))
+    return 24 * 60 if hour == 24 else hour * 60 + minute
+
+
+def _period_label(block: ActivityBlock) -> str:
+    start = _minutes(block.start)
+    end = _minutes(block.end)
+    overlaps = [
+        max(0, min(end, period_end) - max(start, period_start))
+        for period_start, period_end, _label in _PERIODS
+    ]
+    period_index = max(range(len(overlaps)), key=lambda idx: (overlaps[idx], -idx))
+    return _PERIODS[period_index][2]
+
+
 def context_text(
     profile_text: str,
     block: ActivityBlock,
@@ -141,9 +165,28 @@ def context_text(
         f"{profile_text}\n"
         f"Schedule block: diary {block.diary_id}, block {block.episode_index}, "
         f"{block.purpose} from {block.start} to {block.end}.\n"
+        f"Period group: {block.purpose} blocks mostly in the {_period_label(block)} period.\n"
         f"Transition/history context: {_previous_activity_text(previous_activity_idx, catalog)}.\n"
         "Score which valid time-use activity best fits this person, block, time, and history."
     )
+
+
+def _hard_negative_activity(block: ActivityBlock, eligible: Sequence[object]) -> object | None:
+    period = _period_label(block)
+    names_by_priority: list[str]
+    if block.purpose == "HOME" and period == "00-06":
+        names_by_priority = ["eatdrink", "selfcare", "cleanetc"]
+    elif block.purpose == "HOME" and period == "18-24":
+        names_by_priority = ["selfcare", "eatdrink", "pkidcare", "ikidcare"]
+    elif block.purpose == "WORK":
+        names_by_priority = ["paidwork", "selfcare"]
+    else:
+        names_by_priority = ["eatdrink", "selfcare", "paidwork"]
+    by_name = {activity.name: activity for activity in eligible}
+    for name in names_by_priority:
+        if name in by_name:
+            return by_name[name]
+    return None
 
 
 def build_training_pairs(
@@ -178,7 +221,11 @@ def build_training_pairs(
         if not eligible:
             continue
         previous_idx = int(previous_values[int(rng.integers(len(previous_values)))])
-        activity = eligible[int(rng.integers(len(eligible)))]
+        hard_negative = _hard_negative_activity(block, eligible)
+        if hard_negative is not None and len(pairs) % 3 == 0:
+            activity = hard_negative
+        else:
+            activity = eligible[int(rng.integers(len(eligible)))]
         profile_text = profile_to_narrative(profile)
         pairs.append(
             TrainingPair(
@@ -211,6 +258,12 @@ def alignment_prompt(pair: TrainingPair) -> str:
         "Return strictly valid JSON with the keys in this order: reason, score. "
         "The score must be a number from 0 to 1, where 0 means incompatible and "
         "1 means highly aligned.\n\n"
+        "Scoring guidance: use the period group strongly. HOME 00-06 usually "
+        "fits sleep best and should not over-score eating, self-care, or chores. "
+        "HOME evenings can fit TV/radio, food preparation, leisure, reading, or "
+        "internet use. WORK daytime can fit paid work, but realistic meal breaks "
+        "should score well when the time window supports them. Avoid inflating "
+        "eatdrink, selfcare, and paidwork simply because they are eligible.\n\n"
         f"Context:\n{pair.context_text}\n\n"
         f"Candidate activity:\n{pair.activity_text}"
     )
