@@ -1,8 +1,8 @@
 tessellation:
-  min_lon: 120.8
-  min_lat: 30.7
-  max_lon: 122.1
-  max_lat: 31.9
+  min_lon: 120.88
+  min_lat: 30.63
+  max_lon: 122.06
+  max_lat: 31.84
   resolution: 8
   enrich_overture: true
   overture_release: "2026-05-20.0"

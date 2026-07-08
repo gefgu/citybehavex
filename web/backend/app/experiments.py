@@ -137,6 +137,7 @@ class Experiment:
     road_edges_path: Optional[Path]
     network_validation_config: Any
     transport_spatial_config: Any
+    evaluation_adaptation_config: Any
     params: dict[str, Any]
     special_days: list[dict[str, str]]
     runs: list[Run]
@@ -164,6 +165,11 @@ class Experiment:
                 self.transport_spatial_config.model_dump()
                 if hasattr(self.transport_spatial_config, "model_dump")
                 else self.transport_spatial_config
+            ),
+            "evaluation_adaptation": (
+                self.evaluation_adaptation_config.model_dump()
+                if hasattr(self.evaluation_adaptation_config, "model_dump")
+                else self.evaluation_adaptation_config
             ),
             "profiles_enabled": self.profiles_enabled,
             "profiles_output": _display_path(self.profiles_output),
@@ -236,6 +242,7 @@ def _load_experiment(config_path: Path) -> Experiment:
         road_edges_path=road_edges_path,
         network_validation_config=cfg.comparison.network_validation,
         transport_spatial_config=cfg.comparison.transport_spatial,
+        evaluation_adaptation_config=cfg.comparison.evaluation_adaptation,
         params=params,
         special_days=special_days,
         runs=_discover_runs(synthetic_output),

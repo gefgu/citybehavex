@@ -378,6 +378,54 @@ def test_fetch_diary_batch_calls_llm_once_per_diary(monkeypatch, tmp_path):
     assert (tmp_path / "validated_diaries.json").exists()
 
 
+def test_fetch_diary_batch_allows_high_location_counts_without_motif(monkeypatch, tmp_path):
+    calls = []
+
+    class Response:
+        text = ""
+
+        def __init__(self, payload):
+            self._payload = payload
+            self.text = json.dumps(payload)
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return self._payload
+
+    def post(*args, **kwargs):
+        calls.append(kwargs["json"])
+        return Response(_chat(_diary(len(calls))))
+
+    monkeypatch.setattr(
+        "citybehavex.llm_diaries.requests.get",
+        lambda *args, **kwargs: Response({"data": []}),
+    )
+    monkeypatch.setattr("citybehavex.llm_diaries.requests.post", post)
+    config = LLMConfig(
+        base_url="http://localhost:8000",
+        api_key="test",
+        model="test-model",
+        cache_dir=str(tmp_path),
+        diary_count=10,
+    )
+
+    batch = fetch_diary_batch(
+        config,
+        city_profile="test city",
+        representative_day="2026-01-01",
+        location_counts=[7] * 10,
+        max_locations=10,
+        motif_exploration_rate=0.0,
+    )
+
+    assert len(batch.diaries) == 10
+    assert batch.target_location_counts == [7] * 10
+    assert all("exactly 7 distinct location(s)" in call["messages"][1]["content"] for call in calls)
+    assert all("Structure the day as" not in call["messages"][1]["content"] for call in calls)
+
+
 def test_one_location_diary_retries_until_home_only(monkeypatch, tmp_path):
     calls = []
 
@@ -440,11 +488,22 @@ def test_motif_weights_for_location_count_sums_to_one_and_matches_group():
     assert set(weights) == {ordinal for ordinal, count in MOTIF_LOCATION_COUNTS.items() if count == 4}
 
 
+def test_motif_weights_empty_when_location_count_has_no_literature_motif():
+    assert motif_weights_for_location_count(7) == {}
+
+
 def test_sample_motif_only_returns_ordinals_for_requested_location_count():
     rng = np.random.default_rng(0)
     for _ in range(50):
         ordinal = sample_motif(5, rng)
+        assert ordinal is not None
         assert MOTIF_LOCATION_COUNTS[ordinal] == 5
+
+
+def test_sample_motif_returns_none_when_location_count_has_no_literature_motif():
+    rng = np.random.default_rng(0)
+
+    assert sample_motif(10, rng) is None
 
 
 def test_build_motif_rule_empty_for_stay_home_pattern():

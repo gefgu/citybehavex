@@ -83,11 +83,14 @@ def _chart_build_kwargs(experiment, selected, observed_path, time_use_path) -> d
     transport_cfg = getattr(experiment, "transport_spatial_config", None)
     if transport_cfg is not None:
         kwargs["transport_spatial_config"] = _picklable_config(transport_cfg)
+    adaptation_cfg = getattr(experiment, "evaluation_adaptation_config", None)
+    if adaptation_cfg is not None:
+        kwargs["evaluation_adaptation_config"] = _picklable_config(adaptation_cfg)
     return kwargs
 
 
-def _transport_spatial_cache_key(experiment) -> Any:  # noqa: ANN001
-    config = getattr(experiment, "transport_spatial_config", None)
+def _config_cache_key(experiment, name: str) -> Any:  # noqa: ANN001
+    config = getattr(experiment, name, None)
     if config is None:
         return None
     if hasattr(config, "model_dump"):
@@ -146,7 +149,10 @@ async def get_charts(
             if p is not None
         ),
         extra_key={
-            "transport_spatial": _transport_spatial_cache_key(experiment),
+            "transport_spatial": _config_cache_key(experiment, "transport_spatial_config"),
+            "evaluation_adaptation": _config_cache_key(
+                experiment, "evaluation_adaptation_config"
+            ),
         },
     )
     payload = {**payload, "run_id": selected.run_id}
@@ -197,7 +203,10 @@ async def get_chart_section(
             extra_key={
                 "section": section,
                 "filter": filter,
-                "transport_spatial": _transport_spatial_cache_key(experiment),
+                "transport_spatial": _config_cache_key(experiment, "transport_spatial_config"),
+                "evaluation_adaptation": _config_cache_key(
+                    experiment, "evaluation_adaptation_config"
+                ),
             },
         )
     except ValueError as exc:
@@ -243,7 +252,12 @@ async def get_metrics_export(
             )
             if p is not None
         ),
-        extra_key={"format": "json"},
+        extra_key={
+            "format": "json",
+            "evaluation_adaptation": _config_cache_key(
+                experiment, "evaluation_adaptation_config"
+            ),
+        },
     )
     payload = {
         "experiment_id": exp_id,

@@ -39,13 +39,35 @@ from citybehavex.metrics import (
 
 from .cache import CACHE_DIR, get_or_build_parquet
 from .filters import _filter_df
-from .reports_bridge import ActivityVisitsResult, _prepare_activity_visits
+from .reports_bridge import (
+    ActivityVisitsResult,
+    _adapt_evaluation_dataframe,
+    _prepare_activity_visits,
+)
 
-FEATURES_CACHE_VERSION = "f1"
+FEATURES_CACHE_VERSION = "f2"
 
 
 def _filters_signature(filters: list[dict[str, Any]]) -> str:
     return sha256(json.dumps(filters, sort_keys=True).encode("utf-8")).hexdigest()[:12]
+
+
+def _jsonable_config(value: Any) -> Any:
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if hasattr(value, "model_dump"):
+        return _jsonable_config(value.model_dump())
+    if isinstance(value, dict):
+        return {str(k): _jsonable_config(v) for k, v in sorted(value.items())}
+    if isinstance(value, (list, tuple)):
+        return [_jsonable_config(v) for v in value]
+    if isinstance(value, set):
+        return sorted(_jsonable_config(v) for v in value)
+    return repr(value)
+
+
+def _adaptation_signature(config: Optional[object]) -> str:
+    return sha256(json.dumps(_jsonable_config(config), sort_keys=True).encode("utf-8")).hexdigest()[:12]
 
 
 def _path_signature(path: Path) -> str:
@@ -120,6 +142,8 @@ def get_jumps_rog(
     road_nodes_path: Optional[Path] = None,
     road_edges_path: Optional[Path] = None,
     road_snap_max_distance_m: float = 750.0,
+    evaluation_adaptation_config: Optional[object] = None,
+    label: str = "trajectory",
 ) -> dict[str, dict[str, list[float]]]:
     """Per-filter jump-length / radius-of-gyration arrays for one
     trajectory file -- the single most expensive, most duplicated
@@ -146,6 +170,7 @@ def get_jumps_rog(
         _path_signature(traj_path),
         _filters_signature(filters),
         road_sig,
+        _adaptation_signature(evaluation_adaptation_config),
     )
 
     def build() -> dict[str, dict[str, list[float]]]:
@@ -156,6 +181,16 @@ def get_jumps_rog(
             if filtered.is_empty():
                 result[meta["key"]] = {"jumps": [], "rog": []}
                 continue
+            adapted = _adapt_evaluation_dataframe(
+                filtered,
+                label=label,
+                uid_col=uid_col,
+                datetime_col=datetime_col,
+                lat_col=lat_col,
+                lng_col=lng_col,
+                config=evaluation_adaptation_config,
+            )
+            filtered = adapted.df
             if road_handle is not None:
                 jumps = road_jump_lengths_km(
                     filtered,

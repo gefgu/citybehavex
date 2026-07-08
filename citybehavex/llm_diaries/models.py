@@ -136,7 +136,7 @@ class LocationCountDistribution(BaseModel):
 
     mu: float
     sigma: float = Field(gt=0)
-    max_locations: int = Field(ge=1, le=6)
+    max_locations: int = Field(ge=1, le=10)
 
     @field_validator("mu", "sigma")
     @classmethod

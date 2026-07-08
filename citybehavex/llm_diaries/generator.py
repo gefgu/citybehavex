@@ -107,7 +107,8 @@ def fetch_diary_batch(
             motif_rule = ""
             if diary_location_count > 1 and diary_rng.random() >= motif_exploration_rate:
                 motif_ordinal = sample_motif(diary_location_count, diary_rng)
-                motif_rule = build_motif_rule(MOTIF_EXCURSION_PATTERNS[motif_ordinal])
+                if motif_ordinal is not None:
+                    motif_rule = build_motif_rule(MOTIF_EXCURSION_PATTERNS[motif_ordinal])
 
             prompt = build_single_diary_prompt(
                 diary_number=diary_number,

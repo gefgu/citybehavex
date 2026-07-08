@@ -64,6 +64,7 @@ from ..reports_bridge import (
     _DURATION_CANDIDATES,
     _END_TS_CANDIDATES,
     _LOCATION_CANDIDATES,
+    _adapt_evaluation_dataframe,
     _collapse_to_stays,
     _common_part_of_commuters,
     _compute_stvd_layers,
@@ -870,6 +871,7 @@ def build_comparison_payload(
     road_nodes_path: Optional[str] = None,
     road_edges_path: Optional[str] = None,
     road_snap_max_distance_m: float = 750.0,
+    evaluation_adaptation_config: Optional[object] = None,
     special_days: Optional[list[dict[str, str]]] = None,
 ) -> dict[str, Any]:
     return _build_comparison_payload(
@@ -882,6 +884,7 @@ def build_comparison_payload(
         time_use_country=time_use_country,
         time_use_survey=time_use_survey,
         time_use_weight_col=time_use_weight_col,
+        evaluation_adaptation_config=evaluation_adaptation_config,
         road_snap_max_distance_m=road_snap_max_distance_m,
         special_days=special_days,
         filter_keys=None,
@@ -901,6 +904,7 @@ def build_chart_base_payload(
     time_use_country: Optional[str] = None,
     time_use_survey: Optional[int] = None,
     time_use_weight_col: str = "propwt",
+    evaluation_adaptation_config: Optional[object] = None,
     special_days: Optional[list[dict[str, str]]] = None,
 ) -> dict[str, Any]:
     return _build_comparison_payload(
@@ -913,6 +917,7 @@ def build_chart_base_payload(
         time_use_country=time_use_country,
         time_use_survey=time_use_survey,
         time_use_weight_col=time_use_weight_col,
+        evaluation_adaptation_config=evaluation_adaptation_config,
         special_days=special_days,
         filter_keys=[_BASE_FILTER_KEY],
         include_progressive_metadata=True,
@@ -932,6 +937,7 @@ def build_chart_filter_payload(
     time_use_country: Optional[str] = None,
     time_use_survey: Optional[int] = None,
     time_use_weight_col: str = "propwt",
+    evaluation_adaptation_config: Optional[object] = None,
     special_days: Optional[list[dict[str, str]]] = None,
 ) -> dict[str, Any]:
     if filter_key == _BASE_FILTER_KEY:
@@ -950,6 +956,7 @@ def build_chart_filter_payload(
         time_use_country=time_use_country,
         time_use_survey=time_use_survey,
         time_use_weight_col=time_use_weight_col,
+        evaluation_adaptation_config=evaluation_adaptation_config,
         special_days=special_days,
         filter_keys=[filter_key],
         include_progressive_metadata=True,
@@ -970,6 +977,7 @@ def _build_comparison_payload(
     time_use_survey: Optional[int] = None,
     time_use_weight_col: str = "propwt",
     transport_spatial_config: Optional[object] = None,
+    evaluation_adaptation_config: Optional[object] = None,
     road_snap_max_distance_m: float = 750.0,
     special_days: Optional[list[dict[str, str]]] = None,
     filter_keys: Optional[list[str]] = None,
@@ -1018,6 +1026,17 @@ def _build_comparison_payload(
             lng_col=detect_column(real_df, ["lng", "lon", "longitude", "long"]),
             uid_col=detect_column(real_df, ["uid", "user_id", "user", "agent_id", "userid"]),
         )
+        real_eval = _adapt_evaluation_dataframe(
+            real_df,
+            label=observed_label,
+            uid_col=real_traj.uid_col,
+            datetime_col=real_traj.datetime_col,
+            lat_col=real_traj.lat_col,
+            lng_col=real_traj.lng_col,
+            config=evaluation_adaptation_config,
+        )
+        if real_eval.warning:
+            warnings.append(real_eval.warning)
         real_activity_col = detect_column(real_df, _ACTIVITY_CANDIDATES)
         real_start_col = detect_column(real_df, _DATETIME_CANDIDATES)
         real_end_col = detect_column(real_df, _END_TS_CANDIDATES)
@@ -1075,6 +1094,8 @@ def _build_comparison_payload(
             road_nodes_path=road_nodes_path_obj,
             road_edges_path=road_edges_path_obj,
             road_snap_max_distance_m=road_snap_max_distance_m,
+            evaluation_adaptation_config=evaluation_adaptation_config,
+            label=observed_label,
         )
         if needs_jumps and real_traj is not None
         else None
@@ -1088,9 +1109,22 @@ def _build_comparison_payload(
             return group
         synth_traj = _traj_like(traj, synth_df)
         real_group_df = _filter_df(real_df, real_dt_col, meta) if real_df is not None else None
+        real_metric_group_df = real_group_df
+        if real_group_df is not None and real_traj is not None and not real_group_df.is_empty():
+            real_metric_group_df = _adapt_evaluation_dataframe(
+                real_group_df,
+                label=observed_label,
+                uid_col=real_traj.uid_col,
+                datetime_col=real_traj.datetime_col,
+                lat_col=real_traj.lat_col,
+                lng_col=real_traj.lng_col,
+                config=evaluation_adaptation_config,
+            ).df
         real_group_traj = (
-            _traj_like(real_traj, real_group_df)
-            if real_group_df is not None and real_traj is not None and not real_group_df.is_empty()
+            _traj_like(real_traj, real_metric_group_df)
+            if real_metric_group_df is not None
+            and real_traj is not None
+            and not real_metric_group_df.is_empty()
             else None
         )
 
@@ -1110,10 +1144,10 @@ def _build_comparison_payload(
         # so both sides count distinct visits, not raw row density.
         real_stays = (
             _collapse_to_stays(
-                real_group_df, uid_col=real_traj.uid_col, lat_col=real_traj.lat_col,
+                real_metric_group_df, uid_col=real_traj.uid_col, lat_col=real_traj.lat_col,
                 lng_col=real_traj.lng_col, datetime_col=real_traj.datetime_col,
             )
-            if real_group_df is not None and real_traj is not None
+            if real_metric_group_df is not None and real_traj is not None
             else None
         )
         real_visits_count = (
@@ -1133,19 +1167,19 @@ def _build_comparison_payload(
             else waiting_times_minutes(synth_traj)
         )
         real_dwell = None
-        if real_group_df is not None and real_group_traj is not None:
+        if real_metric_group_df is not None and real_group_traj is not None:
             real_dwell = (
-                real_group_df[duration_col].drop_nulls().to_list()
-                if duration_col
+                real_metric_group_df[duration_col].drop_nulls().to_list()
+                if duration_col and duration_col in real_metric_group_df.columns
                 else waiting_times_minutes(real_group_traj)
             )
         synth_trip = real_trip = None
         if "trip_duration_minutes" in synth_df.columns:
             synth_trip = [t for t in synth_df["trip_duration_minutes"].drop_nulls().to_list() if t > 0]
             real_trip = [(j / CAR_SPEED_KMH) * 60.0 for j in (real_jumps if real_jumps is not None else []) if j > 0]
-        elif duration_col and real_group_df is not None:
+        elif duration_col and real_metric_group_df is not None:
             synth_trip = waiting_times_minutes(synth_traj)
-            real_trip = real_group_df[duration_col].drop_nulls().to_list()
+            real_trip = real_metric_group_df[duration_col].drop_nulls().to_list()
 
         blocks = {
             "jump_lengths": _ecdf_block("synthetic", synth_jumps, observed_label if real_jumps is not None else None, real_jumps, "jump length", "km"),
@@ -1157,7 +1191,7 @@ def _build_comparison_payload(
             blocks["trip_duration"] = _ecdf_block("synthetic", synth_trip, observed_label if real_trip else None, real_trip, "trip duration", "min")
         group["blocks"] = blocks
 
-        if real_group_df is not None and real_group_traj is not None:
+        if real_metric_group_df is not None and real_group_traj is not None:
             for row in (
                 _metric_row(meta, "Jump lengths", wasserstein_distance(synth_jumps, real_jumps), "km") if real_jumps is not None and len(real_jumps) else None,
                 _metric_row(meta, "Visits per user", visits_per_user_wasserstein_distance(
@@ -1328,7 +1362,24 @@ def _build_comparison_payload(
         real_group_df = _filter_df(real_df, real_dt_col, meta) if real_df is not None else None
         if synth_df.is_empty():
             return None
-        real_group_traj = _traj_like(real_traj, real_group_df) if real_group_df is not None and real_traj is not None and not real_group_df.is_empty() else None
+        real_metric_group_df = real_group_df
+        if real_group_df is not None and real_traj is not None and not real_group_df.is_empty():
+            real_metric_group_df = _adapt_evaluation_dataframe(
+                real_group_df,
+                label=observed_label,
+                uid_col=real_traj.uid_col,
+                datetime_col=real_traj.datetime_col,
+                lat_col=real_traj.lat_col,
+                lng_col=real_traj.lng_col,
+                config=evaluation_adaptation_config,
+            ).df
+        real_group_traj = (
+            _traj_like(real_traj, real_metric_group_df)
+            if real_metric_group_df is not None
+            and real_traj is not None
+            and not real_metric_group_df.is_empty()
+            else None
+        )
         # Reuse the same cached, road-aware jumps/RoG the ECDF section above
         # already fetched (features.get_jumps_rog) instead of recomputing
         # them again via a second, non-road-aware code path.
@@ -1346,11 +1397,13 @@ def _build_comparison_payload(
         )
         obs_law_visits = (
             _mobility_law_visits(
-                real_group_df, uid_col=real_traj.uid_col, datetime_col=real_traj.datetime_col,
+                real_metric_group_df, uid_col=real_traj.uid_col, datetime_col=real_traj.datetime_col,
                 lat_col=real_traj.lat_col, lng_col=real_traj.lng_col,
                 location_col=real_location_col, activity_col=real_activity_col,
             )
-            if real_group_df is not None and real_traj is not None and not real_group_df.is_empty()
+            if real_metric_group_df is not None
+            and real_traj is not None
+            and not real_metric_group_df.is_empty()
             else None
         )
         syn_law_visits = _mobility_law_visits(

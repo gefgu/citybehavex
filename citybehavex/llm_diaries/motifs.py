@@ -67,16 +67,23 @@ def motif_weights_for_location_count(location_count: int) -> dict[int, float]:
         for ordinal, count in MOTIF_LOCATION_COUNTS.items()
         if count == location_count
     ]
-    if not ordinals:
-        raise ValueError(f"no literature motif has {location_count} distinct location(s)")
     weights = {ordinal: LITERATURE_MOTIF_PERCENTAGES[ordinal] for ordinal in ordinals}
     total = sum(weights.values())
+    if total <= 0:
+        return {}
     return {ordinal: weight / total for ordinal, weight in weights.items()}
 
 
-def sample_motif(location_count: int, rng: np.random.Generator) -> int:
-    """Weighted draw of one literature motif ordinal for this location count."""
+def sample_motif(location_count: int, rng: np.random.Generator) -> int | None:
+    """Weighted draw of one literature motif ordinal for this location count.
+
+    The Schneider et al. literature motif set only covers up to six distinct
+    locations. Higher-count diaries are still valid; they just have no
+    literature motif rule to condition on.
+    """
     weights = motif_weights_for_location_count(location_count)
+    if not weights:
+        return None
     ordinals = list(weights.keys())
     index = sample_multinomial_index(list(weights.values()), rng)
     return ordinals[index]

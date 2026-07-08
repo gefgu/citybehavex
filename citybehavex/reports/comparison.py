@@ -73,6 +73,15 @@ class ActivityVisitsResult:
     warning: Optional[str] = None
 
 
+@dataclass(frozen=True)
+class EvaluationAdaptationResult:
+    df: pl.DataFrame
+    adapted: bool
+    warning: Optional[str] = None
+    location_col: Optional[str] = None
+    h3_resolution: Optional[int] = None
+
+
 def detect_column(df: pl.DataFrame, candidates: list[str]) -> Optional[str]:
     cols_lower = {c.lower(): c for c in df.columns}
     for candidate in candidates:
@@ -622,6 +631,106 @@ def _collapse_to_stays(
     return ordered.filter(new_stay)
 
 
+def _configured_adaptation_value(config: Optional[object], name: str, default: Any) -> Any:
+    if config is None:
+        return default
+    if isinstance(config, dict):
+        return config.get(name, default)
+    return getattr(config, name, default)
+
+
+def _looks_like_panel_observations(
+    df: pl.DataFrame,
+    *,
+    uid_col: str,
+    datetime_col: str,
+    lat_col: str,
+    lng_col: str,
+    location_col: Optional[str],
+    h3_resolution: int,
+) -> bool:
+    end_col = detect_column(df, _END_TS_CANDIDATES)
+    duration_col = detect_column(df, _DURATION_CANDIDATES)
+    if end_col or duration_col:
+        return False
+    if df.is_empty():
+        return False
+
+    ordered = df.sort([uid_col, datetime_col])
+    same_user = ordered[uid_col].eq(ordered[uid_col].shift())
+    if location_col and location_col in ordered.columns:
+        same_loc = ordered[location_col].eq(ordered[location_col].shift())
+    else:
+        cells = _h3_cells(ordered[lat_col], ordered[lng_col], h3_resolution)
+        same_loc = cells.eq(cells.shift())
+    comparable = same_user.fill_null(False)
+    denominator = int(comparable.sum())
+    if denominator <= 0:
+        return False
+    duplicate_share = int((same_user & same_loc).fill_null(False).sum()) / denominator
+    return duplicate_share >= 0.2
+
+
+def _adapt_evaluation_dataframe(
+    df: pl.DataFrame,
+    *,
+    label: str,
+    uid_col: str,
+    datetime_col: str,
+    lat_col: str,
+    lng_col: str,
+    config: Optional[object] = None,
+) -> EvaluationAdaptationResult:
+    mode = str(_configured_adaptation_value(config, "mode", "auto"))
+    if mode == "off":
+        return EvaluationAdaptationResult(df, False)
+
+    configured_location_col = _configured_adaptation_value(config, "location_col", None)
+    location_col = (
+        configured_location_col
+        if configured_location_col and configured_location_col in df.columns
+        else None
+    )
+    h3_resolution = int(_configured_adaptation_value(config, "h3_resolution", 10))
+    should_adapt = mode == "force" or _looks_like_panel_observations(
+        df,
+        uid_col=uid_col,
+        datetime_col=datetime_col,
+        lat_col=lat_col,
+        lng_col=lng_col,
+        location_col=location_col,
+        h3_resolution=h3_resolution,
+    )
+    if not should_adapt:
+        return EvaluationAdaptationResult(df, False)
+
+    ordered = df.sort([uid_col, datetime_col])
+    if location_col:
+        key = ordered[location_col].cast(pl.Utf8)
+        key_source = f"location column '{location_col}'"
+    else:
+        key = _h3_cells(ordered[lat_col], ordered[lng_col], h3_resolution).cast(pl.Utf8)
+        key_source = f"H3 resolution {h3_resolution}"
+
+    work = ordered.with_columns(key.alias("_eval_location_key"))
+    same_user = work[uid_col].eq(work[uid_col].shift())
+    same_key = work["_eval_location_key"].eq(work["_eval_location_key"].shift())
+    new_stay = ~(same_user & same_key).fill_null(False)
+    adapted = work.filter(new_stay).drop("_eval_location_key")
+    warning = (
+        f"{label} comparison data looks like timestamp-only panel observations; "
+        f"evaluation metrics were adapted by collapsing consecutive rows with the same "
+        f"{key_source} into stays ({df.height} rows -> {adapted.height} stays)."
+    )
+    return EvaluationAdaptationResult(
+        adapted,
+        True,
+        warning,
+        location_col=location_col,
+        h3_resolution=None if location_col else h3_resolution,
+    )
+
+
 def _motif_visits(visits: pl.DataFrame) -> pl.DataFrame:
     return visits.with_columns(
         pl.when(pl.col("purpose") == "HOME").then(pl.col("purpose")).otherwise(pl.lit("VISIT")).alias("purpose")
@@ -1032,6 +1141,7 @@ def generate_comparison_report_from_paths(
     observed_label: str,
     json_output_path: Optional[str] = None,
     sections: Optional[list[str]] = None,
+    evaluation_adaptation_config: Optional[object] = None,
 ) -> None:
     typer.echo(f"Loading synthetic trajectories from {synthetic_path} ...")
     traj = load_trajectory(synthetic_path)
@@ -1045,6 +1155,7 @@ def generate_comparison_report_from_paths(
         synthetic_activities_path=_activities_sidecar_path(synthetic_path),
         json_output_path=json_output_path,
         sections=sections,
+        evaluation_adaptation_config=evaluation_adaptation_config,
     )
 
 
@@ -1062,6 +1173,7 @@ def generate_comparison_report(
     road_snap_max_distance_m: float = 750.0,
     network_validation_config: Optional[object] = None,
     transport_spatial_config: Optional[object] = None,
+    evaluation_adaptation_config: Optional[object] = None,
 ) -> None:
     if sections is not None:
         unknown = set(sections) - ALL_REPORT_SECTIONS
@@ -1084,6 +1196,25 @@ def generate_comparison_report(
         lat_col=detect_column(real_df, _LAT_CANDIDATES),
         lng_col=detect_column(real_df, _LNG_CANDIDATES),
         uid_col=detect_column(real_df, _UID_CANDIDATES),
+    )
+    real_eval = _adapt_evaluation_dataframe(
+        real_df,
+        label=observed_label,
+        uid_col=real_traj.uid_col,
+        datetime_col=real_traj.datetime_col,
+        lat_col=real_traj.lat_col,
+        lng_col=real_traj.lng_col,
+        config=evaluation_adaptation_config,
+    )
+    if real_eval.warning:
+        typer.echo(f"Warning: {real_eval.warning}", err=True)
+    real_metric_df = real_eval.df
+    real_metric_traj = skmob2.TrajDataFrame(
+        real_metric_df,
+        datetime_col=real_traj.datetime_col,
+        lat_col=real_traj.lat_col,
+        lng_col=real_traj.lng_col,
+        uid_col=real_traj.uid_col,
     )
 
     typer.echo("Computing mobility metrics ...")
@@ -1110,11 +1241,11 @@ def generate_comparison_report(
             snap_max_distance_m=road_snap_max_distance_m,
         )
         real_jumps = road_jump_lengths_km(
-            real_traj.df,
-            uid_col=real_traj.uid_col,
-            lat_col=real_traj.lat_col,
-            lng_col=real_traj.lng_col,
-            datetime_col=real_traj.datetime_col,
+            real_metric_df,
+            uid_col=real_metric_traj.uid_col,
+            lat_col=real_metric_traj.lat_col,
+            lng_col=real_metric_traj.lng_col,
+            datetime_col=real_metric_traj.datetime_col,
             handle=road_handle,
             nodes_df=road_nodes_df,
             snap_max_distance_m=road_snap_max_distance_m,
@@ -1126,7 +1257,7 @@ def generate_comparison_report(
         # not plain floats, so normalize to a numpy array before any
         # downstream arithmetic/comparisons.
         synth_jumps = np.asarray(traj.jump_lengths(merge=True), dtype=float)
-        real_jumps = np.asarray(real_traj.jump_lengths(merge=True), dtype=float)
+        real_jumps = np.asarray(real_metric_traj.jump_lengths(merge=True), dtype=float)
     # Zero-length "jumps" between consecutive same-location rows (e.g. repeat
     # check-ins at one venue, more common after coordinate rounding) aren't
     # movement -- exclude them from both sides so the distribution reflects
@@ -1152,18 +1283,18 @@ def generate_comparison_report(
     # stay episodes the same way the synthetic side is collapsed, so both
     # sides count distinct visits rather than raw row density.
     real_stays = _collapse_to_stays(
-        real_df,
-        uid_col=real_traj.uid_col,
-        lat_col=real_traj.lat_col,
-        lng_col=real_traj.lng_col,
-        datetime_col=real_traj.datetime_col,
+        real_metric_df,
+        uid_col=real_metric_traj.uid_col,
+        lat_col=real_metric_traj.lat_col,
+        lng_col=real_metric_traj.lng_col,
+        datetime_col=real_metric_traj.datetime_col,
     )
     real_visits = real_stays[real_traj.uid_col].value_counts()["count"].to_list()
     w_visits, _ = visits_per_user_wasserstein_distance(
         synth_stays,
         real_stays,
         user_id_col1=traj.uid_col,
-        user_id_col2=real_traj.uid_col,
+        user_id_col2=real_metric_traj.uid_col,
     )
     metrics["wasserstein"]["visits_per_user"] = w_visits
 
@@ -1178,17 +1309,17 @@ def generate_comparison_report(
             snap_max_distance_m=road_snap_max_distance_m,
         )["radius_of_gyration"].to_numpy()
         real_rog = road_radius_of_gyration_km(
-            real_traj.df,
-            uid_col=real_traj.uid_col,
-            lat_col=real_traj.lat_col,
-            lng_col=real_traj.lng_col,
+            real_metric_df,
+            uid_col=real_metric_traj.uid_col,
+            lat_col=real_metric_traj.lat_col,
+            lng_col=real_metric_traj.lng_col,
             handle=road_handle,
             nodes_df=road_nodes_df,
             snap_max_distance_m=road_snap_max_distance_m,
         )["radius_of_gyration"].to_numpy()
     else:
         synth_rog = traj.radius_of_gyration()["radius_of_gyration"].to_numpy()
-        real_rog = real_traj.radius_of_gyration()["radius_of_gyration"].to_numpy()
+        real_rog = real_metric_traj.radius_of_gyration()["radius_of_gyration"].to_numpy()
     w_rog = wasserstein_distance(synth_rog, real_rog)
     metrics["wasserstein"]["radius_of_gyration_km"] = w_rog
 
@@ -1211,7 +1342,7 @@ def generate_comparison_report(
     if duration_col:
         real_dwell = real_df[duration_col].drop_nulls().to_list()
     else:
-        real_dwell = waiting_times_minutes(real_traj)
+        real_dwell = waiting_times_minutes(real_metric_traj)
     w_dwell = wasserstein_distance(synth_dwell, real_dwell)
     metrics["wasserstein"]["dwell_time_min"] = w_dwell
 
