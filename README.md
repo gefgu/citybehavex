@@ -246,7 +246,6 @@ activities:
   alignment_concurrency: 4
   alignment_retries: 2
   alignment_checkpoint_every: 20
-  prune_to_reachable: false  # set true to run the cheap reachability probe first and skip unvisited (cluster, block) pairs
 ```
 
 ## Web app

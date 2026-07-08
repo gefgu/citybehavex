@@ -14,6 +14,7 @@ from citybehavex.activities.alignment import (
     score_poi_semantic_alignment,
     score_poi_type_alignment,
     _cache_key,
+    _period_cache_key,
     _poi_cache_key,
     _poi_type_cache_key,
 )
@@ -238,13 +239,14 @@ def test_alignment_cache_keys_distinguish_score_products():
 
     keys = {
         _cache_key("model", "profile", block, -1, activity_text),
+        _period_cache_key("model", "profile", "WORK", 2, -1, activity_text),
         _poi_cache_key("model", "profile", "food_drink", activity_text),
         _poi_type_cache_key("model", "profile", block, "food_drink"),
     }
-    assert len(keys) == 3
+    assert len(keys) == 4
 
 
-def test_activity_alignment_visited_pairs_prunes_unreachable_cluster_block_combos(monkeypatch):
+def test_activity_alignment_reuses_period_scores_for_matching_raw_blocks(monkeypatch):
     calls = []
 
     class Response:
@@ -252,7 +254,10 @@ def test_activity_alignment_visited_pairs_prunes_unreachable_cluster_block_combo
             return None
 
         def json(self):
-            return [{"index": i, "score": 0.5} for i in range(len(calls[-1]["pairs"]))]
+            return [
+                {"index": i, "score": _deterministic_score(query, text)}
+                for i, (query, text) in enumerate(calls[-1]["pairs"])
+            ]
 
     def fake_post(url, headers, json, timeout):
         calls.append(json)
@@ -260,49 +265,93 @@ def test_activity_alignment_visited_pairs_prunes_unreachable_cluster_block_combo
 
     monkeypatch.setattr("citybehavex.activities.alignment.requests.post", fake_post)
 
-    diaries = [_diary("routine-001"), _diary("routine-002")]
-    narratives = ["worker profile", "student profile"]
-    # routine-001 is blocks 0,1,2; routine-002 is blocks 3,4,5 (diary_activity_blocks
-    # numbers block_id sequentially across all diaries). Only allow cluster 0's
-    # blocks from routine-001 -- everything else must be pruned away.
-    visited = {(0, 0), (0, 1), (0, 2)}
+    one_diary = [_diary("routine-001")]
+    two_matching_diaries = [_diary("routine-001"), _diary("routine-002")]
+    config = ActivitiesConfig(
+        enabled=True,
+        alignment_backend="rerank",
+        alignment_base_url="http://tei.local",
+        alignment_model="activity-aligner",
+        alignment_batch_size=10_000,
+    )
+
+    first = score_activity_alignment(["worker profile"], one_diary, config)
+    one_diary_pairs = sum(len(call["pairs"]) for call in calls)
+    calls.clear()
+    result = score_activity_alignment(["worker profile"], two_matching_diaries, config)
+    two_diary_pairs = sum(len(call["pairs"]) for call in calls)
+
+    assert result is not None
+    scores, blocks, metadata = result
+    assert first is not None
+    assert one_diary_pairs == two_diary_pairs
+    assert {"period_index", "period_label"}.issubset(metadata.columns)
+
+    by_id = {block.diary_id: [] for block in blocks}
+    for block in blocks:
+        by_id[block.diary_id].append(block.block_id)
+    routine_1, routine_2 = by_id["routine-001"], by_id["routine-002"]
+    np.testing.assert_allclose(scores[0, routine_1[0]], scores[0, routine_2[0]])
+    np.testing.assert_allclose(scores[0, routine_1[1]], scores[0, routine_2[1]])
+    np.testing.assert_allclose(scores[0, routine_1[2]], scores[0, routine_2[2]])
+    assert np.any(scores[0, routine_1[0]])
+
+    all_queries = " ".join(pair[0] for call in calls for pair in call["pairs"])
+    assert "routine-001" not in all_queries
+    assert "routine-002" not in all_queries
+    assert "HOME blocks mostly in the 00-06 period" in all_queries
+    assert "WORK blocks mostly in the 12-18 period" in all_queries
+
+
+def test_activity_alignment_period_groups_merge_previous_activity_candidates(monkeypatch):
+    calls = []
+
+    def fake_post(url, headers, json, timeout):
+        calls.append(json)
+        return _FakeResponse([0.5 for _query, _text in json["pairs"]])
+
+    monkeypatch.setattr("citybehavex.activities.alignment.requests.post", fake_post)
+
+    diaries = [
+        Diary.model_validate(
+            {
+                "diary_id": "after-other",
+                "episodes": [
+                    {"start": "00:00", "end": "01:00", "purpose": "OTHER"},
+                    {"start": "01:00", "end": "05:00", "purpose": "HOME"},
+                    {"start": "05:00", "end": "24:00", "purpose": "HOME"},
+                ],
+            }
+        ),
+        Diary.model_validate(
+            {
+                "diary_id": "after-work",
+                "episodes": [
+                    {"start": "00:00", "end": "01:00", "purpose": "WORK"},
+                    {"start": "01:00", "end": "05:00", "purpose": "HOME"},
+                    {"start": "05:00", "end": "24:00", "purpose": "HOME"},
+                ],
+            }
+        ),
+    ]
 
     result = score_activity_alignment(
-        narratives,
+        ["profile"],
         diaries,
         ActivitiesConfig(
             enabled=True,
             alignment_backend="rerank",
             alignment_base_url="http://tei.local",
             alignment_model="activity-aligner",
-            alignment_batch_size=100,
+            alignment_batch_size=10_000,
         ),
-        visited_pairs=visited,
     )
 
     assert result is not None
-    scores, blocks, metadata = result
-
-    # Excluded cluster (1) must be entirely untouched (zero-initialized default).
-    assert not np.any(scores[1])
-    # Excluded blocks (routine-002, block_id 3/4/5) for the included cluster must
-    # also be entirely zero.
-    excluded_block_ids = [b.block_id for b in blocks if b.diary_id == "routine-002"]
-    for block_id in excluded_block_ids:
-        assert not np.any(scores[0, block_id])
-    # The one allowed (cluster, block) combo must have real (non-zero) scores.
-    included_block_ids = [b.block_id for b in blocks if b.diary_id == "routine-001"]
-    assert any(np.any(scores[0, block_id]) for block_id in included_block_ids)
-
-    # No metadata rows for pruned combinations.
-    assert set(zip(metadata["cluster"], metadata["diary_id"])) == {(0, "routine-001")}
-
-    # No network calls should ever have carried pruned-combo content.
-    all_queries = " ".join(
-        pair[0] for call in calls for pair in call["pairs"]
-    )
-    assert "student profile" not in all_queries
-    assert "routine-002" not in all_queries
+    all_queries = " ".join(pair[0] for call in calls for pair in call["pairs"])
+    assert "HOME blocks mostly in the 00-06 period" in all_queries
+    assert "previous micro-activity was paidwork" in all_queries
+    assert "previous micro-activity was shopserv" in all_queries
 
 
 class _FakeResponse:
