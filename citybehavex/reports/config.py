@@ -47,8 +47,8 @@ class ComparisonConfig(BaseModel):
     time_use_weight_col: str = "propwt"
     # Deprecated standalone metrics export; None = skip it.
     json_output: Optional[str] = None
-    # Which report sections to compute; None (default) = run all of them.
-    # Wasserstein/CPC summary metrics and the ECDF charts always run.
+    # Which optional comparison metric sections to compute; None (default) = run all of them.
+    # Core Wasserstein summary metrics always run.
     sections: Optional[list[str]] = None
     # When True (default) and a cached road graph is available (road_network
     # section), jump_lengths/radius_of_gyration are recomputed as

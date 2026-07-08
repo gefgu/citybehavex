@@ -30,6 +30,7 @@ import {
   purposeOption,
   timeUseDifferenceOption,
   timeUseGroupedOption,
+  transportShareOption,
   transitionOption,
 } from "../charts/builders";
 
@@ -87,6 +88,7 @@ const PERIOD_FILTERS: FilterChoice[] = [
 const FILTERED_SECTIONS = [
   "distributions",
   "metrics",
+  "transport-spatial",
   "activity",
   "mobility-laws",
   "micro-activity",
@@ -120,6 +122,7 @@ function defaultSectionRequests(
     ["motifs", dayFilter],
     ...STATIC_SECTIONS.map((section): [string, string] => [section, "all"]),
     ["metrics", metricFilter],
+    ["transport-spatial", "all"],
     ["distributions", distributionFilter],
     ["mobility-laws", dayFilter],
     ["stvd", dayFilter],
@@ -155,6 +158,7 @@ function mergeChartPayload(current: ChartPayload, incoming: ChartPayload): Chart
       stvd: mergeMetricRows(current.metrics.stvd ?? [], incoming.metrics.stvd ?? []),
     },
     ecdf: mergeGroups(current.ecdf, incoming.ecdf) ?? current.ecdf,
+    transport_spatial: incoming.transport_spatial ?? current.transport_spatial,
     mobility_laws: mergeGroups(current.mobility_laws, incoming.mobility_laws),
     activity: mergeGroups(current.activity, incoming.activity),
     micro_activity_usage: mergeGroups(current.micro_activity_usage, incoming.micro_activity_usage),
@@ -650,6 +654,53 @@ export function Charts() {
             <ChartCard key={key} title={`${ECDF_TITLES[key] ?? key} ECDF`} option={ecdfOption(block)} />
           ))}
         </div>
+      )}
+
+      {isSectionLoading("transport-spatial") && <div className="state">Building transport mobility…</div>}
+      {!isSectionLoading("transport-spatial") && payload.transport_spatial && (
+        <>
+          <SectionHeading title="Transport mobility" />
+          <div className="chart-grid">
+            <ChartCard
+              title="Trips by transport mode"
+              option={transportShareOption(payload.transport_spatial.share)}
+            />
+            <ChartCard
+              title="Jump length by transport mode"
+              option={ecdfOption(payload.transport_spatial.jump_ecdf)}
+            />
+          </div>
+          <div className="metric-tables">
+            {Object.entries(payload.transport_spatial.summary).map(([source, block]) => (
+              <table className="metrics" key={source}>
+                <caption>{source === "observed" ? payload.labels.observed ?? "observed" : "synthetic"}</caption>
+                <thead>
+                  <tr>
+                    <th>Mode</th>
+                    <th>Trips</th>
+                    <th>Share</th>
+                    <th>Mean jump</th>
+                    <th>Mean duration</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {block.modes.map((row) => (
+                    <tr key={row.mode}>
+                      <td>{row.mode}</td>
+                      <td>{row.count}</td>
+                      <td>{row.percent.toFixed(2)}%</td>
+                      <td>{row.mean_jump_km == null ? "n/a" : `${row.mean_jump_km.toFixed(3)} km`}</td>
+                      <td>{row.mean_duration_min == null ? "n/a" : `${row.mean_duration_min.toFixed(1)} min`}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            ))}
+          </div>
+        </>
+      )}
+      {sectionError("transport-spatial") && (
+        <div className="state">Failed to load transport mobility: {sectionError("transport-spatial")}</div>
       )}
 
       {isSectionLoading("mobility-laws", dayFilter) && <div className="state">Building mobility laws…</div>}

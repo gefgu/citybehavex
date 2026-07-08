@@ -113,17 +113,13 @@ def report(
         None,
         help="Observed series label. Defaults to comparison.label.",
     ),
-    output: Optional[str] = typer.Option(
-        "report.html",
-        help="HTML report output path.",
-    ),
     json_output: Optional[str] = typer.Option(
         None,
         "--json",
         help="Metrics JSON output path.",
     ),
 ):
-    """Generate an HTML + JSON mobility comparison report.
+    """Compute mobility comparison metrics and optionally write JSON.
 
     Jump lengths / radius of gyration are recomputed as road-network distance
     (instead of straight-line Haversine) when the config's road_network is
@@ -153,7 +149,6 @@ def report(
         synthetic_path=synthetic_path,
         real_path=real_path,
         observed_label=label,
-        output_path=output,
         synthetic_activities_path=_activities_sidecar_path(synthetic_path),
         json_output_path=json_output,
         road_nodes_df=road_nodes_df,

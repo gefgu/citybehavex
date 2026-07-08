@@ -9,6 +9,7 @@ import type {
   ProfilesBlock,
   SeriesPoints,
   TimeUseComparisonBlock,
+  TransportSpatialBlock,
 } from "../api";
 import {
   axisCommon,
@@ -92,6 +93,10 @@ function groupedBar(categories: string[], series: BarSeries[], yName: string): E
 
 export function purposeOption(block: ActivityBlock["purpose"]): EChartsOption {
   return groupedBar(block.categories, block.series, "% of visits");
+}
+
+export function transportShareOption(block: TransportSpatialBlock["share"]): EChartsOption {
+  return groupedBar(block.categories, block.series, "% of trips");
 }
 
 export function motifOption(block: MotifsBlock): EChartsOption {

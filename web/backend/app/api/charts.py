@@ -43,6 +43,14 @@ def _picklable_nv_config(nv_cfg: Any) -> Any:
     return nv_cfg
 
 
+def _picklable_config(config: Any) -> Any:
+    if config is None:
+        return None
+    if hasattr(config, "model_dump"):
+        return SimpleNamespace(**config.model_dump())
+    return config
+
+
 def _observed_path(experiment) -> Optional[Any]:  # noqa: ANN001
     return (
         experiment.observed_path
@@ -60,7 +68,7 @@ def _time_use_path(experiment) -> Optional[Any]:  # noqa: ANN001
 
 
 def _chart_build_kwargs(experiment, selected, observed_path, time_use_path) -> dict[str, Any]:  # noqa: ANN001
-    return dict(
+    kwargs = dict(
         synthetic_path=str(selected.path),
         observed_path=str(observed_path) if observed_path is not None else None,
         observed_label=experiment.label,
@@ -72,6 +80,21 @@ def _chart_build_kwargs(experiment, selected, observed_path, time_use_path) -> d
         time_use_weight_col=experiment.time_use_weight_col,
         special_days=experiment.special_days,
     )
+    transport_cfg = getattr(experiment, "transport_spatial_config", None)
+    if transport_cfg is not None:
+        kwargs["transport_spatial_config"] = _picklable_config(transport_cfg)
+    return kwargs
+
+
+def _transport_spatial_cache_key(experiment) -> Any:  # noqa: ANN001
+    config = getattr(experiment, "transport_spatial_config", None)
+    if config is None:
+        return None
+    if hasattr(config, "model_dump"):
+        return config.model_dump()
+    if isinstance(config, SimpleNamespace):
+        return vars(config)
+    return config
 
 
 @router.get("/experiments/{exp_id}/charts")
@@ -115,12 +138,16 @@ async def get_charts(
                 selected.social_network_path,
                 getattr(selected, "encounters_path", None),
                 selected.activities_path,
+                getattr(selected, "moving_path", None),
                 time_use_path,
                 road_nodes_path,
                 road_edges_path,
             )
             if p is not None
         ),
+        extra_key={
+            "transport_spatial": _transport_spatial_cache_key(experiment),
+        },
     )
     payload = {**payload, "run_id": selected.run_id}
     return ApiResponseWrapper(data=payload)
@@ -162,11 +189,16 @@ async def get_chart_section(
                 p
                 for p in (
                     selected.activities_path,
+                    getattr(selected, "moving_path", None),
                     time_use_path,
                 )
                 if p is not None
             ),
-            extra_key={"section": section, "filter": filter},
+            extra_key={
+                "section": section,
+                "filter": filter,
+                "transport_spatial": _transport_spatial_cache_key(experiment),
+            },
         )
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc

@@ -11,6 +11,7 @@ from .store import artifact_store
 SECTION_NAMES = [
     "distributions",
     "metrics",
+    "transport-spatial",
     "activity",
     "mobility-laws",
     "micro-activity",
@@ -45,6 +46,7 @@ def _empty_payload(ctx: ComparisonContext, loaded_filters: Optional[list[str]] =
         "loaded_filters": loaded_filters or [],
         "metrics": _empty_metrics(),
         "ecdf": {"groups": []},
+        "transport_spatial": None,
         "mobility_laws": None,
         "activity": None,
         "micro_activity_usage": None,
@@ -75,6 +77,7 @@ def _regular_artifact(ctx: ComparisonContext, filter_key: str, section: str) -> 
             time_use_country=ctx.time_use_country,
             time_use_survey=ctx.time_use_survey,
             time_use_weight_col=ctx.time_use_weight_col,
+            transport_spatial_config=ctx.transport_spatial_config,
             special_days=ctx.special_day_dicts(),
             filter_keys=[filter_key],
             include_progressive_metadata=True,
@@ -99,6 +102,7 @@ def _profile_artifact(ctx: ComparisonContext) -> dict[str, Any]:
             time_use_country=ctx.time_use_country,
             time_use_survey=ctx.time_use_survey,
             time_use_weight_col=ctx.time_use_weight_col,
+            transport_spatial_config=ctx.transport_spatial_config,
             special_days=ctx.special_day_dicts(),
             filter_keys=["all"],
             include_progressive_metadata=True,
@@ -118,6 +122,7 @@ def build_chart_base_payload(
     time_use_country: Optional[str] = None,
     time_use_survey: Optional[int] = None,
     time_use_weight_col: str = "propwt",
+    transport_spatial_config: Optional[object] = None,
     special_days: Optional[list[dict[str, str]]] = None,
 ) -> dict[str, Any]:
     kwargs = dict(
@@ -130,6 +135,7 @@ def build_chart_base_payload(
         time_use_country=time_use_country,
         time_use_survey=time_use_survey,
         time_use_weight_col=time_use_weight_col,
+        transport_spatial_config=transport_spatial_config,
         special_days=special_days,
     )
     ctx = _context_from_kwargs(**kwargs)
@@ -149,6 +155,7 @@ def build_metrics_export_payload(
     time_use_country: Optional[str] = None,
     time_use_survey: Optional[int] = None,
     time_use_weight_col: str = "propwt",
+    transport_spatial_config: Optional[object] = None,
     special_days: Optional[list[dict[str, str]]] = None,
 ) -> dict[str, Any]:
     ctx = _context_from_kwargs(
@@ -161,6 +168,7 @@ def build_metrics_export_payload(
         time_use_country=time_use_country,
         time_use_survey=time_use_survey,
         time_use_weight_col=time_use_weight_col,
+        transport_spatial_config=transport_spatial_config,
         special_days=special_days,
     )
     key = (*ctx.artifact_key("all"), "metrics-export")
@@ -176,6 +184,7 @@ def build_metrics_export_payload(
             time_use_country=ctx.time_use_country,
             time_use_survey=ctx.time_use_survey,
             time_use_weight_col=ctx.time_use_weight_col,
+            transport_spatial_config=ctx.transport_spatial_config,
             special_days=ctx.special_day_dicts(),
             filter_keys=None,
             include_progressive_metadata=True,
@@ -246,6 +255,14 @@ def build_section_mobility_laws(ctx: ComparisonContext, filter_key: str) -> dict
     return payload
 
 
+def build_section_transport_spatial(ctx: ComparisonContext, filter_key: str = "all") -> dict[str, Any]:
+    artifact = _regular_artifact(ctx, "all", "transport-spatial")
+    payload = _empty_payload(ctx, loaded_filters=[])
+    payload["warnings"] = artifact.get("warnings", [])
+    payload["transport_spatial"] = artifact.get("transport_spatial")
+    return payload
+
+
 def build_section_micro_activity(ctx: ComparisonContext, filter_key: str) -> dict[str, Any]:
     artifact = _regular_artifact(ctx, filter_key, "micro-activity")
     payload = _empty_payload(ctx, loaded_filters=[filter_key])
@@ -299,6 +316,7 @@ SECTION_BUILDERS = {
     "distributions": build_section_distributions,
     "metrics": build_section_metrics,
     "activity": build_section_activity,
+    "transport-spatial": build_section_transport_spatial,
     "mobility-laws": build_section_mobility_laws,
     "micro-activity": build_section_micro_activity,
     "time-use": build_section_time_use,

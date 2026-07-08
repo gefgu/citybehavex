@@ -74,7 +74,11 @@ from ..reports_bridge import (
     _mobility_law_visits,
     _motif_visits,
     _stvd_hourly_histogram,
+    _synthetic_transport_leg_records,
+    _transport_mode_map,
+    _transport_spatial_summary,
     _truncated_powerlaw_dataset,
+    _observed_transport_leg_records,
     compute_profiles,
     detect_column,
     load_trajectory,
@@ -166,6 +170,101 @@ def _ecdf_block(
     if label_obs is not None and obs_values is not None:
         series.append({"name": label_obs, "role": "observed", "points": _ecdf(obs_values)})
     return {"x_label": x_label, "x_unit": x_unit, "series": series}
+
+
+def _transport_ecdf_block(records: pl.DataFrame, observed_label: str) -> dict[str, Any]:
+    series: list[dict[str, Any]] = []
+    labels = {"synthetic": "synthetic", "observed": observed_label}
+    mode_order = sorted(
+        set(records["mode"].to_list()),
+        key=lambda m: (["walk", "bike", "car", "rail"].index(m) if m in {"walk", "bike", "car", "rail"} else 99, m),
+    )
+    for source in ["synthetic", "observed"]:
+        source_df = records.filter(pl.col("source") == source)
+        if source_df.is_empty():
+            continue
+        for mode in mode_order:
+            values = source_df.filter(pl.col("mode") == mode)["jump_km"].to_numpy()
+            if len(values) == 0:
+                continue
+            series.append(
+                {
+                    "name": f"{labels[source]} · {mode}",
+                    "role": source,
+                    "points": _ecdf(values),
+                }
+            )
+    return {"x_label": "jump length", "x_unit": "km", "series": series}
+
+
+def _transport_spatial_block(
+    *,
+    synthetic_path: str,
+    observed_df: Optional[pl.DataFrame],
+    observed_label: str,
+    duration_col: Optional[str],
+    config: Optional[object],
+    warnings: list[str],
+) -> Optional[dict[str, Any]]:
+    if not bool(getattr(config, "enabled", True)):
+        return None
+    configured_path = getattr(config, "synthetic_moving_path", None)
+    synth_path = Path(synthetic_path)
+    moving_path = Path(configured_path) if configured_path else synth_path.with_name(
+        f"{synth_path.stem}_moving{synth_path.suffix}"
+    )
+    if not moving_path.exists():
+        warnings.append(f"transport_spatial: moving sidecar not found: {moving_path}")
+        return None
+    try:
+        mode_map = _transport_mode_map(config)
+        records = _synthetic_transport_leg_records(moving_path, mode_map=mode_map)
+        if records.is_empty():
+            warnings.append("transport_spatial: no synthetic transport legs")
+            return None
+        if bool(getattr(config, "observed_enabled", False)) and observed_df is not None:
+            try:
+                observed_records = _observed_transport_leg_records(
+                    observed_df,
+                    uid_col=getattr(config, "uid_col", None),
+                    datetime_col=getattr(config, "datetime_col", None),
+                    lat_col=getattr(config, "lat_col", None),
+                    lng_col=getattr(config, "lng_col", None),
+                    transport_col=getattr(config, "transport_col", None),
+                    duration_col=duration_col,
+                    mode_map=mode_map,
+                )
+                if observed_records.is_empty():
+                    warnings.append("transport_spatial: no observed transport legs")
+                else:
+                    records = pl.concat([records, observed_records], how="diagonal")
+            except Exception as exc:  # noqa: BLE001 - section-level degradation
+                warnings.append(f"transport_spatial.observed: {exc}")
+        summary = _transport_spatial_summary(records)
+        mode_order = sorted(
+            {row["mode"] for source in summary.values() for row in source.get("modes", [])},
+            key=lambda m: (["walk", "bike", "car", "rail"].index(m) if m in {"walk", "bike", "car", "rail"} else 99, m),
+        )
+        share_series = []
+        for source, label in (("synthetic", "synthetic"), ("observed", observed_label)):
+            if source not in summary:
+                continue
+            by_mode = {row["mode"]: row["percent"] for row in summary[source].get("modes", [])}
+            share_series.append(
+                {
+                    "name": label,
+                    "role": source,
+                    "values": [by_mode.get(mode, 0.0) for mode in mode_order],
+                }
+            )
+        return {
+            "summary": summary,
+            "share": {"categories": mode_order, "series": share_series},
+            "jump_ecdf": _transport_ecdf_block(records, observed_label),
+        }
+    except Exception as exc:  # noqa: BLE001 - section-level degradation
+        warnings.append(f"transport_spatial: {exc}")
+        return None
 
 
 def _read_time_use_table(path: Path, required_columns: list[str]) -> pl.DataFrame:
@@ -870,6 +969,7 @@ def _build_comparison_payload(
     time_use_country: Optional[str] = None,
     time_use_survey: Optional[int] = None,
     time_use_weight_col: str = "propwt",
+    transport_spatial_config: Optional[object] = None,
     road_snap_max_distance_m: float = 750.0,
     special_days: Optional[list[dict[str, str]]] = None,
     filter_keys: Optional[list[str]] = None,
@@ -1275,6 +1375,22 @@ def _build_comparison_payload(
         mobility_groups = [g for g in mobility_groups if g is not None]
         mobility_laws = {"groups": mobility_groups} if mobility_groups else None
 
+    transport_spatial = (
+        guard(
+            "transport_spatial",
+            lambda: _transport_spatial_block(
+                synthetic_path=synthetic_path,
+                observed_df=real_df,
+                observed_label=observed_label,
+                duration_col=duration_col,
+                config=transport_spatial_config,
+                warnings=warnings,
+            ),
+        )
+        if wants("transport-spatial")
+        else None
+    )
+
     # ---- profiles -------------------------------------------------------- #
     profiles = None
     if wants("profiles") and include_profiles and synthetic_visits is not None and observed_visits is not None:
@@ -1374,6 +1490,7 @@ def _build_comparison_payload(
             "stvd": stvd_metrics,
         },
         "ecdf": ecdf,
+        "transport_spatial": transport_spatial,
         "mobility_laws": mobility_laws,
         "activity": activity,
         "micro_activity_usage": micro_activity_usage,
