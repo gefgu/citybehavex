@@ -171,6 +171,50 @@ def _query_text(
     )
 
 
+_PERIODS: tuple[tuple[int, int, str], ...] = (
+    (0, 6 * 60, "00-06"),
+    (6 * 60, 12 * 60, "06-12"),
+    (12 * 60, 18 * 60, "12-18"),
+    (18 * 60, 24 * 60, "18-24"),
+)
+
+
+def _time_to_minutes(value: str) -> int:
+    hour, minute = (int(part) for part in value.split(":", maxsplit=1))
+    return 24 * 60 if hour == 24 else hour * 60 + minute
+
+
+def _period_index_for_block(block: ActivityBlock) -> int:
+    start = _time_to_minutes(block.start)
+    end = _time_to_minutes(block.end)
+    overlaps = [
+        max(0, min(end, period_end) - max(start, period_start))
+        for period_start, period_end, _label in _PERIODS
+    ]
+    return max(range(len(overlaps)), key=lambda idx: (overlaps[idx], -idx))
+
+
+def _period_label(period_index: int) -> str:
+    return _PERIODS[period_index][2]
+
+
+def _period_query_text(
+    profile_text: str,
+    purpose: str,
+    period_index: int,
+    previous: int,
+    catalog: Sequence[Activity],
+) -> str:
+    period_start, period_end, period_label = _PERIODS[period_index]
+    return (
+        f"{profile_text}\n"
+        f"Schedule block group: {purpose} blocks mostly in the {period_label} "
+        f"period ({period_start // 60:02d}:00-{period_end // 60:02d}:00).\n"
+        f"Transition/history context: {_previous_activity_text(previous, catalog)}.\n"
+        "Score which valid time-use activity best fits this person, block period, time, and history."
+    )
+
+
 def _cache_key(
     model: str | None,
     profile_text: str,
@@ -182,6 +226,21 @@ def _cache_key(
         f"{model or ''}\x00{profile_text}\x00{block.diary_id}\x00"
         f"{block.episode_index}\x00{block.purpose}\x00{block.start}\x00"
         f"{block.end}\x00{previous}\x00{activity_text}"
+    )
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+def _period_cache_key(
+    model: str | None,
+    profile_text: str,
+    purpose: str,
+    period_index: int,
+    previous: int,
+    activity_text: str,
+) -> str:
+    raw = (
+        f"{model or ''}\x00{profile_text}\x00PERIOD_BLOCK\x00{purpose}\x00"
+        f"{period_index}\x00{previous}\x00{activity_text}"
     )
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
@@ -384,7 +443,6 @@ def score_activity_alignment(
     cluster_narratives: Sequence[str],
     diaries: Sequence[Diary],
     config: ActivitiesConfig,
-    visited_pairs: Optional[set[tuple[int, int]]] = None,
 ) -> Optional[tuple[np.ndarray, list[ActivityBlock], pd.DataFrame]]:
     """Return contextual micro-activity alignment scores or ``None`` on failure.
 
@@ -392,20 +450,11 @@ def score_activity_alignment(
     third dimension reserves index 0 for no previous activity and activity ``a``
     at index ``a + 1``.
 
-    Only HOME and WORK blocks are scored by this legacy contextual tensor.
-    OTHER/POI blocks are handled by ``score_poi_semantic_alignment`` and remain
-    zero-initialized here.
-
-    ``visited_pairs``, when given, is a set of ``(cluster_id, block_id)`` pairs
-    a cheap reachability probe found were actually visited; any other pair is
-    skipped entirely (both the network request and the tensor slot, which
-    stays at its zero-initialized default -- a documented graceful-degradation
-    fallback toward base-rate weighting, not a crash). Pruning at this
-    (cluster, block) granularity rather than per previous-activity is
-    deliberate: block visitation is driven by diary structure, identical
-    between the probe run and the final run, while which previous activity
-    gets sampled within an already-visited block depends on weights that
-    differ between the two runs.
+    Only HOME and WORK blocks are scored by this contextual tensor. OTHER/POI
+    blocks are handled by ``score_poi_semantic_alignment`` and remain
+    zero-initialized here. Reranker requests are reused across raw diary blocks
+    by scoring canonical ``(purpose, 6-hour period)`` groups, then copying those
+    canonical scores into every matching raw block slot expected by Rust.
     """
     if (
         not cluster_narratives
@@ -465,23 +514,44 @@ def score_activity_alignment(
         for block in blocks
     ]
 
-    def should_score(cluster_id: int, block: ActivityBlock) -> bool:
-        return visited_pairs is None or (cluster_id, block.block_id) in visited_pairs
+    block_periods = [
+        _period_index_for_block(block) if eligible else -1
+        for block, eligible in zip(blocks, block_eligible)
+    ]
+    group_previous_candidates: dict[tuple[str, int], list[int]] = {}
+    grouped: dict[tuple[str, int], set[int]] = {}
+    for block, eligible, period_index, previous_candidates in zip(
+        blocks, block_eligible, block_periods, block_previous_candidates
+    ):
+        if not eligible:
+            continue
+        grouped.setdefault((block.purpose, period_index), set()).update(previous_candidates)
+    group_previous_candidates = {
+        group: sorted(previous) for group, previous in grouped.items()
+    }
 
     try:
         pending: list[tuple[str, str, str]] = []
         pending_seen: set[str] = set()
         for cluster_id, profile_text in enumerate(cluster_narratives):
-            for block, eligible, previous_candidates in zip(
-                blocks, block_eligible, block_previous_candidates
-            ):
-                if not eligible or not should_score(cluster_id, block):
-                    continue
+            for purpose, period_index in sorted(group_previous_candidates):
+                eligible = [
+                    activity.idx
+                    for activity in catalog
+                    if _purpose_code(purpose) in activity.eligible_purposes
+                ]
                 texts = [_activity_text(catalog[idx]) for idx in eligible]
-                for previous in previous_candidates:
-                    query = _query_text(profile_text, block, previous, catalog)
+                for previous in group_previous_candidates[(purpose, period_index)]:
+                    query = _period_query_text(profile_text, purpose, period_index, previous, catalog)
                     for text in texts:
-                        key = _cache_key(config.alignment_model, profile_text, block, previous, text)
+                        key = _period_cache_key(
+                            config.alignment_model,
+                            profile_text,
+                            purpose,
+                            period_index,
+                            previous,
+                            text,
+                        )
                         if key in cache or key in pending_seen:
                             continue
                         pending_seen.add(key)
@@ -551,16 +621,23 @@ def score_activity_alignment(
                     _report_progress(done_chunks, done_pairs)
 
         for cluster_id, profile_text in enumerate(cluster_narratives):
-            for block, eligible, previous_candidates in zip(
-                blocks, block_eligible, block_previous_candidates
+            for block, eligible, previous_candidates, period_index in zip(
+                blocks, block_eligible, block_previous_candidates, block_periods
             ):
-                if not eligible or not should_score(cluster_id, block):
+                if not eligible:
                     continue
                 texts = [_activity_text(catalog[idx]) for idx in eligible]
                 for previous in previous_candidates:
                     prev_pos = 0 if previous == START_PREVIOUS_ACTIVITY else previous + 1
                     for local_idx, activity_idx in enumerate(eligible):
-                        key = _cache_key(config.alignment_model, profile_text, block, previous, texts[local_idx])
+                        key = _period_cache_key(
+                            config.alignment_model,
+                            profile_text,
+                            block.purpose,
+                            period_index,
+                            previous,
+                            texts[local_idx],
+                        )
                         score = float(cache[key])
                         scores[cluster_id, block.block_id, prev_pos, activity_idx] = score
                         rows.append(
@@ -572,6 +649,8 @@ def score_activity_alignment(
                                 "purpose": block.purpose,
                                 "start": block.start,
                                 "end": block.end,
+                                "period_index": period_index,
+                                "period_label": _period_label(period_index),
                                 "previous_activity": previous,
                                 "activity": catalog[activity_idx].name,
                                 "activity_idx": activity_idx,
