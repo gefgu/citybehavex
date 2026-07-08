@@ -358,7 +358,7 @@ body {
 /* ---- metric tables ---- */
 .metric-tables {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: var(--space-xl);
 }
 table.metrics {
@@ -381,11 +381,6 @@ table.metrics td.unit { color: var(--muted); }
   color: var(--muted);
   font-size: 12px;
 }
-.time-use-table {
-  margin-top: var(--space-md);
-  overflow-x: auto;
-}
-
 /* ---- charts ---- */
 .segmented-control {
   display: inline-flex;
@@ -971,6 +966,9 @@ table.agent-table td:first-child { color: var(--muted); }
   .section-controls {
     justify-content: flex-start;
     width: 100%;
+  }
+  .metric-tables {
+    grid-template-columns: 1fr;
   }
   .segmented-control {
     max-width: 100%;

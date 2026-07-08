@@ -302,41 +302,6 @@ function NetworkValidationSection({
   );
 }
 
-function TimeUseDifferenceTable({ block }: { block: { rows: {
-  category: string;
-  mtus_minutes?: number;
-  simulation_minutes?: number;
-  observed_minutes: number;
-  synthetic_minutes: number;
-  share_of_day_difference_pct_points: number;
-}[] } }) {
-  return (
-    <div className="time-use-table">
-      <h4>MTUS activity differences</h4>
-      <table className="metrics">
-        <thead>
-          <tr>
-            <th>Activity</th>
-            <th>MTUS minutes</th>
-            <th>Simulation minutes</th>
-            <th>Share-of-day difference</th>
-          </tr>
-        </thead>
-        <tbody>
-          {block.rows.map((row) => (
-            <tr key={row.category}>
-              <td>{row.category}</td>
-              <td className="value">{(row.mtus_minutes ?? row.observed_minutes).toFixed(1)}</td>
-              <td className="value">{(row.simulation_minutes ?? row.synthetic_minutes).toFixed(1)}</td>
-              <td className="value">{row.share_of_day_difference_pct_points.toFixed(3)}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  );
-}
-
 export function Charts() {
   const { id = "" } = useParams();
   const [params] = useSearchParams();
@@ -792,7 +757,6 @@ export function Charts() {
               wide
             />
           </div>
-          <TimeUseDifferenceTable block={timeUseGroup.block} />
         </>
       )}
 
