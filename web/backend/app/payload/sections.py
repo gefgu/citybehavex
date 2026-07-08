@@ -78,6 +78,7 @@ def _regular_artifact(ctx: ComparisonContext, filter_key: str, section: str) -> 
             time_use_survey=ctx.time_use_survey,
             time_use_weight_col=ctx.time_use_weight_col,
             transport_spatial_config=ctx.transport_spatial_config,
+            evaluation_adaptation_config=ctx.evaluation_adaptation_config,
             special_days=ctx.special_day_dicts(),
             filter_keys=[filter_key],
             include_progressive_metadata=True,
@@ -103,6 +104,7 @@ def _profile_artifact(ctx: ComparisonContext) -> dict[str, Any]:
             time_use_survey=ctx.time_use_survey,
             time_use_weight_col=ctx.time_use_weight_col,
             transport_spatial_config=ctx.transport_spatial_config,
+            evaluation_adaptation_config=ctx.evaluation_adaptation_config,
             special_days=ctx.special_day_dicts(),
             filter_keys=["all"],
             include_progressive_metadata=True,
@@ -123,6 +125,7 @@ def build_chart_base_payload(
     time_use_survey: Optional[int] = None,
     time_use_weight_col: str = "propwt",
     transport_spatial_config: Optional[object] = None,
+    evaluation_adaptation_config: Optional[object] = None,
     special_days: Optional[list[dict[str, str]]] = None,
 ) -> dict[str, Any]:
     kwargs = dict(
@@ -136,6 +139,7 @@ def build_chart_base_payload(
         time_use_survey=time_use_survey,
         time_use_weight_col=time_use_weight_col,
         transport_spatial_config=transport_spatial_config,
+        evaluation_adaptation_config=evaluation_adaptation_config,
         special_days=special_days,
     )
     ctx = _context_from_kwargs(**kwargs)
@@ -156,6 +160,7 @@ def build_metrics_export_payload(
     time_use_survey: Optional[int] = None,
     time_use_weight_col: str = "propwt",
     transport_spatial_config: Optional[object] = None,
+    evaluation_adaptation_config: Optional[object] = None,
     special_days: Optional[list[dict[str, str]]] = None,
 ) -> dict[str, Any]:
     ctx = _context_from_kwargs(
@@ -169,6 +174,7 @@ def build_metrics_export_payload(
         time_use_survey=time_use_survey,
         time_use_weight_col=time_use_weight_col,
         transport_spatial_config=transport_spatial_config,
+        evaluation_adaptation_config=evaluation_adaptation_config,
         special_days=special_days,
     )
     key = (*ctx.artifact_key("all"), "metrics-export")
@@ -185,6 +191,7 @@ def build_metrics_export_payload(
             time_use_survey=ctx.time_use_survey,
             time_use_weight_col=ctx.time_use_weight_col,
             transport_spatial_config=ctx.transport_spatial_config,
+            evaluation_adaptation_config=ctx.evaluation_adaptation_config,
             special_days=ctx.special_day_dicts(),
             filter_keys=None,
             include_progressive_metadata=True,

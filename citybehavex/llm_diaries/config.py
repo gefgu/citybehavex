@@ -50,7 +50,7 @@ class DiariesConfig(BaseModel):
     )
     location_count_mu: float = 1.0
     location_count_sigma: float = Field(default=0.5, gt=0)
-    max_locations: int = Field(default=6, ge=1, le=6)
+    max_locations: int = Field(default=6, ge=1, le=10)
     max_one_location_diaries: int | None = Field(default=None, ge=0)
     motif_exploration_rate: float = Field(default=1.0, ge=0.0, le=1.0)
 

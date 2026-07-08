@@ -2,10 +2,10 @@
 # (matches AgentSociety/CitySim's own 500-agent sampling methodology; not part
 # of the ablation table's N/2-population sweep, see configs/ablations/shanghai_half.yaml).
 tessellation:
-  min_lon: 120.8
-  min_lat: 30.7
-  max_lon: 122.1
-  max_lat: 31.9
+  min_lon: 120.88
+  min_lat: 30.63
+  max_lon: 122.06
+  max_lat: 31.84
   resolution: 8
   enrich_overture: true
   overture_release: "2026-05-20.0"
@@ -26,7 +26,7 @@ simulation:
   alpha: 0.2
   dt_update_mob_sim_hours: 168.0
   indipendency_window_hours: 0.5
-  gravity_deterrence_exponent: -3.0
+  gravity_deterrence_exponent: -3.5
   gravity_origin_exponent: 1.0
   gravity_destination_exponent: 1.0
 
@@ -60,10 +60,10 @@ diaries:
   city_profile_weekday: "Shanghai weekday routines: early metro/bus commutes to offices, factories, or universities; midday meals near workplaces; evening shopping or leisure along commercial streets; late returns home."
   city_profile_weekend: "Shanghai weekend routines: later mornings at home, family outings to malls, parks, or restaurants, leisure trips by metro or car, tourism in central districts."
   representative_day: "2015-12-27"
-  location_count_mu: 1.0
-  location_count_sigma: 0.5
-  max_locations: 6
-  motif_exploration_rate: 0.5
+  location_count_mu: 1.5
+  location_count_sigma: 0.6
+  max_locations: 9
+  motif_exploration_rate: 0.25
 
 embedding:
   enabled: true
@@ -89,7 +89,7 @@ schedule:
   alignment_cache_path: data/llm_diaries_shanghai/alignment_cache.npz
 
 activities:
-  enabled: true
+  enabled: false
   materialize_travel: true
   kappa: 0.3
   temperature: 0.25
@@ -162,6 +162,10 @@ profiles:
 comparison:
   path: data/shanghai/shanghai_500sample.parquet
   label: shanghai_500sample
+  evaluation_adaptation:
+    mode: auto
+    location_col: venueId
+    h3_resolution: 10
   network_validation:
     enabled: true
     observed_enabled: true

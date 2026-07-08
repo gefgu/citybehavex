@@ -23,6 +23,7 @@ from citybehavex.reports.comparison import (  # noqa: F401
     _daily_location_lognormal_dataset,
     _diff_stvd_layers,
     _distance_frequency_dataset,
+    _adapt_evaluation_dataframe,
     _location_resolution,
     _mobility_law_visits,
     _motif_visits,

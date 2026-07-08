@@ -45,6 +45,7 @@ class ComparisonContext:
     time_use_survey: Optional[int] = None
     time_use_weight_col: str = "propwt"
     transport_spatial_config: object | None = None
+    evaluation_adaptation_config: object | None = None
     special_days: tuple[tuple[str, str, str], ...] = ()
 
     @classmethod
@@ -61,6 +62,7 @@ class ComparisonContext:
         time_use_survey: Optional[int] = None,
         time_use_weight_col: str = "propwt",
         transport_spatial_config: object | None = None,
+        evaluation_adaptation_config: object | None = None,
         special_days: Optional[list[dict[str, str]]] = None,
     ) -> "ComparisonContext":
         return cls(
@@ -74,6 +76,7 @@ class ComparisonContext:
             time_use_survey=time_use_survey,
             time_use_weight_col=time_use_weight_col,
             transport_spatial_config=transport_spatial_config,
+            evaluation_adaptation_config=evaluation_adaptation_config,
             special_days=tuple(
                 (sd["name"], sd["start_date"], sd["end_date"]) for sd in (special_days or [])
             ),
@@ -103,6 +106,7 @@ class ComparisonContext:
             self.time_use_survey,
             self.time_use_weight_col,
             _hashable_config(self.transport_spatial_config),
+            _hashable_config(self.evaluation_adaptation_config),
             self.special_days,
             filter_key,
         )

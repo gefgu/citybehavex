@@ -156,6 +156,7 @@ def report(
         road_snap_max_distance_m=rn.snap_max_distance_m,
         network_validation_config=loaded.comparison.network_validation,
         transport_spatial_config=loaded.comparison.transport_spatial,
+        evaluation_adaptation_config=loaded.comparison.evaluation_adaptation,
     )
 
 
