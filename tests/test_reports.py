@@ -12,17 +12,12 @@ import skmob2
 
 from citybehavex.reports import (
     ALL_REPORT_SECTIONS,
-    _activity_comparison_section_html,
     _activities_sidecar_path,
     _collapse_explicit_purposes,
     _common_part_of_commuters,
     _daily_location_lognormal_dataset,
     _derive_purpose_groups_from_heuristic,
-    _metrics_section_html,
-    _micro_activity_daily_usage_figure,
-    _micro_activity_section_html,
     _mobility_law_visits,
-    _mobility_laws_section_html,
     _motif_visits,
     _prepare_activity_visits,
     _trajectory_od_matrix,
@@ -147,19 +142,6 @@ def test_common_part_of_commuters_uses_trajectory_cpc(monkeypatch):
 
     assert values == [(7, 0.75), (8, 0.75), (9, 0.75)]
     assert calls == [(traj, traj, (7, 8, 9))]
-
-
-def test_metrics_section_html_shows_cpc_at_all_resolutions():
-    html = _metrics_section_html(
-        [("Jump lengths", "1.2345", "km")],
-        [("Activity distribution", "0.1234", "")],
-        [(7, 0.1), (8, 0.25), (9, 1.0)],
-    )
-
-    assert "Common Part of Commuters" in html
-    assert "<td>H3 7</td><td>0.1000</td>" in html
-    assert "<td>H3 8</td><td>0.2500</td>" in html
-    assert "<td>H3 9</td><td>1.0000</td>" in html
 
 
 def test_motif_visits_use_h3_locations_and_binary_purposes():
@@ -299,109 +281,6 @@ def test_prepare_activity_visits_warns_when_using_heuristic():
     assert set(result.visits["purpose"]).issubset({"HOME", "WORK", "OTHER"})
 
 
-def test_activity_comparison_section_uses_comparison_plots(monkeypatch):
-    observed_visits = pd.DataFrame({"source": ["observed"]})
-    synthetic_visits = pd.DataFrame({"source": ["synthetic"]})
-    calls = []
-
-    class Figure:
-        def __init__(self, name):
-            self.name = name
-
-        def _repr_html_(self):
-            return f"<iframe>{self.name}</iframe>"
-
-    def purpose(datasets, **kwargs):
-        calls.append(("purpose", datasets))
-        return Figure("purpose")
-
-    def transition(first, second, *, labels, **kwargs):
-        calls.append(("transition", first, second, labels))
-        return Figure("transition")
-
-    def daily(first, second, *, labels, **kwargs):
-        calls.append(("daily", first, second, labels))
-        return Figure("daily")
-
-    monkeypatch.setattr("citybehavex.reports.comparison.plot_visit_purpose_comparison", purpose)
-    monkeypatch.setattr(
-        "citybehavex.reports.comparison.plot_activity_transition_difference",
-        transition,
-    )
-    monkeypatch.setattr(
-        "citybehavex.reports.comparison.plot_daily_activity_difference",
-        daily,
-    )
-
-    html = _activity_comparison_section_html(
-        observed_visits,
-        synthetic_visits,
-        "survey",
-    )
-
-    assert len(calls) == 3
-    assert calls[0][0] == "purpose"
-    assert list(calls[0][1]) == ["survey", "synthetic"]
-    assert calls[0][1]["survey"] is observed_visits
-    assert calls[0][1]["synthetic"] is synthetic_visits
-    assert calls[1][0] == "transition"
-    assert calls[1][1] is observed_visits
-    assert calls[1][2] is synthetic_visits
-    assert calls[1][3] == ("survey", "synthetic")
-    assert calls[2][0] == "daily"
-    assert calls[2][1] is observed_visits
-    assert calls[2][2] is synthetic_visits
-    assert calls[2][3] == ("survey", "synthetic")
-    assert html.count("Activity comparison") == 1
-    assert html.count("<iframe>") == 3
-
-
-def test_activity_comparison_section_shows_heuristic_warning(monkeypatch):
-    class Figure:
-        def _repr_html_(self):
-            return "<iframe>chart</iframe>"
-
-    monkeypatch.setattr(
-        "citybehavex.reports.comparison.plot_visit_purpose_comparison",
-        lambda *args, **kwargs: Figure(),
-    )
-    monkeypatch.setattr(
-        "citybehavex.reports.comparison.plot_activity_transition_difference",
-        lambda *args, **kwargs: Figure(),
-    )
-    monkeypatch.setattr(
-        "citybehavex.reports.comparison.plot_daily_activity_difference",
-        lambda *args, **kwargs: Figure(),
-    )
-
-    visits = pd.DataFrame(
-        {
-            "uid": ["u1"],
-            "start_timestamp": pd.to_datetime(["2026-01-01 08:00"]),
-            "end_timestamp": pd.to_datetime(["2026-01-01 09:00"]),
-            "location_id": ["home"],
-            "purpose": ["HOME"],
-        }
-    )
-
-    html = _activity_comparison_section_html(
-        visits,
-        visits,
-        "survey",
-        ["survey has no explicit purpose column; derived HOME/WORK/OTHER."],
-    )
-
-    assert "Purpose heuristic warning" in html
-    assert "survey has no explicit purpose column" in html
-
-
-def test_activity_comparison_section_requires_both_datasets():
-    visits = pd.DataFrame({"source": ["observed"]})
-
-    assert _activity_comparison_section_html(visits, None, "survey") == ""
-    assert _activity_comparison_section_html(None, visits, "survey") == ""
-
-
 def test_mobility_law_visits_use_existing_locations_or_h3_fallback():
     source = pl.DataFrame(
         {
@@ -477,182 +356,11 @@ def test_daily_location_lognormal_dataset_counts_distinct_locations():
     assert label == "observed"
 
 
-def test_mobility_laws_section_renders_all_four_charts(monkeypatch):
-    calls = []
-
-    class Figure:
-        def __init__(self, name):
-            self.name = name
-
-        def _repr_html_(self):
-            return f"<iframe>{self.name}</iframe>"
-
-    monkeypatch.setattr(
-        "citybehavex.reports.comparison._truncated_powerlaw_dataset",
-        lambda values, label: ((1.0, 2.0, 3.0, 4.0), [1.0], [0.5], label),
-    )
-    monkeypatch.setattr(
-        "citybehavex.reports.comparison._daily_location_lognormal_dataset",
-        lambda visits, label: ([1.0], [0.5], 0.6, 0.7, label),
-    )
-    monkeypatch.setattr(
-        "citybehavex.reports.comparison._distance_frequency_dataset",
-        lambda visits, label: ([1.0], [0.5], 1.8, 2.5, label),
-    )
-
-    def truncated(*datasets, **kwargs):
-        calls.append(("truncated", datasets, kwargs))
-        return Figure(kwargs["title"])
-
-    def lognormal(*datasets, **kwargs):
-        calls.append(("lognormal", datasets, kwargs))
-        return Figure("lognormal")
-
-    def distance_frequency(*datasets, **kwargs):
-        calls.append(("distance-frequency", datasets, kwargs))
-        return Figure("distance-frequency")
-
-    monkeypatch.setattr(
-        "citybehavex.reports.comparison.plot_truncated_powerlaw_fits",
-        truncated,
-    )
-    monkeypatch.setattr("citybehavex.reports.comparison.plot_lognormal_fits", lognormal)
-    monkeypatch.setattr(
-        "citybehavex.reports.comparison.plot_distance_frequency_law",
-        distance_frequency,
-    )
-
-    visits = pd.DataFrame({"row": [1, 2]})
-    html = _mobility_laws_section_html(
-        observed_visits=visits,
-        synthetic_visits=visits,
-        observed_jumps=[1.0, 2.0],
-        synthetic_jumps=[2.0, 3.0],
-        observed_rog=[3.0, 4.0],
-        synthetic_rog=[4.0, 5.0],
-        observed_label="survey",
-    )
-
-    assert [call[0] for call in calls] == [
-        "truncated",
-        "truncated",
-        "lognormal",
-        "distance-frequency",
-    ]
-    for _, datasets, _ in calls:
-        assert datasets[0][-1] == "survey"
-        assert datasets[1][-1] == "synthetic"
-    assert calls[1][2]["x_label"] == "radius of gyration · km"
-    assert "Mobility laws" in html
-    assert html.count("<iframe>") == 4
-    assert html.count('class="fit-parameters"') == 4
-    assert "c=1" in html
-    assert "r0=2" in html
-    assert "beta=3" in html
-    assert "kappa=4" in html
-    assert "mu=0.6" in html
-    assert "sigma=0.7" in html
-    assert "eta=1.8" in html
-    assert "mu=2.5" in html
-
-
-def test_mobility_laws_section_skips_only_failed_chart(monkeypatch):
-    class Figure:
-        def _repr_html_(self):
-            return "<iframe>chart</iframe>"
-
-    monkeypatch.setattr(
-        "citybehavex.reports.comparison._truncated_powerlaw_dataset",
-        lambda values, label: ((1.0, 2.0, 3.0, 4.0), [1.0], [0.5], label),
-    )
-    monkeypatch.setattr(
-        "citybehavex.reports.comparison._daily_location_lognormal_dataset",
-        lambda visits, label: ([1.0], [0.5], 0.6, 0.7, label),
-    )
-    monkeypatch.setattr(
-        "citybehavex.reports.comparison._distance_frequency_dataset",
-        lambda visits, label: ([1.0], [0.5], 1.8, 2.5, label),
-    )
-
-    truncated_calls = 0
-
-    def truncated(*datasets, **kwargs):
-        nonlocal truncated_calls
-        truncated_calls += 1
-        if truncated_calls == 1:
-            raise ValueError("insufficient travel distances")
-        return Figure()
-
-    monkeypatch.setattr(
-        "citybehavex.reports.comparison.plot_truncated_powerlaw_fits",
-        truncated,
-    )
-    monkeypatch.setattr(
-        "citybehavex.reports.comparison.plot_lognormal_fits",
-        lambda *datasets, **kwargs: Figure(),
-    )
-    monkeypatch.setattr(
-        "citybehavex.reports.comparison.plot_distance_frequency_law",
-        lambda *datasets, **kwargs: Figure(),
-    )
-
-    visits = pd.DataFrame({"row": [1, 2]})
-    html = _mobility_laws_section_html(
-        observed_visits=visits,
-        synthetic_visits=visits,
-        observed_jumps=[1.0, 2.0],
-        synthetic_jumps=[2.0, 3.0],
-        observed_rog=[3.0, 4.0],
-        synthetic_rog=[4.0, 5.0],
-        observed_label="survey",
-    )
-
-    assert html.count("<iframe>") == 3
-    assert html.count('class="fit-parameters"') == 3
-
-
 def test_activities_sidecar_path_uses_synthetic_stem():
     assert (
         _activities_sidecar_path("data/run/synthetic.parquet")
         == "data/run/synthetic_activities.parquet"
     )
-
-
-def test_micro_activity_daily_usage_figure_uses_catalog_labels():
-    activities = pl.DataFrame(
-        {
-            "uid": [1, 1],
-            "activity": [0, 3],
-            "arrival": pl.Series(["2026-01-01 00:00", "2026-01-01 08:00"]).str.to_datetime(),
-            "departure": pl.Series(["2026-01-01 01:00", "2026-01-01 09:00"]).str.to_datetime(),
-        }
-    )
-
-    fig = _micro_activity_daily_usage_figure(activities)
-
-    trace_names = {trace.name for trace in fig.data}
-    assert "sleep" in trace_names
-    assert "paidwork" in trace_names
-
-
-def test_micro_activity_section_skips_missing_sidecar(capsys, tmp_path):
-    html = _micro_activity_section_html(str(tmp_path / "missing_activities.parquet"))
-
-    assert html == ""
-    assert "micro-activity chart skipped" in capsys.readouterr().err
-
-
-def test_micro_activity_section_skips_empty_sidecar(capsys, tmp_path):
-    path = tmp_path / "empty_activities.parquet"
-    pd.DataFrame(columns=["uid", "activity", "arrival", "departure"]).to_parquet(
-        path,
-        index=False,
-    )
-
-    html = _micro_activity_section_html(str(path))
-
-    assert html == ""
-    assert "activities table is empty" in capsys.readouterr().err
 
 
 def _build_report_fixture(tmp_path):
@@ -742,7 +450,6 @@ def test_generate_comparison_report_writes_json_metrics(tmp_path):
             "ts": [1, 2, 1, 2],
         }
     ).to_parquet(encounters_sidecar_path(synthetic_path), index=False)
-    html_path = tmp_path / "report.html"
     json_path = tmp_path / "metrics.json"
 
     generate_comparison_report(
@@ -750,7 +457,6 @@ def test_generate_comparison_report_writes_json_metrics(tmp_path):
         synthetic_path=str(synthetic_path),
         real_path=real_path,
         observed_label="observed",
-        output_path=str(html_path),
         json_output_path=str(json_path),
         network_validation_config=SimpleNamespace(
             enabled=True,
@@ -764,7 +470,6 @@ def test_generate_comparison_report_writes_json_metrics(tmp_path):
         ),
     )
 
-    assert html_path.exists()
     assert json_path.exists()
     payload = json.loads(json_path.read_text())
     assert set(payload["wasserstein"]) >= {
@@ -814,7 +519,6 @@ def test_generate_comparison_report_adds_transport_spatial_synthetic_only(tmp_pa
             "mode": ["car", "car", "walk", "walk"],
         }
     ).to_parquet(moving_path, index=False)
-    html_path = tmp_path / "report.html"
     json_path = tmp_path / "metrics.json"
 
     generate_comparison_report(
@@ -822,7 +526,6 @@ def test_generate_comparison_report_adds_transport_spatial_synthetic_only(tmp_pa
         synthetic_path=str(synthetic_path),
         real_path=real_path,
         observed_label="observed",
-        output_path=str(html_path),
         json_output_path=str(json_path),
         transport_spatial_config=SimpleNamespace(
             enabled=True,
@@ -839,9 +542,6 @@ def test_generate_comparison_report_adds_transport_spatial_synthetic_only(tmp_pa
     assert modes["car"]["percent"] == pytest.approx(50.0)
     assert modes["walk"]["percent"] == pytest.approx(50.0)
     assert modes["car"]["mean_jump_km"] > 0
-    html = html_path.read_text()
-    assert "Transport-conditioned spatial mobility" in html
-    assert "Trip share by transport mode" in html
 
 
 def test_generate_comparison_report_transport_spatial_observed_custom_columns(tmp_path):
@@ -880,7 +580,6 @@ def test_generate_comparison_report_transport_spatial_observed_custom_columns(tm
         synthetic_path=str(synthetic_path),
         real_path=str(observed_custom_path),
         observed_label="observed",
-        output_path=str(tmp_path / "report.html"),
         json_output_path=str(json_path),
         transport_spatial_config=SimpleNamespace(
             enabled=True,
@@ -916,7 +615,6 @@ def test_generate_comparison_report_transport_spatial_missing_sidecar_warns(tmp_
         synthetic_path=str(synthetic_path),
         real_path=real_path,
         observed_label="observed",
-        output_path=str(tmp_path / "report.html"),
         json_output_path=str(json_path),
         transport_spatial_config=SimpleNamespace(enabled=True, observed_enabled=False),
     )
@@ -967,7 +665,6 @@ def test_generate_comparison_report_uses_road_network_distance_when_provided(tmp
         traj=traj,
         real_path=real_path,
         observed_label="observed",
-        output_path=str(tmp_path / "baseline_report.html"),
         json_output_path=str(baseline_json),
     )
     baseline = json.loads(baseline_json.read_text())["wasserstein"]["jump_lengths_km"]
@@ -977,7 +674,6 @@ def test_generate_comparison_report_uses_road_network_distance_when_provided(tmp
         traj=traj,
         real_path=real_path,
         observed_label="observed",
-        output_path=str(tmp_path / "road_report.html"),
         json_output_path=str(road_json),
         road_nodes_df=road_nodes_df,
         road_edges_df=road_edges_df,
@@ -995,18 +691,17 @@ def test_generate_comparison_report_rejects_unknown_section(tmp_path):
             traj=traj,
             real_path=real_path,
             observed_label="observed",
-            output_path=str(tmp_path / "report.html"),
             sections=["bogus"],
         )
 
 
 def test_generate_comparison_report_sections_skip_expensive_blocks(tmp_path, monkeypatch):
     traj, real_path = _build_report_fixture(tmp_path)
-    html_path = tmp_path / "report.html"
+    json_path = tmp_path / "metrics.json"
 
     import citybehavex.reports.comparison as comparison_module
 
-    called = {"motifs": False, "profiles": False}
+    called = {"motifs": False}
 
     original_discover = comparison_module.discover_daily_motifs_from_agents
 
@@ -1014,27 +709,19 @@ def test_generate_comparison_report_sections_skip_expensive_blocks(tmp_path, mon
         called["motifs"] = True
         return original_discover(*args, **kwargs)
 
-    original_compute_profiles = comparison_module.compute_profiles
-
-    def fake_compute_profiles(*args, **kwargs):
-        called["profiles"] = True
-        return original_compute_profiles(*args, **kwargs)
-
     monkeypatch.setattr(comparison_module, "discover_daily_motifs_from_agents", fake_discover)
-    monkeypatch.setattr(comparison_module, "compute_profiles", fake_compute_profiles)
 
     generate_comparison_report(
         traj=traj,
         real_path=real_path,
         observed_label="observed",
-        output_path=str(html_path),
+        json_output_path=str(json_path),
         sections=["cpc"],
     )
 
     assert not called["motifs"]
-    assert not called["profiles"]
-    html = html_path.read_text()
-    assert "Common Part of Commuters" in html
+    payload = json.loads(json_path.read_text())
+    assert set(payload["cpc"]) == {"h3_7", "h3_8", "h3_9"}
 
 
 def test_all_report_sections_constant_matches_config_validator():

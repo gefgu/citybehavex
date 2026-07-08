@@ -2,8 +2,6 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from datetime import datetime as _dt
-from html import escape
 from pathlib import Path
 from typing import Any, Optional
 
@@ -11,7 +9,6 @@ import h3
 import numpy as np
 import polars as pl
 from citybehavex import _core as _cbx_core
-import plotly.graph_objects as go
 import skmob2
 import typer
 from skmob2 import (
@@ -31,36 +28,13 @@ from skmob2 import (
     waiting_times,
     wasserstein_distance,
 )
-from skmob_vis import (
-    get_resource_bundle,
-    plot_activity_transition_difference,
-    plot_daily_activity_difference,
-    plot_distance_frequency_law,
-    plot_dwell_time_ecdf,
-    plot_jump_lengths_ecdf,
-    plot_lognormal_fits,
-    plot_mobility_profiles,
-    plot_motif_literature_comparison,
-    plot_profile_metrics,
-    plot_radius_of_gyration_ecdf,
-    plot_stvd_comparison,
-    plot_trip_duration_ecdf,
-    plot_truncated_powerlaw_fits,
-    plot_visit_purpose_comparison,
-    plot_visits_frequency_ecdf,
-)
-
 from citybehavex.activities import build_catalog
 from citybehavex.metrics import (
     build_road_network_handle,
     jump_lengths_km as road_jump_lengths_km,
     radius_of_gyration_km as road_radius_of_gyration_km,
 )
-from citybehavex.profiles import PROFILE_METRICS, compute_profiles
-from citybehavex.reports.network_validation import (
-    NETWORK_METRIC_LABELS,
-    build_network_validation,
-)
+from citybehavex.reports.network_validation import build_network_validation
 
 _DATETIME_CANDIDATES = [
     "datetime", "start_timestamp", "timestamp", "check-in_time",
@@ -378,104 +352,6 @@ def _transport_spatial_summary(records: pl.DataFrame) -> dict[str, Any]:
     return summary
 
 
-def _transport_spatial_section_html(records: pl.DataFrame, *, observed_label: str) -> str:
-    if records.is_empty():
-        return ""
-    summary = _transport_spatial_summary(records)
-    sources = ["synthetic"]
-    if "observed" in summary:
-        sources.append("observed")
-    mode_order = sorted(
-        set(records["mode"].to_list()),
-        key=lambda m: (_DEFAULT_MODE_ORDER.index(m) if m in _DEFAULT_MODE_ORDER else 99, m),
-    )
-    source_labels = {"synthetic": "synthetic", "observed": observed_label}
-
-    fig_share = go.Figure()
-    for source in sources:
-        mode_to_percent = {row["mode"]: row["percent"] for row in summary.get(source, {}).get("modes", [])}
-        fig_share.add_trace(
-            go.Bar(
-                name=source_labels[source],
-                x=mode_order,
-                y=[mode_to_percent.get(mode, 0.0) for mode in mode_order],
-                hovertemplate="%{x}<br>%{y:.2f}%<extra></extra>",
-            )
-        )
-    fig_share.update_layout(
-        title="Trip share by transport mode",
-        template="plotly_white",
-        barmode="group",
-        yaxis_title="% of trips",
-        xaxis_title="Transport mode",
-        margin=dict(l=48, r=20, t=56, b=48),
-        width=640,
-        height=420,
-    )
-
-    fig_ecdf = go.Figure()
-    for source in sources:
-        source_df = records.filter(pl.col("source") == source)
-        for mode in mode_order:
-            values = np.sort(source_df.filter(pl.col("mode") == mode)["jump_km"].to_numpy())
-            if len(values) == 0:
-                continue
-            y = np.arange(1, len(values) + 1, dtype=float) / len(values)
-            fig_ecdf.add_trace(
-                go.Scatter(
-                    x=values,
-                    y=y,
-                    mode="lines",
-                    name=f"{source_labels[source]} · {mode}",
-                    hovertemplate="%{x:.3f} km<br>%{y:.2%}<extra></extra>",
-                )
-            )
-    fig_ecdf.update_layout(
-        title="Jump length ECDF by transport mode",
-        template="plotly_white",
-        xaxis_title="Jump length (km)",
-        yaxis_title="ECDF",
-        margin=dict(l=48, r=20, t=56, b=48),
-        width=640,
-        height=420,
-    )
-
-    rows = []
-    for source in sources:
-        for row in summary.get(source, {}).get("modes", []):
-            duration = row["mean_duration_min"]
-            duration_text = f"{duration:.2f}" if duration is not None else "n/a"
-            rows.append(
-                "<tr>"
-                f"<td>{escape(source_labels[source])}</td>"
-                f"<td>{escape(row['mode'])}</td>"
-                f"<td>{row['count']}</td>"
-                f"<td>{row['percent']:.2f}%</td>"
-                f"<td>{row['mean_jump_km']:.4f}</td>"
-                f"<td>{duration_text}</td>"
-                "</tr>"
-            )
-    table = f"""
-  <div class="metrics">
-    <div>
-      <h2>Transport spatial mobility</h2>
-      <table>
-        <tr><td>source</td><td>mode</td><td>trips</td><td>share</td><td>mean jump km</td><td>mean duration min</td></tr>
-        {"".join(rows)}
-      </table>
-    </div>
-  </div>"""
-    charts = (
-        fig_share.to_html(full_html=False, include_plotlyjs=True)
-        + fig_ecdf.to_html(full_html=False, include_plotlyjs=False)
-    )
-    return f"""
-  <div class="section-header">
-    <span>Transport-conditioned spatial mobility</span>
-  </div>{table}
-  <div class="charts">{charts}</div>"""
-
-
 def _trajectory_od_matrix(
     df: pl.DataFrame,
     *,
@@ -525,151 +401,6 @@ def _common_part_of_commuters(
     resolutions: tuple[int, ...] = CPC_H3_RESOLUTIONS,
 ) -> list[tuple[int, float]]:
     return trajectory_common_part_of_commuters_multi(traj, real_traj, resolutions=resolutions)
-
-
-def _metrics_section_html(
-    wasserstein_rows: list[tuple[str, str, str]],
-    jsd_rows: list[tuple[str, str, str]],
-    cpc_rows: list[tuple[int, float]],
-) -> str:
-    def table_rows(rows: list[tuple[str, str, str]]) -> str:
-        return "".join(
-            f"<tr><td>{name}</td><td>{value}</td><td>{unit}</td></tr>"
-            for name, value, unit in rows
-        )
-
-    cpc_table_rows = "".join(
-        f"<tr><td>H3 {resolution}</td><td>{value:.4f}</td><td></td></tr>"
-        for resolution, value in cpc_rows
-    )
-    return f"""
-  <div class="metrics">
-    <div>
-      <h2>Wasserstein distances</h2>
-      <table>{table_rows(wasserstein_rows)}</table>
-    </div>
-    <div>
-      <h2>Jensen-Shannon divergences</h2>
-      <table>{table_rows(jsd_rows)}</table>
-    </div>
-    <div>
-      <h2>Common Part of Commuters</h2>
-      <table>{cpc_table_rows}</table>
-    </div>
-  </div>"""
-
-
-def _plot_network_block(block: dict, *, title: str) -> go.Figure:
-    nodes = block.get("nodes", [])
-    edges = block.get("edges", [])
-    x = [float(row[0]) for row in nodes if isinstance(row, list) and len(row) >= 2]
-    y = [float(row[1]) for row in nodes if isinstance(row, list) and len(row) >= 2]
-    degree = block.get("degrees") or [0] * len(x)
-
-    edge_x: list[float | None] = []
-    edge_y: list[float | None] = []
-    for row in edges:
-        if not isinstance(row, list) or len(row) < 2:
-            continue
-        source, target = int(row[0]), int(row[1])
-        if source >= len(nodes) or target >= len(nodes):
-            continue
-        edge_x.extend([float(nodes[source][0]), float(nodes[target][0]), None])
-        edge_y.extend([float(nodes[source][1]), float(nodes[target][1]), None])
-
-    fig = go.Figure()
-    fig.add_trace(
-        go.Scatter(
-            x=edge_x,
-            y=edge_y,
-            mode="lines",
-            line=dict(width=0.6, color="rgba(20,17,13,0.18)"),
-            hoverinfo="skip",
-            showlegend=False,
-        )
-    )
-    fig.add_trace(
-        go.Scatter(
-            x=x,
-            y=y,
-            mode="markers",
-            marker=dict(
-                size=[float(row[2]) if isinstance(row, list) and len(row) > 2 else 5 for row in nodes],
-                color=degree,
-                colorscale="Viridis",
-                showscale=True,
-                colorbar=dict(title="degree"),
-                line=dict(width=0),
-            ),
-            text=[f"agent {row[3]}<br>degree {degree[i] if i < len(degree) else 0}" for i, row in enumerate(nodes)],
-            hoverinfo="text",
-            showlegend=False,
-        )
-    )
-    fig.update_layout(
-        title=title,
-        template="plotly_white",
-        margin=dict(l=20, r=20, t=44, b=20),
-        xaxis=dict(visible=False),
-        yaxis=dict(visible=False, scaleanchor="x", scaleratio=1),
-        width=640,
-        height=480,
-    )
-    return fig
-
-
-def _network_validation_section_html(network_validation: Optional[dict]) -> str:
-    if not network_validation:
-        return ""
-    sections: list[str] = []
-    titles = {
-        "synthetic_vs_random": ("Synthetic vs random", "Synthetic social + encounters"),
-        "observed_vs_random": ("Observed vs random", "Observed daily co-presence"),
-    }
-    for block_key, block in network_validation.items():
-        if not isinstance(block, dict):
-            continue
-        table_title, source_title = titles.get(block_key, (block_key.replace("_", " "), "Source network"))
-        rows = []
-        for key, label in NETWORK_METRIC_LABELS.items():
-            value = block.get("wasserstein", {}).get(key)
-            rows.append(
-                f"<tr><td>{label}</td><td>{value:.4f}</td><td></td></tr>"
-                if value is not None
-                else f"<tr><td>{label}</td><td>n/a</td><td></td></tr>"
-            )
-        source_network = block.get("source_network")
-        random_network = block.get("random_network")
-        source_plot = (
-            _plot_network_block(source_network, title=source_title).to_html(
-                full_html=False,
-                include_plotlyjs=True,
-            )
-            if isinstance(source_network, dict)
-            else ""
-        )
-        random_plot = (
-            _plot_network_block(random_network, title="Degree-preserving random network").to_html(
-                full_html=False,
-                include_plotlyjs=True,
-            )
-            if isinstance(random_network, dict)
-            else ""
-        )
-        sections.append(
-            f"""
-  <div class="section-header">
-    <span>Random network validation &mdash; {table_title}</span>
-  </div>
-  <div class="metrics">
-    <div>
-      <h2>{table_title} Wasserstein</h2>
-      <table>{"".join(rows)}</table>
-    </div>
-  </div>
-  <div class="charts">{source_plot}{random_plot}</div>"""
-        )
-    return "".join(sections)
 
 
 _H3_INVALID_CELL = np.uint64(2**64 - 1)
@@ -1015,9 +746,8 @@ def _compute_stvd_layers(
 ) -> dict[int, dict]:
     """Compute per-H3-zone volume diff and peak shift for the STVD
     visualisation -- thin composition of ``_stvd_hourly_histogram`` (tier-1)
-    and ``_diff_stvd_layers`` (tier-2), kept as a single call for the
-    standalone HTML report path (``generate_comparison_report``), which has
-    no per-filter-group caching need.
+    and ``_diff_stvd_layers`` (tier-2), kept as a single call for JSON/export
+    callers that do not need per-filter-group caching.
     """
     syn_hourly = _stvd_hourly_histogram(
         traj.df,
@@ -1061,94 +791,9 @@ def _motif_distribution_jsd(
     )
 
 
-def _activity_comparison_section_html(
-    observed_visits: Optional[pl.DataFrame],
-    synthetic_visits: Optional[pl.DataFrame],
-    observed_label: str,
-    warnings: Optional[list[str]] = None,
-) -> str:
-    if observed_visits is None or synthetic_visits is None:
-        return ""
-
-    labels = (observed_label, "synthetic")
-    charts_html = (
-        plot_visit_purpose_comparison(
-            {
-                observed_label: observed_visits,
-                "synthetic": synthetic_visits,
-            },
-            bundle_libs=False,
-        )._repr_html_()
-        + plot_activity_transition_difference(
-            observed_visits,
-            synthetic_visits,
-            labels=labels,
-            bundle_libs=False,
-        )._repr_html_()
-        + plot_daily_activity_difference(
-            observed_visits,
-            synthetic_visits,
-            labels=labels,
-            bundle_libs=False,
-        )._repr_html_()
-    )
-    warning_html = _activity_warning_html(warnings or [])
-    return f"""
-  <div class="section-header">
-    <span>Activity comparison &mdash; {observed_label} vs synthetic</span>
-  </div>
-  {warning_html}
-  <div class="charts">{charts_html}</div>"""
-
-
-def _activity_warning_html(warnings: list[str]) -> str:
-    if not warnings:
-        return ""
-    items = "".join(f"<li>{escape(message)}</li>" for message in warnings)
-    return f"""
-  <div class="report-warning">
-    <strong>Purpose heuristic warning</strong>
-    <ul>{items}</ul>
-  </div>"""
-
-
 def _activities_sidecar_path(synthetic_path: str) -> str:
     path = Path(synthetic_path)
     return str(path.with_name(f"{path.stem}_activities{path.suffix}"))
-
-
-def _micro_activity_daily_usage_figure(
-    activities: pl.DataFrame,
-    *,
-    bin_size_minutes: int = 10,
-) -> go.Figure:
-    usage = _micro_activity_daily_usage_data(
-        activities,
-        bin_size_minutes=bin_size_minutes,
-    )
-    fig = go.Figure()
-    for series in usage["series"]:
-        fig.add_trace(
-            go.Scatter(
-                x=usage["x"],
-                y=series["values"],
-                mode="lines",
-                stackgroup="micro_activity_usage",
-                name=series["name"],
-            )
-        )
-    fig.update_layout(
-        title="Synthetic micro-activity mean daily usage",
-        xaxis_title="Time of day",
-        yaxis_title="Share of synthetic micro-activity time (%)",
-        hovermode="x unified",
-        template="plotly_white",
-        legend_title_text="Micro-activity",
-        height=460,
-        margin=dict(l=48, r=24, t=64, b=48),
-    )
-    fig.update_xaxes(tickmode="array", tickvals=usage["x"][::6], tickangle=0)
-    return fig
 
 
 def _micro_activity_daily_usage_data(
@@ -1230,29 +875,6 @@ def _micro_activity_daily_usage_data(
             for activity_id in activity_ids
         ],
     }
-
-
-def _micro_activity_section_html(activities_path: Optional[str]) -> str:
-    if not activities_path:
-        return ""
-    path = Path(activities_path)
-    if not path.exists():
-        typer.echo(f"Warning: micro-activity chart skipped: {path} not found", err=True)
-        return ""
-    try:
-        activities = pl.read_parquet(path)
-        if activities.is_empty():
-            raise ValueError("activities table is empty")
-        fig = _micro_activity_daily_usage_figure(activities)
-    except Exception as exc:
-        typer.echo(f"Warning: micro-activity chart skipped: {exc}", err=True)
-        return ""
-
-    return f"""
-  <div class="section-header">
-    <span>Synthetic micro-activity usage</span>
-  </div>
-  <div class="charts">{fig.to_html(full_html=False, include_plotlyjs=True)}</div>"""
 
 
 def _mobility_law_visits(
@@ -1375,139 +997,6 @@ def _distance_frequency_dataset(
     return rf_points, rho_points, eta, mu, label
 
 
-def _fit_parameters_html(
-    formula: str,
-    rows: list[tuple[str, list[tuple[str, float]]]],
-) -> str:
-    parameter_rows = "".join(
-        "<tr>"
-        f"<td>{label}</td>"
-        f"<td>{', '.join(f'{name}={value:.4g}' for name, value in parameters)}</td>"
-        "</tr>"
-        for label, parameters in rows
-    )
-    return f"""
-    <div class="fit-parameters">
-      <div class="fit-formula">{formula}</div>
-      <table>{parameter_rows}</table>
-    </div>"""
-
-
-def _mobility_laws_section_html(
-    *,
-    observed_visits: pl.DataFrame,
-    synthetic_visits: pl.DataFrame,
-    observed_jumps: list | np.ndarray,
-    synthetic_jumps: list | np.ndarray,
-    observed_rog: list | np.ndarray,
-    synthetic_rog: list | np.ndarray,
-    observed_label: str,
-) -> str:
-    chart_html: list[str] = []
-
-    def render(name: str, build_chart) -> None:
-        try:
-            figure, parameters_html = build_chart()
-            chart_html.append(
-                '<div class="mobility-law-chart">'
-                f"{figure._repr_html_()}{parameters_html}"
-                "</div>"
-            )
-        except (RuntimeError, TypeError, ValueError) as exc:
-            typer.echo(f"Warning: {name} mobility-law chart skipped: {exc}", err=True)
-
-    def truncated_powerlaw_chart(values_observed, values_synthetic, **plot_kwargs):
-        observed = _truncated_powerlaw_dataset(values_observed, observed_label)
-        synthetic = _truncated_powerlaw_dataset(values_synthetic, "synthetic")
-        figure = plot_truncated_powerlaw_fits(
-            observed,
-            synthetic,
-            bundle_libs=False,
-            **plot_kwargs,
-        )
-        return figure, _fit_parameters_html(
-            "p(x) = c (x + r0)<sup>-beta</sup> exp(-x / kappa)",
-            [
-                (
-                    observed[3],
-                    list(zip(("c", "r0", "beta", "kappa"), observed[0])),
-                ),
-                (
-                    synthetic[3],
-                    list(zip(("c", "r0", "beta", "kappa"), synthetic[0])),
-                ),
-            ],
-        )
-
-    render(
-        "travel-distance",
-        lambda: truncated_powerlaw_chart(
-            observed_jumps,
-            synthetic_jumps,
-            title="Travel-distance mobility law",
-        ),
-    )
-    render(
-        "radius-of-gyration",
-        lambda: truncated_powerlaw_chart(
-            observed_rog,
-            synthetic_rog,
-            title="Radius-of-gyration mobility law",
-            x_label="radius of gyration · km",
-            y_label="P(r_g)",
-        ),
-    )
-
-    def lognormal_chart():
-        observed = _daily_location_lognormal_dataset(
-            observed_visits,
-            observed_label,
-        )
-        synthetic = _daily_location_lognormal_dataset(
-            synthetic_visits,
-            "synthetic",
-        )
-        figure = plot_lognormal_fits(observed, synthetic, bundle_libs=False)
-        return figure, _fit_parameters_html(
-            "f(N) = exp(-(ln N - mu)<sup>2</sup> / (2 sigma<sup>2</sup>)) "
-            "/ (N sigma sqrt(2 pi))",
-            [
-                (observed[4], [("mu", observed[2]), ("sigma", observed[3])]),
-                (synthetic[4], [("mu", synthetic[2]), ("sigma", synthetic[3])]),
-            ],
-        )
-
-    render(
-        "daily-locations log-normal",
-        lognormal_chart,
-    )
-
-    def distance_frequency_chart():
-        observed = _distance_frequency_dataset(observed_visits, observed_label)
-        synthetic = _distance_frequency_dataset(synthetic_visits, "synthetic")
-        figure = plot_distance_frequency_law(observed, synthetic, bundle_libs=False)
-        return figure, _fit_parameters_html(
-            "rho(r, f) = mu (r f)<sup>-eta</sup>",
-            [
-                (observed[4], [("eta", observed[2]), ("mu", observed[3])]),
-                (synthetic[4], [("eta", synthetic[2]), ("mu", synthetic[3])]),
-            ],
-        )
-
-    render(
-        "distance-frequency",
-        distance_frequency_chart,
-    )
-
-    if not chart_html:
-        return ""
-    return f"""
-  <div class="section-header">
-    <span>Mobility laws &mdash; {observed_label} vs synthetic</span>
-  </div>
-  <div class="charts mobility-law-charts">{"".join(chart_html)}</div>"""
-
-
 def load_trajectory(path: str) -> skmob2.TrajDataFrame:
     df = pl.read_parquet(path)
     datetime_col = detect_column(df, _DATETIME_CANDIDATES)
@@ -1541,7 +1030,6 @@ def generate_comparison_report_from_paths(
     synthetic_path: str,
     real_path: str,
     observed_label: str,
-    output_path: str,
     json_output_path: Optional[str] = None,
     sections: Optional[list[str]] = None,
 ) -> None:
@@ -1553,7 +1041,6 @@ def generate_comparison_report_from_paths(
         synthetic_path=synthetic_path,
         real_path=real_path,
         observed_label=observed_label,
-        output_path=output_path,
         synth_activity_col=synth_activity_col,
         synthetic_activities_path=_activities_sidecar_path(synthetic_path),
         json_output_path=json_output_path,
@@ -1565,7 +1052,6 @@ def generate_comparison_report(
     traj: skmob2.TrajDataFrame,
     real_path: str,
     observed_label: str,
-    output_path: str,
     synthetic_path: Optional[str] = None,
     synth_activity_col: Optional[str] = None,
     synthetic_activities_path: Optional[str] = None,
@@ -1655,10 +1141,21 @@ def generate_comparison_report(
         datetime_col=traj.datetime_col,
     )
     synth_visits = synth_stays[traj.uid_col].value_counts()["count"].to_list()
-    real_visits = real_traj.df[real_traj.uid_col].value_counts()["count"].to_list()
+    # Real check-in-style datasets can have many consecutive rows at the same
+    # location (repeated pings/check-ins without leaving); collapse them into
+    # stay episodes the same way the synthetic side is collapsed, so both
+    # sides count distinct visits rather than raw row density.
+    real_stays = _collapse_to_stays(
+        real_df,
+        uid_col=real_traj.uid_col,
+        lat_col=real_traj.lat_col,
+        lng_col=real_traj.lng_col,
+        datetime_col=real_traj.datetime_col,
+    )
+    real_visits = real_stays[real_traj.uid_col].value_counts()["count"].to_list()
     w_visits, _ = visits_per_user_wasserstein_distance(
         synth_stays,
-        real_df,
+        real_stays,
         user_id_col1=traj.uid_col,
         user_id_col2=real_traj.uid_col,
     )
@@ -1859,82 +1356,6 @@ def generate_comparison_report(
             )
         )
 
-    typer.echo("Rendering distribution charts ...")
-    fig_jump = plot_jump_lengths_ecdf(synth_jumps, real_jumps, labels=labels, bundle_libs=False)
-    fig_visits = plot_visits_frequency_ecdf(synth_visits, real_visits, labels=labels, bundle_libs=False)
-    fig_rog = plot_radius_of_gyration_ecdf(synth_rog, real_rog, labels=labels, bundle_libs=False)
-    fig_dwell = plot_dwell_time_ecdf(synth_dwell, real_dwell, labels=labels, bundle_libs=False)
-    fig_trip = (
-        plot_trip_duration_ecdf(synth_trip, real_trip, labels=labels, bundle_libs=False)
-        if real_trip is not None
-        else None
-    )
-
-    ecdf_charts_html = "".join(
-        f._repr_html_()
-        for f in [fig_jump, fig_visits, fig_rog, fig_dwell]
-    )
-    if fig_trip:
-        ecdf_charts_html += fig_trip._repr_html_()
-
-    if "mobility_laws" in enabled_sections:
-        typer.echo("Rendering mobility-law charts ...")
-        real_location_col = detect_column(real_df, _LOCATION_CANDIDATES)
-        real_activity_col = detect_column(real_df, _ACTIVITY_CANDIDATES)
-        mobility_observed_visits = _mobility_law_visits(
-            real_df,
-            uid_col=real_traj.uid_col,
-            datetime_col=real_traj.datetime_col,
-            lat_col=real_traj.lat_col,
-            lng_col=real_traj.lng_col,
-            location_col=real_location_col,
-            activity_col=real_activity_col,
-        )
-        mobility_synthetic_visits = _mobility_law_visits(
-            traj.df,
-            uid_col=traj.uid_col,
-            datetime_col=traj.datetime_col,
-            lat_col=traj.lat_col,
-            lng_col=traj.lng_col,
-            location_col=synth_location_col,
-            activity_col=(
-                synth_activity_col
-                if synth_activity_col and synth_activity_col in traj.df.columns
-                else None
-            ),
-        )
-        mobility_laws_section_html = _mobility_laws_section_html(
-            observed_visits=mobility_observed_visits,
-            synthetic_visits=mobility_synthetic_visits,
-            observed_jumps=real_jumps,
-            synthetic_jumps=synth_jumps,
-            observed_rog=real_rog,
-            synthetic_rog=synth_rog,
-            observed_label=observed_label,
-        )
-    else:
-        mobility_laws_section_html = ""
-
-    if "activity_comparison" in enabled_sections:
-        if observed_visits is not None and synthetic_visits is not None:
-            typer.echo(
-                f"Rendering activity comparison for {observed_label} and synthetic trajectories ..."
-            )
-        activity_section_html = _activity_comparison_section_html(
-            observed_visits,
-            synthetic_visits,
-            observed_label,
-            activity_warnings,
-        )
-    else:
-        activity_section_html = ""
-
-    if "micro_activity" in enabled_sections:
-        micro_activity_section_html = _micro_activity_section_html(synthetic_activities_path)
-    else:
-        micro_activity_section_html = ""
-
-    motif_section_html = ""
     if "motifs" in enabled_sections:
         try:
             if observed_visits is not None:
@@ -1971,67 +1392,9 @@ def generate_comparison_report(
                             "",
                         )
                     )
-
-            if real_motif_dist is not None or synth_motif_dist is not None:
-                fig_motif = plot_motif_literature_comparison(
-                    reference_distribution=real_motif_dist,
-                    comparison_distribution=synth_motif_dist,
-                    labels=(observed_label, "synthetic"),
-                    bundle_libs=False,
-                )
-                motif_section_html = f"""
-  <div class="section-header">
-    <span>Motif comparison &mdash; literature vs {observed_label}{" vs synthetic" if synth_motif_dist is not None else ""}</span>
-  </div>
-  <div class="charts">{fig_motif._repr_html_()}</div>"""
         except Exception as exc:
-            typer.echo(f"Warning: motif chart skipped: {exc}", err=True)
+            typer.echo(f"Warning: motif metrics skipped: {exc}", err=True)
 
-    stvd_section_html = ""
-    if "stvd" in enabled_sections and traj.lat_col and traj.lng_col and real_traj.lat_col and real_traj.lng_col:
-        try:
-            typer.echo("Rendering STVD map ...")
-            stvd_layers = _compute_stvd_layers(traj, real_traj, resolutions=[7, 9])
-            fig_stvd = plot_stvd_comparison(
-                stvd_layers,
-                title=f"STVD — {observed_label} vs synthetic",
-                bundle_libs=False,
-            )
-            stvd_section_html = f"""
-  <div class="section-header">
-    <span>Spatial-temporal volume difference &mdash; {observed_label} vs synthetic</span>
-  </div>
-  <div class="charts stvd-section">{fig_stvd._repr_html_()}</div>"""
-        except Exception as exc:
-            typer.echo(f"Warning: STVD chart skipped: {exc}", err=True)
-
-    profiles_section_html = ""
-    if "mobility_profiles" in enabled_sections and observed_visits is not None and synthetic_visits is not None:
-        try:
-            typer.echo("Rendering mobility profiles ...")
-            obs_profiles = compute_profiles(observed_visits)
-            synth_profiles = compute_profiles(synthetic_visits)
-            fig_profiles_obs = plot_mobility_profiles(
-                obs_profiles, title=observed_label, bundle_libs=False
-            )
-            fig_profiles_synth = plot_mobility_profiles(
-                synth_profiles, title="synthetic", bundle_libs=False
-            )
-            fig_profile_metrics = plot_profile_metrics(
-                {"synthetic": synth_profiles, observed_label: obs_profiles},
-                metrics=PROFILE_METRICS,
-                bundle_libs=False,
-            )
-            profiles_section_html = f"""
-  <div class="section-header">
-    <span>Mobility profiles &mdash; {observed_label} vs synthetic</span>
-  </div>
-  <div class="charts">{fig_profiles_obs._repr_html_()}{fig_profiles_synth._repr_html_()}</div>
-  <div class="charts">{fig_profile_metrics._repr_html_()}</div>"""
-        except Exception as exc:
-            typer.echo(f"Warning: mobility profiles skipped: {exc}", err=True)
-
-    transport_spatial_section_html = ""
     transport_cfg = transport_spatial_config
     if bool(getattr(transport_cfg, "enabled", True)):
         synthetic_moving_path = getattr(transport_cfg, "synthetic_moving_path", None)
@@ -2084,10 +1447,6 @@ def generate_comparison_report(
                     transport_summary = _transport_spatial_summary(transport_records)
                     if transport_summary:
                         metrics["transport_spatial"] = transport_summary
-                        transport_spatial_section_html = _transport_spatial_section_html(
-                            transport_records,
-                            observed_label=observed_label,
-                        )
             except Exception as exc:
                 typer.echo(f"Warning: transport spatial mobility skipped: {exc}", err=True)
 
@@ -2100,60 +1459,11 @@ def generate_comparison_report(
     if w_trip is not None:
         w_rows.append(("Trip duration (car)", f"{w_trip:.4f}", "min"))
 
-    metrics_html = _metrics_section_html(w_rows, js_rows, cpc_rows)
-    network_validation_section_html = _network_validation_section_html(network_validation)
-    generated_at = _dt.now().strftime("%Y-%m-%d %H:%M")
-    resource_bundle = get_resource_bundle(echarts=True, leaflet=True)
-    full_html = f"""<!doctype html>
-<html>
-<head>
-  <meta charset="utf-8">
-  <title>CityBehavEx Comparison Report</title>
-  {resource_bundle}
-  <style>
-    html,body{{margin:0;padding:0;background:#fbf8f1;color:#14110d;font-family:sans-serif;}}
-    .header{{padding:32px 32px 24px;border-bottom:1px solid #dcd5c4;}}
-    .header h1{{margin:0;font-size:20px;font-weight:600;}}
-    .header p{{margin:6px 0 0;font-size:13px;color:#6b5e4c;}}
-    .section-header{{padding:20px 32px 0;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.1em;color:#6b5e4c;}}
-    .charts{{display:flex;flex-wrap:wrap;padding:24px;gap:24px;}}
-    .charts iframe{{flex:1 1 580px;border:0;min-height:420px;}}
-    .charts .skmob-vis-widget{{min-height:420px;}}
-    .mobility-law-chart{{flex:1 1 580px;min-width:0;}}
-    .mobility-law-chart iframe{{width:100%;}}
-    .stvd-section .skmob-vis-widget{{min-height:600px;}}
-    .fit-parameters{{margin:8px 12px 0;padding:12px 16px;border:1px solid #dcd5c4;background:#fffdf8;font-family:monospace;font-size:12px;}}
-    .fit-formula{{margin-bottom:8px;color:#6b5e4c;}}
-    .fit-parameters table{{border-collapse:collapse;}}
-    .fit-parameters td{{padding:2px 18px 2px 0;}}
-    .fit-parameters td:first-child{{font-weight:600;}}
-    .report-warning{{margin:16px 32px 0;padding:12px 16px;border:1px solid #d5a33d;background:#fff7df;color:#4b3511;font-size:13px;}}
-    .report-warning strong{{display:block;margin-bottom:6px;}}
-    .report-warning ul{{margin:0;padding-left:18px;}}
-    .metrics{{display:flex;flex-wrap:wrap;gap:64px;padding:24px 32px 32px;border-bottom:1px solid #dcd5c4;}}
-    .metrics h2{{margin:0 0 14px;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.1em;color:#6b5e4c;}}
-    .metrics table{{border-collapse:collapse;font-family:monospace;font-size:13px;}}
-    .metrics td{{padding:3px 20px 3px 0;}}
-  </style>
-</head>
-<body>
-  <div class="header">
-    <h1>synthetic &nbsp;vs&nbsp; {observed_label}</h1>
-    <p>Generated {generated_at}</p>
-  </div>{metrics_html}
-  <div class="section-header">Distribution comparisons</div>
-  <div class="charts">{ecdf_charts_html}</div>{network_validation_section_html}{transport_spatial_section_html}{mobility_laws_section_html}{activity_section_html}{micro_activity_section_html}{profiles_section_html}{motif_section_html}{stvd_section_html}
-</body>
-</html>
-"""
-    output = Path(output_path)
-    output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text(full_html, encoding="utf-8")
     summary = "  ".join(f"{n}: {v}" for n, v, _ in w_rows)
-    typer.echo(f"Comparison report -> {output_path}  ({summary})")
-
     if json_output_path:
         json_out = Path(json_output_path)
         json_out.parent.mkdir(parents=True, exist_ok=True)
         json_out.write_text(json.dumps(metrics, indent=2), encoding="utf-8")
-        typer.echo(f"Comparison metrics -> {json_output_path}")
+        typer.echo(f"Comparison metrics -> {json_output_path}  ({summary})")
+    else:
+        typer.echo(f"Comparison metrics computed  ({summary})")

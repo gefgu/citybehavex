@@ -538,6 +538,7 @@ def test_build_chart_base_payload_returns_only_all_filter(monkeypatch, tmp_path)
     assert payload["enabled_sections"] == [
         "distributions",
         "metrics",
+        "transport-spatial",
         "activity",
         "mobility-laws",
         "micro-activity",

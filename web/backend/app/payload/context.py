@@ -4,9 +4,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
+from types import SimpleNamespace
+from typing import Any, Optional
 
-ARTIFACT_SCHEMA_VERSION = "v2"
+ARTIFACT_SCHEMA_VERSION = "v3"
 
 
 def path_mtime(path: str | Path | None) -> int | str:
@@ -14,6 +15,22 @@ def path_mtime(path: str | Path | None) -> int | str:
         return "none"
     p = Path(path)
     return int(p.stat().st_mtime) if p.exists() else "missing"
+
+
+def _hashable_config(value: Any) -> Any:
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if hasattr(value, "model_dump"):
+        return _hashable_config(value.model_dump())
+    if isinstance(value, SimpleNamespace):
+        return _hashable_config(vars(value))
+    if isinstance(value, dict):
+        return tuple(sorted((str(k), _hashable_config(v)) for k, v in value.items()))
+    if isinstance(value, (list, tuple)):
+        return tuple(_hashable_config(v) for v in value)
+    if isinstance(value, set):
+        return tuple(sorted(_hashable_config(v) for v in value))
+    return repr(value)
 
 
 @dataclass(frozen=True)
@@ -27,6 +44,7 @@ class ComparisonContext:
     time_use_country: Optional[str] = None
     time_use_survey: Optional[int] = None
     time_use_weight_col: str = "propwt"
+    transport_spatial_config: object | None = None
     special_days: tuple[tuple[str, str, str], ...] = ()
 
     @classmethod
@@ -42,6 +60,7 @@ class ComparisonContext:
         time_use_country: Optional[str] = None,
         time_use_survey: Optional[int] = None,
         time_use_weight_col: str = "propwt",
+        transport_spatial_config: object | None = None,
         special_days: Optional[list[dict[str, str]]] = None,
     ) -> "ComparisonContext":
         return cls(
@@ -54,6 +73,7 @@ class ComparisonContext:
             time_use_country=time_use_country,
             time_use_survey=time_use_survey,
             time_use_weight_col=time_use_weight_col,
+            transport_spatial_config=transport_spatial_config,
             special_days=tuple(
                 (sd["name"], sd["start_date"], sd["end_date"]) for sd in (special_days or [])
             ),
@@ -82,6 +102,7 @@ class ComparisonContext:
             self.time_use_country,
             self.time_use_survey,
             self.time_use_weight_col,
+            _hashable_config(self.transport_spatial_config),
             self.special_days,
             filter_key,
         )

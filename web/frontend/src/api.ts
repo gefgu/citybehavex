@@ -548,6 +548,18 @@ export interface SocialNetworkBlock {
   edges_sampled?: boolean;
   degrees?: number[];
 }
+export interface TransportSpatialModeSummary {
+  mode: string;
+  count: number;
+  percent: number;
+  mean_jump_km: number | null;
+  mean_duration_min: number | null;
+}
+export interface TransportSpatialBlock {
+  summary: Record<string, { total_trips: number; modes: TransportSpatialModeSummary[] }>;
+  share: { categories: string[]; series: BarSeries[] };
+  jump_ecdf: EcdfBlock;
+}
 export interface NetworkMetricSummary {
   count: number;
   mean: number | null;
@@ -593,6 +605,7 @@ export interface ChartPayload {
     stvd: { filter_key: string; filter_label: string; metric_name: string; name?: string; resolution: number; value: number; unit?: string }[];
   };
   ecdf: { groups: FilteredBlockMap<EcdfBlock>[] };
+  transport_spatial: TransportSpatialBlock | null;
   mobility_laws: { groups: FilteredBlockMap<LawBlock>[] } | null;
   activity: { groups: FilteredActivityBlock[] } | null;
   micro_activity_usage: { groups: FilteredSingleBlock<MicroActivityUsageBlock>[] } | null;
