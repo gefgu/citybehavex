@@ -8,6 +8,7 @@ from citybehavex.llm import LLMConfig
 from citybehavex.llm_diaries import DiariesConfig
 from citybehavex.activities.config import ActivitiesConfig
 from citybehavex.profiles.config import AgentProfilesConfig
+from citybehavex.reports.config import ComparisonConfig
 from citybehavex.schedules import ScheduleConfig
 from citybehavex.simulation import SimulationConfig
 from citybehavex.social.config import SocialNetworkConfig
@@ -117,6 +118,34 @@ def test_activity_alignment_config_defaults_to_disabled_rerank():
     assert config.alignment_backend == "none"
     assert config.alignment_base_url is None
     assert config.profile_cluster_similarity_threshold == 0.94
+
+
+def test_transport_spatial_config_defaults_to_synthetic_only():
+    config = ComparisonConfig()
+
+    assert config.transport_spatial.enabled is True
+    assert config.transport_spatial.observed_enabled is False
+    assert config.transport_spatial.synthetic_moving_path is None
+    assert config.transport_spatial.mode_map == {}
+
+
+def test_transport_spatial_config_accepts_custom_observed_columns_and_mode_map():
+    config = ComparisonConfig(
+        transport_spatial={
+            "observed_enabled": True,
+            "uid_col": "person",
+            "datetime_col": "started_at",
+            "lat_col": "y",
+            "lng_col": "x",
+            "transport_col": "travel_kind",
+            "mode_map": {"metro": "rail", "auto": "car"},
+        }
+    )
+
+    assert config.transport_spatial.observed_enabled is True
+    assert config.transport_spatial.uid_col == "person"
+    assert config.transport_spatial.transport_col == "travel_kind"
+    assert config.transport_spatial.mode_map == {"metro": "rail", "auto": "car"}
 
 
 def test_profiles_default_to_poi_building_location_inference():

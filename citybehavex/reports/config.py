@@ -21,6 +21,20 @@ class NetworkValidationConfig(BaseModel):
     random_seed: int = 42
 
 
+class TransportSpatialConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = True
+    observed_enabled: bool = False
+    synthetic_moving_path: Optional[str] = None
+    uid_col: Optional[str] = None
+    datetime_col: Optional[str] = None
+    lat_col: Optional[str] = None
+    lng_col: Optional[str] = None
+    transport_col: Optional[str] = None
+    mode_map: dict[str, str] = Field(default_factory=dict)
+
+
 class ComparisonConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -45,6 +59,7 @@ class ComparisonConfig(BaseModel):
     # keep the live web comparison responsive.
     road_network_distance: bool = True
     network_validation: NetworkValidationConfig = Field(default_factory=NetworkValidationConfig)
+    transport_spatial: TransportSpatialConfig = Field(default_factory=TransportSpatialConfig)
 
     @field_validator("sections")
     @classmethod

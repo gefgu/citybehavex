@@ -791,6 +791,141 @@ def test_generate_comparison_report_writes_json_metrics(tmp_path):
     assert payload["network_validation"]["observed_vs_random"]["distributions"]["observed"]["edge_persistence"]["count"] > 0
 
 
+def test_generate_comparison_report_adds_transport_spatial_synthetic_only(tmp_path):
+    traj, real_path = _build_report_fixture(tmp_path)
+    synthetic_path = tmp_path / "synthetic.parquet"
+    traj.df.write_parquet(synthetic_path)
+    moving_path = tmp_path / "synthetic_moving.parquet"
+    pd.DataFrame(
+        {
+            "uid": [1, 1, 1, 1],
+            "stop_id": [2, 2, 3, 3],
+            "seq": [0, 1, 0, 1],
+            "lat": [48.85, 48.85, 48.86, 48.87],
+            "lng": [2.35, 2.36, 2.36, 2.36],
+            "t": pd.to_datetime(
+                [
+                    "2026-01-01 08:00",
+                    "2026-01-01 08:10",
+                    "2026-01-01 09:00",
+                    "2026-01-01 09:20",
+                ]
+            ),
+            "mode": ["car", "car", "walk", "walk"],
+        }
+    ).to_parquet(moving_path, index=False)
+    html_path = tmp_path / "report.html"
+    json_path = tmp_path / "metrics.json"
+
+    generate_comparison_report(
+        traj=traj,
+        synthetic_path=str(synthetic_path),
+        real_path=real_path,
+        observed_label="observed",
+        output_path=str(html_path),
+        json_output_path=str(json_path),
+        transport_spatial_config=SimpleNamespace(
+            enabled=True,
+            observed_enabled=False,
+            synthetic_moving_path=str(moving_path),
+            mode_map={},
+        ),
+    )
+
+    payload = json.loads(json_path.read_text())
+    modes = {row["mode"]: row for row in payload["transport_spatial"]["synthetic"]["modes"]}
+    assert modes["car"]["count"] == 1
+    assert modes["walk"]["count"] == 1
+    assert modes["car"]["percent"] == pytest.approx(50.0)
+    assert modes["walk"]["percent"] == pytest.approx(50.0)
+    assert modes["car"]["mean_jump_km"] > 0
+    html = html_path.read_text()
+    assert "Transport-conditioned spatial mobility" in html
+    assert "Trip share by transport mode" in html
+
+
+def test_generate_comparison_report_transport_spatial_observed_custom_columns(tmp_path):
+    traj, real_path = _build_report_fixture(tmp_path)
+    synthetic_path = tmp_path / "synthetic.parquet"
+    traj.df.write_parquet(synthetic_path)
+    moving_path = tmp_path / "synthetic_moving.parquet"
+    pd.DataFrame(
+        {
+            "uid": [1, 1],
+            "stop_id": [2, 2],
+            "seq": [0, 1],
+            "lat": [48.85, 48.86],
+            "lng": [2.35, 2.35],
+            "t": pd.to_datetime(["2026-01-01 08:00", "2026-01-01 08:12"]),
+            "mode": ["rail", "rail"],
+        }
+    ).to_parquet(moving_path, index=False)
+
+    observed = pl.read_parquet(real_path).with_columns(
+        pl.col("uid").alias("person"),
+        pl.col("datetime").alias("started_at"),
+        pl.col("lat").alias("y"),
+        pl.col("lng").alias("x"),
+        pl.when(pl.arange(0, pl.len()) % 2 == 0)
+        .then(pl.lit("metro"))
+        .otherwise(pl.lit("auto"))
+        .alias("travel_kind"),
+    )
+    observed_custom_path = tmp_path / "observed_custom.parquet"
+    observed.write_parquet(observed_custom_path)
+    json_path = tmp_path / "metrics.json"
+
+    generate_comparison_report(
+        traj=traj,
+        synthetic_path=str(synthetic_path),
+        real_path=str(observed_custom_path),
+        observed_label="observed",
+        output_path=str(tmp_path / "report.html"),
+        json_output_path=str(json_path),
+        transport_spatial_config=SimpleNamespace(
+            enabled=True,
+            observed_enabled=True,
+            synthetic_moving_path=str(moving_path),
+            uid_col="person",
+            datetime_col="started_at",
+            lat_col="y",
+            lng_col="x",
+            transport_col="travel_kind",
+            mode_map={"metro": "rail", "auto": "car"},
+        ),
+    )
+
+    payload = json.loads(json_path.read_text())
+    assert "observed" in payload["transport_spatial"]
+    observed_modes = {
+        row["mode"]: row for row in payload["transport_spatial"]["observed"]["modes"]
+    }
+    assert set(observed_modes) == {"car", "rail"}
+    assert observed_modes["car"]["count"] > 0
+    assert observed_modes["rail"]["count"] > 0
+
+
+def test_generate_comparison_report_transport_spatial_missing_sidecar_warns(tmp_path, capsys):
+    traj, real_path = _build_report_fixture(tmp_path)
+    synthetic_path = tmp_path / "synthetic.parquet"
+    traj.df.write_parquet(synthetic_path)
+    json_path = tmp_path / "metrics.json"
+
+    generate_comparison_report(
+        traj=traj,
+        synthetic_path=str(synthetic_path),
+        real_path=real_path,
+        observed_label="observed",
+        output_path=str(tmp_path / "report.html"),
+        json_output_path=str(json_path),
+        transport_spatial_config=SimpleNamespace(enabled=True, observed_enabled=False),
+    )
+
+    assert "moving sidecar not found" in capsys.readouterr().err
+    payload = json.loads(json_path.read_text())
+    assert "transport_spatial" not in payload
+
+
 def test_generate_comparison_report_uses_road_network_distance_when_provided(tmp_path):
     """When a cached road graph is supplied, jump_lengths_km must come from
     road-network routing, not skmob2's straight-line Haversine. Build a tiny

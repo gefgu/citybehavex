@@ -73,6 +73,10 @@ _DURATION_CANDIDATES = ["duration_minutes", "duration", "trip_duration_minutes",
 _ACTIVITY_CANDIDATES = ["purpose", "activity", "act", "location_type", "category", "purpose_d"]
 _LOCATION_CANDIDATES = ["location_id", "tile_id", "Code_INSEE_D", "area", "venueId", "location"]
 _END_TS_CANDIDATES = ["end_timestamp", "_end_time", "end_time"]
+_TRANSPORT_CANDIDATES = [
+    "mode", "transport_mode", "transport", "travel_mode", "trip_mode", "vehicle_mode"
+]
+_DEFAULT_MODE_ORDER = ["walk", "bike", "car", "rail"]
 
 # Speed used to turn real jump lengths into a car travel-time proxy for the trip
 # duration comparison. Matches the synthetic SimulationConfig.car_speed_kmh default.
@@ -123,6 +127,353 @@ def _to_datetime(col: pl.Series) -> pl.Series:
     if isinstance(col.dtype, pl.Datetime):
         return col
     return col.cast(pl.Datetime, strict=False)
+
+
+def _haversine_km_np(lat1, lng1, lat2, lng2) -> np.ndarray:
+    lat1_arr = np.radians(np.asarray(lat1, dtype=float))
+    lng1_arr = np.radians(np.asarray(lng1, dtype=float))
+    lat2_arr = np.radians(np.asarray(lat2, dtype=float))
+    lng2_arr = np.radians(np.asarray(lng2, dtype=float))
+    dlat = lat2_arr - lat1_arr
+    dlng = lng2_arr - lng1_arr
+    a = (
+        np.sin(dlat / 2.0) ** 2
+        + np.cos(lat1_arr) * np.cos(lat2_arr) * np.sin(dlng / 2.0) ** 2
+    )
+    return 6371.0088 * 2.0 * np.arcsin(np.minimum(1.0, np.sqrt(a)))
+
+
+def _default_synthetic_moving_path(synthetic_path: Optional[str]) -> Optional[Path]:
+    if not synthetic_path:
+        return None
+    path = Path(synthetic_path)
+    return path.with_name(f"{path.stem}_moving{path.suffix}")
+
+
+def _normalize_transport_mode(value: Any, mode_map: dict[str, str]) -> Optional[str]:
+    if value is None:
+        return None
+    raw = str(value).strip()
+    if not raw or raw.lower() in {"nan", "none", "null"}:
+        return None
+    lowered = raw.lower()
+    mapped = mode_map.get(raw, mode_map.get(lowered, lowered))
+    mapped = str(mapped).strip().lower()
+    return mapped or None
+
+
+def _transport_mode_map(config: Optional[object]) -> dict[str, str]:
+    raw = getattr(config, "mode_map", {}) if config is not None else {}
+    return {str(k).strip().lower(): str(v).strip().lower() for k, v in dict(raw).items()}
+
+
+def _synthetic_transport_leg_records(
+    moving_path: Path,
+    *,
+    mode_map: dict[str, str],
+) -> pl.DataFrame:
+    moving = pl.read_parquet(moving_path)
+    required = {"uid", "stop_id", "seq", "lat", "lng", "t", "mode"}
+    missing = required - set(moving.columns)
+    if missing:
+        raise ValueError(f"synthetic moving sidecar missing columns: {sorted(missing)}")
+    if moving.is_empty():
+        return pl.DataFrame(
+            schema={
+                "source": pl.Utf8,
+                "mode": pl.Utf8,
+                "jump_km": pl.Float64,
+                "duration_min": pl.Float64,
+            }
+        )
+
+    pdf = (
+        moving.select(["uid", "stop_id", "seq", "lat", "lng", "t", "mode"])
+        .with_columns(_to_datetime(moving["t"]).alias("t"))
+        .drop_nulls(subset=["uid", "stop_id", "seq", "lat", "lng", "t", "mode"])
+        .to_pandas()
+    )
+    if pdf.empty:
+        return pl.DataFrame(
+            schema={
+                "source": pl.Utf8,
+                "mode": pl.Utf8,
+                "jump_km": pl.Float64,
+                "duration_min": pl.Float64,
+            }
+        )
+    rows: list[dict[str, Any]] = []
+    for (_uid, _stop_id), group in pdf.sort_values(["uid", "stop_id", "seq"]).groupby(
+        ["uid", "stop_id"],
+        sort=False,
+    ):
+        if len(group) < 2:
+            continue
+        mode = _normalize_transport_mode(group["mode"].dropna().iloc[0], mode_map)
+        if mode is None:
+            continue
+        lat = group["lat"].to_numpy(dtype=float)
+        lng = group["lng"].to_numpy(dtype=float)
+        valid = np.isfinite(lat) & np.isfinite(lng)
+        if valid.sum() < 2:
+            continue
+        lat = lat[valid]
+        lng = lng[valid]
+        jump_km = float(np.nansum(_haversine_km_np(lat[:-1], lng[:-1], lat[1:], lng[1:])))
+        t = group["t"].dropna()
+        duration_min = None
+        if len(t) >= 2:
+            duration_min = float((t.max() - t.min()).total_seconds() / 60.0)
+        rows.append(
+            {
+                "source": "synthetic",
+                "mode": mode,
+                "jump_km": jump_km,
+                "duration_min": duration_min,
+            }
+        )
+    return (
+        pl.DataFrame(rows)
+        if rows
+        else pl.DataFrame(
+            schema={
+                "source": pl.Utf8,
+                "mode": pl.Utf8,
+                "jump_km": pl.Float64,
+                "duration_min": pl.Float64,
+            }
+        )
+    )
+
+
+def _observed_transport_leg_records(
+    observed_df: pl.DataFrame,
+    *,
+    uid_col: Optional[str],
+    datetime_col: Optional[str],
+    lat_col: Optional[str],
+    lng_col: Optional[str],
+    transport_col: Optional[str],
+    duration_col: Optional[str],
+    mode_map: dict[str, str],
+) -> pl.DataFrame:
+    uid = uid_col or detect_column(observed_df, _UID_CANDIDATES)
+    dt = datetime_col or detect_column(observed_df, _DATETIME_CANDIDATES)
+    lat = lat_col or detect_column(observed_df, _LAT_CANDIDATES)
+    lng = lng_col or detect_column(observed_df, _LNG_CANDIDATES)
+    mode_col = transport_col or detect_column(observed_df, _TRANSPORT_CANDIDATES)
+    missing = [
+        name
+        for name, value in {
+            "uid_col": uid,
+            "datetime_col": dt,
+            "lat_col": lat,
+            "lng_col": lng,
+            "transport_col": mode_col,
+        }.items()
+        if not value or value not in observed_df.columns
+    ]
+    if missing:
+        raise ValueError(f"observed transport comparison missing columns: {', '.join(missing)}")
+
+    select_cols = [uid, dt, lat, lng, mode_col]
+    dur = duration_col if duration_col and duration_col in observed_df.columns else None
+    if dur:
+        select_cols.append(dur)
+    pdf = (
+        observed_df.select(select_cols)
+        .with_columns(_to_datetime(observed_df[dt]).alias(dt))
+        .drop_nulls(subset=[uid, dt, lat, lng, mode_col])
+        .sort([uid, dt])
+        .to_pandas()
+    )
+    if pdf.empty:
+        return pl.DataFrame(
+            schema={
+                "source": pl.Utf8,
+                "mode": pl.Utf8,
+                "jump_km": pl.Float64,
+                "duration_min": pl.Float64,
+            }
+        )
+
+    rows: list[dict[str, Any]] = []
+    for _uid, group in pdf.groupby(uid, sort=False):
+        group = group.sort_values(dt)
+        if len(group) < 2:
+            continue
+        prev_lat = group[lat].shift(1)
+        prev_lng = group[lng].shift(1)
+        prev_t = group[dt].shift(1)
+        distances = _haversine_km_np(
+            prev_lat.iloc[1:],
+            prev_lng.iloc[1:],
+            group[lat].iloc[1:],
+            group[lng].iloc[1:],
+        )
+        for idx, jump_km in zip(group.index[1:], distances):
+            if not np.isfinite(jump_km):
+                continue
+            mode = _normalize_transport_mode(group.at[idx, mode_col], mode_map)
+            if mode is None:
+                continue
+            duration_min = None
+            if dur:
+                raw_duration = group.at[idx, dur]
+                if raw_duration is not None and np.isfinite(float(raw_duration)):
+                    duration_min = float(raw_duration)
+            else:
+                delta = group.at[idx, dt] - prev_t.loc[idx]
+                if delta is not None:
+                    duration_min = float(delta.total_seconds() / 60.0)
+            rows.append(
+                {
+                    "source": "observed",
+                    "mode": mode,
+                    "jump_km": float(jump_km),
+                    "duration_min": duration_min,
+                }
+            )
+    return (
+        pl.DataFrame(rows)
+        if rows
+        else pl.DataFrame(
+            schema={
+                "source": pl.Utf8,
+                "mode": pl.Utf8,
+                "jump_km": pl.Float64,
+                "duration_min": pl.Float64,
+            }
+        )
+    )
+
+
+def _transport_spatial_summary(records: pl.DataFrame) -> dict[str, Any]:
+    if records.is_empty():
+        return {}
+    summary: dict[str, Any] = {}
+    for source in records["source"].unique().to_list():
+        src = records.filter(pl.col("source") == source)
+        total = int(len(src))
+        mode_rows = []
+        for mode in sorted(
+            src["mode"].unique().to_list(),
+            key=lambda m: (
+                _DEFAULT_MODE_ORDER.index(m) if m in _DEFAULT_MODE_ORDER else 99,
+                m,
+            ),
+        ):
+            mode_df = src.filter(pl.col("mode") == mode)
+            durations = mode_df["duration_min"].drop_nulls()
+            mode_rows.append(
+                {
+                    "mode": mode,
+                    "count": int(len(mode_df)),
+                    "percent": float(len(mode_df) / total * 100.0) if total else 0.0,
+                    "mean_jump_km": float(mode_df["jump_km"].mean()) if len(mode_df) else None,
+                    "mean_duration_min": float(durations.mean()) if len(durations) else None,
+                }
+            )
+        summary[source] = {"total_trips": total, "modes": mode_rows}
+    return summary
+
+
+def _transport_spatial_section_html(records: pl.DataFrame, *, observed_label: str) -> str:
+    if records.is_empty():
+        return ""
+    summary = _transport_spatial_summary(records)
+    sources = ["synthetic"]
+    if "observed" in summary:
+        sources.append("observed")
+    mode_order = sorted(
+        set(records["mode"].to_list()),
+        key=lambda m: (_DEFAULT_MODE_ORDER.index(m) if m in _DEFAULT_MODE_ORDER else 99, m),
+    )
+    source_labels = {"synthetic": "synthetic", "observed": observed_label}
+
+    fig_share = go.Figure()
+    for source in sources:
+        mode_to_percent = {row["mode"]: row["percent"] for row in summary.get(source, {}).get("modes", [])}
+        fig_share.add_trace(
+            go.Bar(
+                name=source_labels[source],
+                x=mode_order,
+                y=[mode_to_percent.get(mode, 0.0) for mode in mode_order],
+                hovertemplate="%{x}<br>%{y:.2f}%<extra></extra>",
+            )
+        )
+    fig_share.update_layout(
+        title="Trip share by transport mode",
+        template="plotly_white",
+        barmode="group",
+        yaxis_title="% of trips",
+        xaxis_title="Transport mode",
+        margin=dict(l=48, r=20, t=56, b=48),
+        width=640,
+        height=420,
+    )
+
+    fig_ecdf = go.Figure()
+    for source in sources:
+        source_df = records.filter(pl.col("source") == source)
+        for mode in mode_order:
+            values = np.sort(source_df.filter(pl.col("mode") == mode)["jump_km"].to_numpy())
+            if len(values) == 0:
+                continue
+            y = np.arange(1, len(values) + 1, dtype=float) / len(values)
+            fig_ecdf.add_trace(
+                go.Scatter(
+                    x=values,
+                    y=y,
+                    mode="lines",
+                    name=f"{source_labels[source]} · {mode}",
+                    hovertemplate="%{x:.3f} km<br>%{y:.2%}<extra></extra>",
+                )
+            )
+    fig_ecdf.update_layout(
+        title="Jump length ECDF by transport mode",
+        template="plotly_white",
+        xaxis_title="Jump length (km)",
+        yaxis_title="ECDF",
+        margin=dict(l=48, r=20, t=56, b=48),
+        width=640,
+        height=420,
+    )
+
+    rows = []
+    for source in sources:
+        for row in summary.get(source, {}).get("modes", []):
+            duration = row["mean_duration_min"]
+            duration_text = f"{duration:.2f}" if duration is not None else "n/a"
+            rows.append(
+                "<tr>"
+                f"<td>{escape(source_labels[source])}</td>"
+                f"<td>{escape(row['mode'])}</td>"
+                f"<td>{row['count']}</td>"
+                f"<td>{row['percent']:.2f}%</td>"
+                f"<td>{row['mean_jump_km']:.4f}</td>"
+                f"<td>{duration_text}</td>"
+                "</tr>"
+            )
+    table = f"""
+  <div class="metrics">
+    <div>
+      <h2>Transport spatial mobility</h2>
+      <table>
+        <tr><td>source</td><td>mode</td><td>trips</td><td>share</td><td>mean jump km</td><td>mean duration min</td></tr>
+        {"".join(rows)}
+      </table>
+    </div>
+  </div>"""
+    charts = (
+        fig_share.to_html(full_html=False, include_plotlyjs=True)
+        + fig_ecdf.to_html(full_html=False, include_plotlyjs=False)
+    )
+    return f"""
+  <div class="section-header">
+    <span>Transport-conditioned spatial mobility</span>
+  </div>{table}
+  <div class="charts">{charts}</div>"""
 
 
 def _trajectory_od_matrix(
@@ -1224,6 +1575,7 @@ def generate_comparison_report(
     road_edges_df: Optional[pl.DataFrame] = None,
     road_snap_max_distance_m: float = 750.0,
     network_validation_config: Optional[object] = None,
+    transport_spatial_config: Optional[object] = None,
 ) -> None:
     if sections is not None:
         unknown = set(sections) - ALL_REPORT_SECTIONS
@@ -1679,6 +2031,66 @@ def generate_comparison_report(
         except Exception as exc:
             typer.echo(f"Warning: mobility profiles skipped: {exc}", err=True)
 
+    transport_spatial_section_html = ""
+    transport_cfg = transport_spatial_config
+    if bool(getattr(transport_cfg, "enabled", True)):
+        synthetic_moving_path = getattr(transport_cfg, "synthetic_moving_path", None)
+        moving_path = (
+            Path(synthetic_moving_path)
+            if synthetic_moving_path
+            else _default_synthetic_moving_path(synthetic_path)
+        )
+        if moving_path is None:
+            typer.echo("Warning: transport spatial mobility skipped: synthetic_path was not provided", err=True)
+        elif not moving_path.exists():
+            typer.echo(
+                f"Warning: transport spatial mobility skipped: moving sidecar not found: {moving_path}",
+                err=True,
+            )
+        else:
+            try:
+                mode_map = _transport_mode_map(transport_cfg)
+                transport_records = _synthetic_transport_leg_records(moving_path, mode_map=mode_map)
+                if transport_records.is_empty():
+                    typer.echo("Warning: transport spatial mobility skipped: no synthetic transport legs", err=True)
+                else:
+                    if bool(getattr(transport_cfg, "observed_enabled", False)):
+                        try:
+                            observed_records = _observed_transport_leg_records(
+                                real_df,
+                                uid_col=getattr(transport_cfg, "uid_col", None),
+                                datetime_col=getattr(transport_cfg, "datetime_col", None),
+                                lat_col=getattr(transport_cfg, "lat_col", None),
+                                lng_col=getattr(transport_cfg, "lng_col", None),
+                                transport_col=getattr(transport_cfg, "transport_col", None),
+                                duration_col=duration_col,
+                                mode_map=mode_map,
+                            )
+                            if observed_records.is_empty():
+                                typer.echo(
+                                    "Warning: observed transport spatial comparison skipped: no observed transport legs",
+                                    err=True,
+                                )
+                            else:
+                                transport_records = pl.concat(
+                                    [transport_records, observed_records],
+                                    how="diagonal",
+                                )
+                        except Exception as exc:
+                            typer.echo(
+                                f"Warning: observed transport spatial comparison skipped: {exc}",
+                                err=True,
+                            )
+                    transport_summary = _transport_spatial_summary(transport_records)
+                    if transport_summary:
+                        metrics["transport_spatial"] = transport_summary
+                        transport_spatial_section_html = _transport_spatial_section_html(
+                            transport_records,
+                            observed_label=observed_label,
+                        )
+            except Exception as exc:
+                typer.echo(f"Warning: transport spatial mobility skipped: {exc}", err=True)
+
     w_rows = [
         ("Jump lengths", f"{w_jump:.4f}", "km"),
         ("Visits per user", f"{w_visits:.4f}", "visits"),
@@ -1730,7 +2142,7 @@ def generate_comparison_report(
     <p>Generated {generated_at}</p>
   </div>{metrics_html}
   <div class="section-header">Distribution comparisons</div>
-  <div class="charts">{ecdf_charts_html}</div>{network_validation_section_html}{mobility_laws_section_html}{activity_section_html}{micro_activity_section_html}{profiles_section_html}{motif_section_html}{stvd_section_html}
+  <div class="charts">{ecdf_charts_html}</div>{network_validation_section_html}{transport_spatial_section_html}{mobility_laws_section_html}{activity_section_html}{micro_activity_section_html}{profiles_section_html}{motif_section_html}{stvd_section_html}
 </body>
 </html>
 """
