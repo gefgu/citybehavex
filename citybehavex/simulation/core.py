@@ -86,21 +86,38 @@ def build_social_graph_artifact(
     social_graph_k: int,
     profile_embeddings: np.ndarray | None = None,
     profile_types: list[str] | None = None,
+    edge_sources: np.ndarray | None = None,
+    edge_targets: np.ndarray | None = None,
+    edge_kinds: np.ndarray | None = None,
 ) -> SocialGraphArtifact:
-    """Pack the initial simulation social graph for WebGL rendering."""
+    """Pack the simulation social graph for WebGL rendering."""
     starts = np.asarray(neighbor_starts, dtype=np.int64)
     neigh = np.asarray(neighbors, dtype=np.int64)
     weights = np.asarray(edge_weights, dtype=np.float64)
     coords = _social_layout(n_agents, random_state, profile_embeddings)
-    degrees = np.diff(starts).astype(np.int64)
+    if edge_sources is not None and edge_targets is not None:
+        sources = np.asarray(edge_sources, dtype=np.int64)
+        targets = np.asarray(edge_targets, dtype=np.int64)
+        final_weights = np.asarray(edge_weights, dtype=np.float64)
+        degrees = np.bincount(sources[(0 <= sources) & (sources < n_agents)], minlength=n_agents)
+    else:
+        sources = None
+        targets = None
+        final_weights = weights
+        degrees = np.diff(starts).astype(np.int64)
 
     weighted = np.zeros(n_agents, dtype=np.float64)
-    for i in range(n_agents):
-        start, end = int(starts[i]), int(starts[i + 1])
-        if end > start and len(weights) == len(neigh):
-            weighted[i] = float(np.abs(weights[start:end]).sum())
-        else:
-            weighted[i] = float(end - start)
+    if sources is not None and targets is not None and len(final_weights) == len(sources):
+        for source, weight in zip(sources, final_weights):
+            if 0 <= source < n_agents:
+                weighted[int(source)] += abs(float(weight))
+    else:
+        for i in range(n_agents):
+            start, end = int(starts[i]), int(starts[i + 1])
+            if end > start and len(weights) == len(neigh):
+                weighted[i] = float(np.abs(weights[start:end]).sum())
+            else:
+                weighted[i] = float(end - start)
     max_weighted = float(weighted.max()) if weighted.size else 0.0
     if max_weighted > 0:
         sizes = 3.0 + 13.0 * np.sqrt(weighted / max_weighted)
@@ -120,23 +137,31 @@ def build_social_graph_artifact(
         nodes.append(row)
 
     edges: list[list[float]] = []
-    for source in range(n_agents):
-        for edge_idx in range(int(starts[source]), int(starts[source + 1])):
-            target = int(neigh[edge_idx])
-            weight = float(weights[edge_idx]) if len(weights) == len(neigh) else 1.0
-            edges.append([source, target, round(weight, 4)])
+    if sources is not None and targets is not None:
+        kinds = np.asarray(edge_kinds, dtype=np.uint8) if edge_kinds is not None else np.zeros(len(sources), dtype=np.uint8)
+        for edge_idx, (source, target) in enumerate(zip(sources, targets)):
+            weight = float(final_weights[edge_idx]) if edge_idx < len(final_weights) else 1.0
+            kind = int(kinds[edge_idx]) if edge_idx < len(kinds) else 0
+            edges.append([int(source), int(target), round(weight, 4), kind])
+    else:
+        for source in range(n_agents):
+            for edge_idx in range(int(starts[source]), int(starts[source + 1])):
+                target = int(neigh[edge_idx])
+                weight = float(weights[edge_idx]) if len(weights) == len(neigh) else 1.0
+                edges.append([source, target, round(weight, 4)])
 
     return SocialGraphArtifact(
         nodes=nodes,
         edges=edges,
         degrees=[int(d) for d in degrees],
         metadata={
-            "kind": "initial_profile_similarity",
+            "kind": "final_dynamic_social" if sources is not None else "initial_profile_similarity",
             "node_count": int(n_agents),
             "edge_count": int(len(edges)),
             "layout": "profile_svd" if profile_embeddings is not None else "fallback_seeded_random",
             "directed": True,
             "social_graph_k": int(social_graph_k),
+            "edge_kind_labels": {"0": "initial", "1": "dynamic"} if sources is not None else None,
         },
     )
 
@@ -305,6 +330,19 @@ def simulate_agents(
     similarity_temperature: float = 0.3,
     max_candidate_pool: int = 2000,
     max_ring_expansion: int = 2,
+    dynamic_friendships_enabled: bool = True,
+    friendship_update_interval_hours: float = 24.0,
+    encounter_window_hours: float = 24.0 * 7,
+    regularity_threshold: float = 0.3,
+    topological_overlap_threshold: float = 0.05,
+    recast_random_baseline_samples: int = 256,
+    recast_random_chance_probability: float = 1.0e-3,
+    strength_initial: float = 0.1,
+    strength_growth_mu_ln: float = -2.3,
+    strength_growth_sigma_ln: float = 0.5,
+    strength_decay_rate: float = 0.05,
+    max_dynamic_degree: int = 200,
+    max_colocation_group_size: int = 50,
     dt_update_mob_sim_hours: float = 24 * 7,
     indipendency_window_hours: float = 0.5,
     gravity_deterrence_exponent: float = -2.0,
@@ -655,18 +693,7 @@ def simulate_agents(
             )
 
     start = time.perf_counter()
-    (
-        (
-            agent_ids, loc_id, arrival, departure, trip_dur,
-            enc_agent, enc_contact, enc_tile, enc_ts, stop_abstract_loc,
-        ),
-        (
-            stop_id, path_agent, path_stop_id, path_seq, path_lat, path_lng, path_t, path_mode,
-        ),
-        (
-            act_agent, act_stop_id, act_seq, act_activity, act_arrival, act_departure, act_block_id,
-        ),
-    ) = _cbx_core.simulation_core_simulate_agents(
+    rust_result = _cbx_core.simulation_core_simulate_agents(
         lats,
         lngs,
         relevances,
@@ -748,7 +775,49 @@ def simulate_agents(
         rust_on_encounter_day_flush,
         rust_on_trip_day_flush,
         rust_on_activity_day_flush,
+        bool(dynamic_friendships_enabled),
+        int(friendship_update_interval_hours * 3600),
+        int(encounter_window_hours * 3600),
+        float(regularity_threshold),
+        float(topological_overlap_threshold),
+        int(recast_random_baseline_samples),
+        float(recast_random_chance_probability),
+        float(strength_initial),
+        float(strength_growth_mu_ln),
+        float(strength_growth_sigma_ln),
+        float(strength_decay_rate),
+        int(max_dynamic_degree),
+        int(max_colocation_group_size),
+        bool(return_social_graph),
     )
+    if return_social_graph:
+        (
+            (
+                agent_ids, loc_id, arrival, departure, trip_dur,
+                enc_agent, enc_contact, enc_tile, enc_ts, stop_abstract_loc,
+            ),
+            (
+                stop_id, path_agent, path_stop_id, path_seq, path_lat, path_lng, path_t, path_mode,
+            ),
+            (
+                act_agent, act_stop_id, act_seq, act_activity, act_arrival, act_departure, act_block_id,
+            ),
+            (social_source, social_target, social_weight, social_kind),
+        ) = rust_result
+    else:
+        social_source = social_target = social_weight = social_kind = None
+        (
+        (
+            agent_ids, loc_id, arrival, departure, trip_dur,
+            enc_agent, enc_contact, enc_tile, enc_ts, stop_abstract_loc,
+        ),
+        (
+            stop_id, path_agent, path_stop_id, path_seq, path_lat, path_lng, path_t, path_mode,
+        ),
+        (
+            act_agent, act_stop_id, act_seq, act_activity, act_arrival, act_departure, act_block_id,
+        ),
+        ) = rust_result
     elapsed = time.perf_counter() - start
     if timing is not None:
         timing.seconds += elapsed
@@ -766,5 +835,19 @@ def simulate_agents(
     )
 
     if social_graph_artifact is not None:
+        if social_source is not None and social_target is not None and social_weight is not None:
+            social_graph_artifact = build_social_graph_artifact(
+                neighbor_starts,
+                neighbors,
+                np.asarray(social_weight, dtype=np.float64),
+                n_agents=n_agents,
+                random_state=random_state,
+                social_graph_k=social_graph_k,
+                profile_embeddings=profile_embeddings,
+                profile_types=social_node_profiles,
+                edge_sources=np.asarray(social_source, dtype=np.int64),
+                edge_targets=np.asarray(social_target, dtype=np.int64),
+                edge_kinds=np.asarray(social_kind, dtype=np.uint8) if social_kind is not None else None,
+            )
         return trajectories, encounters, moving, activities, social_graph_artifact
     return trajectories, encounters, moving, activities

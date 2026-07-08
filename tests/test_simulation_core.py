@@ -1779,6 +1779,152 @@ def test_on_encounter_day_flush_chunks_plus_tail_reproduce_the_no_callback_encou
     assert baseline_rows == reconstructed_rows
 
 
+def _run_dynamic_social_case(
+    *,
+    neighbor_starts,
+    neighbors,
+    edge_profile_sim,
+    starting_locs,
+    diary_abs_locs=None,
+    diary_timestamps=None,
+    diary_starts=None,
+    diary_ends=None,
+    alpha=0.0,
+    regularity_threshold=1.0,
+    topological_overlap_threshold=0.0,
+    recast_random_baseline_samples=0,
+    strength_decay_rate=0.0,
+    max_colocation_group_size=10,
+    end_ts=3600,
+):
+    n_agents = len(starting_locs)
+    if diary_abs_locs is None:
+        diary_abs_locs = np.zeros(n_agents, dtype=np.int32)
+        diary_timestamps = np.zeros(n_agents, dtype=np.int64)
+        diary_starts = np.arange(n_agents, dtype=np.int64)
+        diary_ends = diary_starts + 1
+    return core.simulation_core_simulate_agents(
+        latitudes=np.array([48.8566, 48.8570, 48.8580], dtype=float),
+        longitudes=np.array([2.3522, 2.3530, 2.3540], dtype=float),
+        relevances=np.ones(3, dtype=float),
+        distances=np.empty(0, dtype=np.float64),
+        neighbor_starts=np.asarray(neighbor_starts, dtype=np.int64),
+        neighbors=np.asarray(neighbors, dtype=np.int64),
+        diary_timestamps=np.asarray(diary_timestamps, dtype=np.int64),
+        diary_abs_locs=np.asarray(diary_abs_locs, dtype=np.int32),
+        diary_starts=np.asarray(diary_starts, dtype=np.int64),
+        diary_ends=np.asarray(diary_ends, dtype=np.int64),
+        rho=0.0,
+        gamma=0.21,
+        alpha=alpha,
+        start_ts=0,
+        end_ts=end_ts,
+        indipendency_window_s=1800,
+        dt_update_mob_sim_s=3600,
+        slot_seconds=_SLOT,
+        car_speed_kmh=_SPEED,
+        n_agents=n_agents,
+        master_seed=42,
+        starting_locs=np.asarray(starting_locs, dtype=np.int64),
+        starting_locs_mode_relevance=False,
+        work_tiles=np.ones(n_agents, dtype=np.int64),
+        edge_profile_sim=np.asarray(edge_profile_sim, dtype=np.float64),
+        dynamic_friendships_enabled=True,
+        friendship_update_interval_s=1800,
+        encounter_window_s=1800,
+        regularity_threshold=regularity_threshold,
+        topological_overlap_threshold=topological_overlap_threshold,
+        recast_random_baseline_samples=recast_random_baseline_samples,
+        strength_initial=0.25,
+        strength_growth_mu_ln=0.0,
+        strength_growth_sigma_ln=0.01,
+        strength_decay_rate=strength_decay_rate,
+        max_dynamic_degree=10,
+        max_colocation_group_size=max_colocation_group_size,
+        return_social_edges=True,
+    )
+
+
+def _social_rows(result):
+    source, target, weight, kind = result[3]
+    return {
+        (int(s), int(t)): (float(w), int(k))
+        for s, t, w, k in zip(source, target, weight, kind)
+    }
+
+
+def test_dynamic_friendship_promotes_repeated_colocation_with_topological_overlap():
+    result = _run_dynamic_social_case(
+        neighbor_starts=[0, 1, 2, 2],
+        neighbors=[2, 2],
+        edge_profile_sim=[1.0, 1.0],
+        starting_locs=[0, 0, 0],
+        topological_overlap_threshold=0.5,
+    )
+    rows = _social_rows(result)
+    assert rows[(0, 1)][1] == 1
+    assert rows[(1, 0)][1] == 1
+
+
+def test_dynamic_friendship_requires_topological_overlap_threshold():
+    result = _run_dynamic_social_case(
+        neighbor_starts=[0, 0, 0, 0],
+        neighbors=[],
+        edge_profile_sim=[],
+        starting_locs=[0, 0, 0],
+        topological_overlap_threshold=0.5,
+    )
+    rows = _social_rows(result)
+    assert (0, 1) not in rows
+    assert (1, 0) not in rows
+
+
+def test_dynamic_friendship_skips_large_colocation_groups():
+    result = _run_dynamic_social_case(
+        neighbor_starts=[0, 1, 2, 2],
+        neighbors=[2, 2],
+        edge_profile_sim=[1.0, 1.0],
+        starting_locs=[0, 0, 0],
+        topological_overlap_threshold=0.5,
+        max_colocation_group_size=2,
+    )
+    rows = _social_rows(result)
+    assert (0, 1) not in rows
+    assert (1, 0) not in rows
+
+
+def test_dynamic_friendship_strength_decays_without_encounters():
+    result = _run_dynamic_social_case(
+        neighbor_starts=[0, 1, 1],
+        neighbors=[1],
+        edge_profile_sim=[1.0],
+        starting_locs=[0, 1],
+        strength_decay_rate=0.5,
+    )
+    rows = _social_rows(result)
+    assert 0.0 < rows[(0, 1)][0] < 1.0
+    assert rows[(0, 1)][1] == 0
+
+
+def test_dynamic_friendship_strength_grows_after_encounter():
+    diary_timestamps = np.array([0, 1800, 0], dtype=np.int64)
+    diary_abs_locs = np.array([0, 2, 0], dtype=np.int32)
+    result = _run_dynamic_social_case(
+        neighbor_starts=[0, 1, 1],
+        neighbors=[1],
+        edge_profile_sim=[1.0],
+        starting_locs=[0, 0],
+        diary_timestamps=diary_timestamps,
+        diary_abs_locs=diary_abs_locs,
+        diary_starts=np.array([0, 2], dtype=np.int64),
+        diary_ends=np.array([2, 3], dtype=np.int64),
+        alpha=1.0,
+        end_ts=5400,
+    )
+    rows = _social_rows(result)
+    assert rows[(0, 1)][0] > 1.0
+
+
 def test_on_day_flush_none_matches_baseline_return_shape():
     """The default (no callback) path must be unaffected by the new parameter."""
     trip, paths, activities = _run_multi_agent_multi_day()

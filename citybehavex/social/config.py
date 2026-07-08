@@ -56,3 +56,20 @@ class SocialNetworkConfig(BaseModel):
     # profile embedding or a real home tile (see build_profile_social_graph).
     social_graph_k: int = Field(default=20, gt=0)
     profile_graph_exact_threshold: int = Field(default=10_000, gt=0)
+
+    # Runtime friendship formation. The initial graph above seeds durable
+    # friendships; these settings let repeated co-location promote new ties
+    # and update tie strength as the simulation unfolds.
+    dynamic_friendships_enabled: bool = True
+    friendship_update_interval_hours: float = Field(default=24.0, gt=0)
+    encounter_window_hours: float = Field(default=24.0 * 7, gt=0)
+    regularity_threshold: float = Field(default=0.3, ge=0.0, le=1.0)
+    topological_overlap_threshold: float = Field(default=0.05, ge=0.0, le=1.0)
+    recast_random_baseline_samples: int = Field(default=256, ge=0)
+    recast_random_chance_probability: float = Field(default=1.0e-3, gt=0.0, le=1.0)
+    strength_initial: float = Field(default=0.1, gt=0.0)
+    strength_growth_mu_ln: float = Field(default=-2.3)
+    strength_growth_sigma_ln: float = Field(default=0.5, gt=0.0)
+    strength_decay_rate: float = Field(default=0.05, ge=0.0, le=1.0)
+    max_dynamic_degree: int = Field(default=200, gt=0)
+    max_colocation_group_size: int = Field(default=50, ge=2)

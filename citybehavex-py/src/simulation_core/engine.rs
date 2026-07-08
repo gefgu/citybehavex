@@ -1,9 +1,11 @@
-use rand::SeedableRng;
+use rand::{Rng, SeedableRng};
 use rand_xoshiro::Xoshiro256PlusPlus;
 use rayon::prelude::*;
+use rustc_hash::{FxHashMap, FxHashSet};
 use skmob2_core::models::od::{CachedGravityOdRows, validate_equal_lengths};
 use skmob2_core::models::shared::derive_agent_seed;
 use skmob2_core::utils::haversine::haversine_km;
+use std::collections::VecDeque;
 
 use crate::simulation_core::activity::{
     COMMUTE_ACTIVITY_IDX, TRAVEL_ACTIVITY_IDX, sample_activity_and_duration,
@@ -495,6 +497,45 @@ fn validate_params(params: &SimulationParams) -> Result<(), String> {
     if params.dt_update_mob_sim_s <= 0 {
         return Err("dt_update_mob_sim_s must be positive".to_string());
     }
+    if params.friendship_update_interval_s <= 0 {
+        return Err("friendship_update_interval_s must be positive".to_string());
+    }
+    if params.encounter_window_s <= 0 {
+        return Err("encounter_window_s must be positive".to_string());
+    }
+    if !(params.regularity_threshold.is_finite()
+        && (0.0..=1.0).contains(&params.regularity_threshold))
+    {
+        return Err("regularity_threshold must be in [0, 1]".to_string());
+    }
+    if !(params.topological_overlap_threshold.is_finite()
+        && (0.0..=1.0).contains(&params.topological_overlap_threshold))
+    {
+        return Err("topological_overlap_threshold must be in [0, 1]".to_string());
+    }
+    if !(params.recast_random_chance_probability.is_finite()
+        && params.recast_random_chance_probability > 0.0
+        && params.recast_random_chance_probability <= 1.0)
+    {
+        return Err("recast_random_chance_probability must be in (0, 1]".to_string());
+    }
+    if !(params.strength_initial.is_finite() && params.strength_initial > 0.0) {
+        return Err("strength_initial must be positive".to_string());
+    }
+    if !(params.strength_growth_sigma_ln.is_finite() && params.strength_growth_sigma_ln > 0.0) {
+        return Err("strength_growth_sigma_ln must be positive".to_string());
+    }
+    if !(params.strength_decay_rate.is_finite()
+        && (0.0..=1.0).contains(&params.strength_decay_rate))
+    {
+        return Err("strength_decay_rate must be in [0, 1]".to_string());
+    }
+    if params.max_dynamic_degree == 0 {
+        return Err("max_dynamic_degree must be positive".to_string());
+    }
+    if params.max_colocation_group_size < 2 {
+        return Err("max_colocation_group_size must be at least 2".to_string());
+    }
     if !(params.car_speed_kmh.is_finite() && params.car_speed_kmh > 0.0) {
         return Err("car_speed_kmh must be positive".to_string());
     }
@@ -656,7 +697,9 @@ fn new_agent_par_data(inputs: &CoreInputs<'_>, master_seed: u64) -> Vec<AgentPar
                 neighbor_indices: inputs.social_graph.neighbors[edge_start..edge_end].to_vec(),
                 edge_sim: initial_edge_sim,
                 edge_upd: init_ts_edges[edge_start..edge_end].to_vec(),
+                edge_initial: vec![true; n_edges],
                 encounters: Vec::new(),
+                processed_encounters: 0,
                 activity_counts: vec![0u32; inputs.activities.act_dur_mu.len()],
                 last_activity: -1,
                 pending_departure: 0,
@@ -664,6 +707,278 @@ fn new_agent_par_data(inputs: &CoreInputs<'_>, master_seed: u64) -> Vec<AgentPar
             }
         })
         .collect()
+}
+
+fn ordered_pair(a: usize, b: usize) -> (usize, usize) {
+    if a <= b { (a, b) } else { (b, a) }
+}
+
+fn find_neighbor(row: &[usize], target: usize) -> Option<usize> {
+    row.iter().position(|&x| x == target)
+}
+
+fn has_neighbor(par_data: &[AgentParData], a: usize, b: usize) -> bool {
+    find_neighbor(&par_data[a].neighbor_indices, b).is_some()
+}
+
+fn topological_overlap(par_data: &[AgentParData], a: usize, b: usize) -> f64 {
+    let left = &par_data[a].neighbor_indices;
+    let right = &par_data[b].neighbor_indices;
+    if left.is_empty() && right.is_empty() {
+        return 0.0;
+    }
+    let mut set: FxHashSet<usize> = left.iter().copied().filter(|&x| x != b).collect();
+    let mut intersection = 0usize;
+    let mut union = set.len();
+    for &nb in right {
+        if nb == a {
+            continue;
+        }
+        if set.remove(&nb) {
+            intersection += 1;
+        } else {
+            union += 1;
+        }
+    }
+    if union == 0 {
+        0.0
+    } else {
+        intersection as f64 / union as f64
+    }
+}
+
+fn random_baseline_overlap_threshold<R: Rng>(
+    par_data: &[AgentParData],
+    samples: usize,
+    p_rnd: f64,
+    rng: &mut R,
+) -> f64 {
+    if samples == 0 || par_data.len() < 2 {
+        return 0.0;
+    }
+    let n = par_data.len();
+    let mut values = Vec::with_capacity(samples);
+    for _ in 0..samples {
+        let a = rng.gen_range(0..n);
+        let mut b = rng.gen_range(0..n - 1);
+        if b >= a {
+            b += 1;
+        }
+        values.push(topological_overlap(par_data, a, b));
+    }
+    values.sort_by(|a, b| a.total_cmp(b));
+    let q = (1.0 - p_rnd).clamp(0.0, 1.0);
+    let idx = ((values.len() - 1) as f64 * q).round() as usize;
+    values[idx.min(values.len() - 1)]
+}
+
+fn add_or_update_directed_edge(
+    data: &mut AgentParData,
+    target: usize,
+    strength: f64,
+    current_ts: i64,
+    initial: bool,
+) {
+    if let Some(idx) = find_neighbor(&data.neighbor_indices, target) {
+        data.edge_sim[idx] = data.edge_sim[idx].max(strength);
+        data.edge_upd[idx] = current_ts;
+        data.edge_initial[idx] |= initial;
+    } else {
+        data.neighbor_indices.push(target);
+        data.edge_sim.push(strength);
+        data.edge_upd.push(current_ts);
+        data.edge_initial.push(initial);
+    }
+}
+
+fn add_symmetric_dynamic_edge(
+    par_data: &mut [AgentParData],
+    a: usize,
+    b: usize,
+    strength: f64,
+    current_ts: i64,
+) {
+    let (left, right) = par_data.split_at_mut(b.max(a));
+    if a < b {
+        add_or_update_directed_edge(&mut left[a], b, strength, current_ts, false);
+        add_or_update_directed_edge(&mut right[0], a, strength, current_ts, false);
+    } else if b < a {
+        add_or_update_directed_edge(&mut right[0], b, strength, current_ts, false);
+        add_or_update_directed_edge(&mut left[b], a, strength, current_ts, false);
+    }
+}
+
+struct DynamicSocialState {
+    observations: VecDeque<FxHashSet<(usize, usize)>>,
+    window_updates: usize,
+    next_update_ts: i64,
+    rng: Xoshiro256PlusPlus,
+}
+
+impl DynamicSocialState {
+    fn new(params: &SimulationParams, master_seed: u64) -> Self {
+        let interval = params.friendship_update_interval_s.max(1);
+        let window_updates =
+            ((params.encounter_window_s + interval - 1) / interval).max(1) as usize;
+        Self {
+            observations: VecDeque::with_capacity(window_updates),
+            window_updates,
+            next_update_ts: params.start_ts + interval,
+            rng: Xoshiro256PlusPlus::seed_from_u64(master_seed ^ 0x5eed_501a_1f5a_11ce),
+        }
+    }
+
+    fn due(&self, ts: i64) -> bool {
+        ts >= self.next_update_ts
+    }
+
+    fn advance(&mut self, params: &SimulationParams) {
+        self.next_update_ts += params.friendship_update_interval_s;
+    }
+}
+
+fn collect_colocation_pairs(
+    agents: &[AgentState],
+    max_group_size: usize,
+) -> FxHashSet<(usize, usize)> {
+    let mut groups: FxHashMap<usize, Vec<usize>> = FxHashMap::default();
+    for (agent, state) in agents.iter().enumerate() {
+        groups
+            .entry(state.current_location)
+            .or_default()
+            .push(agent);
+    }
+    let mut pairs = FxHashSet::default();
+    for group in groups.values() {
+        if group.len() < 2 || group.len() > max_group_size {
+            continue;
+        }
+        for i in 0..group.len() {
+            for j in (i + 1)..group.len() {
+                pairs.insert(ordered_pair(group[i], group[j]));
+            }
+        }
+    }
+    pairs
+}
+
+fn recent_pair_counts(
+    observations: &VecDeque<FxHashSet<(usize, usize)>>,
+) -> FxHashMap<(usize, usize), usize> {
+    let mut counts: FxHashMap<(usize, usize), usize> = FxHashMap::default();
+    for window in observations {
+        for &pair in window {
+            *counts.entry(pair).or_insert(0) += 1;
+        }
+    }
+    counts
+}
+
+fn apply_strength_updates(
+    par_data: &mut [AgentParData],
+    params: &SimulationParams,
+    current_ts: i64,
+    rng: &mut Xoshiro256PlusPlus,
+) {
+    let mut encountered: FxHashSet<(usize, usize)> = FxHashSet::default();
+    for data in par_data.iter_mut() {
+        for e in data.encounters.iter().skip(data.processed_encounters) {
+            encountered.insert(ordered_pair(e.agent as usize, e.contact as usize));
+        }
+        data.processed_encounters = data.encounters.len();
+    }
+
+    for agent in 0..par_data.len() {
+        for idx in 0..par_data[agent].neighbor_indices.len() {
+            let nb = par_data[agent].neighbor_indices[idx];
+            let pair = ordered_pair(agent, nb);
+            if encountered.contains(&pair) {
+                let z = sample_standard_normal(rng);
+                let growth =
+                    (params.strength_growth_mu_ln + params.strength_growth_sigma_ln * z).exp();
+                par_data[agent].edge_sim[idx] += growth;
+                par_data[agent].edge_upd[idx] = current_ts;
+            } else {
+                par_data[agent].edge_sim[idx] *= 1.0 - params.strength_decay_rate;
+            }
+            if par_data[agent].edge_sim[idx] < 1.0e-9 {
+                par_data[agent].edge_sim[idx] = 1.0e-9;
+            }
+        }
+    }
+}
+
+fn sample_standard_normal(rng: &mut Xoshiro256PlusPlus) -> f64 {
+    let u1 = rng.gen_range(f64::MIN_POSITIVE..1.0);
+    let u2 = rng.gen_range(0.0..1.0);
+    (-2.0 * u1.ln()).sqrt() * (2.0 * std::f64::consts::PI * u2).cos()
+}
+
+fn update_dynamic_social_graph(
+    state: &mut DynamicSocialState,
+    par_data: &mut [AgentParData],
+    agents: &[AgentState],
+    params: &SimulationParams,
+    current_ts: i64,
+) {
+    apply_strength_updates(par_data, params, current_ts, &mut state.rng);
+
+    let colocated = collect_colocation_pairs(agents, params.max_colocation_group_size);
+    state.observations.push_back(colocated);
+    while state.observations.len() > state.window_updates {
+        state.observations.pop_front();
+    }
+    let counts = recent_pair_counts(&state.observations);
+    let denom = state.observations.len().max(1) as f64;
+    let baseline = random_baseline_overlap_threshold(
+        par_data,
+        params.recast_random_baseline_samples,
+        params.recast_random_chance_probability,
+        &mut state.rng,
+    );
+    let overlap_threshold = params.topological_overlap_threshold.max(baseline);
+
+    let mut promotions = Vec::new();
+    for ((a, b), count) in counts {
+        if has_neighbor(par_data, a, b) {
+            continue;
+        }
+        if par_data[a].neighbor_indices.len() >= params.max_dynamic_degree
+            || par_data[b].neighbor_indices.len() >= params.max_dynamic_degree
+        {
+            continue;
+        }
+        let regularity = count as f64 / denom;
+        if regularity < params.regularity_threshold {
+            continue;
+        }
+        let overlap = topological_overlap(par_data, a, b);
+        if overlap < overlap_threshold {
+            continue;
+        }
+        promotions.push((a, b));
+    }
+
+    for (a, b) in promotions {
+        add_symmetric_dynamic_edge(par_data, a, b, params.strength_initial, current_ts);
+    }
+}
+
+fn flatten_social_edges(par_data: &[AgentParData]) -> (Vec<u32>, Vec<u32>, Vec<f64>, Vec<u8>) {
+    let total: usize = par_data.iter().map(|d| d.neighbor_indices.len()).sum();
+    let mut source = Vec::with_capacity(total);
+    let mut target = Vec::with_capacity(total);
+    let mut weight = Vec::with_capacity(total);
+    let mut kind = Vec::with_capacity(total);
+    for (agent, data) in par_data.iter().enumerate() {
+        for idx in 0..data.neighbor_indices.len() {
+            source.push(agent as u32);
+            target.push(data.neighbor_indices[idx] as u32);
+            weight.push(data.edge_sim[idx]);
+            kind.push(if data.edge_initial[idx] { 0 } else { 1 });
+        }
+    }
+    (source, target, weight, kind)
 }
 
 /// Assigns each agent's starting/HOME location and fixed WORK location.
@@ -1307,6 +1622,11 @@ pub(crate) fn simulate(
 
     let mut commit_buf: Vec<(i64, usize, usize, i32, i32)> = Vec::new();
     let mut window_start = inputs.params.start_ts;
+    let mut dynamic_social = if inputs.params.dynamic_friendships_enabled {
+        Some(DynamicSocialState::new(&inputs.params, master_seed))
+    } else {
+        None
+    };
 
     // Tracking simulation days and duration
     let mut current_day = 0;
@@ -1341,6 +1661,7 @@ pub(crate) fn simulate(
                 }
                 for data in par_data.iter_mut() {
                     data.encounters.clear();
+                    data.processed_encounters = 0;
                 }
             }
             if let Some(flush) = on_trip_day_flush.as_deref_mut() {
@@ -1388,12 +1709,25 @@ pub(crate) fn simulate(
             activities_on,
             &mut next_stop_id,
         );
-        update_all_edge_sims(
-            &mut par_data,
-            &agents,
-            window_end,
-            inputs.params.dt_update_mob_sim_s,
-        );
+        if let Some(state) = dynamic_social.as_mut() {
+            while state.due(window_end) {
+                update_dynamic_social_graph(
+                    state,
+                    &mut par_data,
+                    &agents,
+                    &inputs.params,
+                    window_end,
+                );
+                state.advance(&inputs.params);
+            }
+        } else {
+            update_all_edge_sims(
+                &mut par_data,
+                &agents,
+                window_end,
+                inputs.params.dt_update_mob_sim_s,
+            );
+        }
 
         window_start = window_end;
     }
@@ -1412,6 +1746,19 @@ pub(crate) fn simulate(
     report_road_fallbacks(&inputs.road_network, &road_fallback);
     report_rail_fallbacks(&inputs.rail_network, &rail_fallback);
     let (enc_agent, enc_contact, enc_tile, enc_ts) = flatten_encounters(&par_data);
+    let (social_source, social_target, social_weight, social_kind) =
+        flatten_social_edges(&par_data);
 
-    Ok(output.into_output(enc_agent, enc_contact, enc_tile, enc_ts, paths, activities))
+    Ok(output.into_output(
+        enc_agent,
+        enc_contact,
+        enc_tile,
+        enc_ts,
+        paths,
+        activities,
+        social_source,
+        social_target,
+        social_weight,
+        social_kind,
+    ))
 }

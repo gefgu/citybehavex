@@ -2,6 +2,7 @@ use h3o::Resolution;
 use numpy::{IntoPyArray, PyArray1, PyReadonlyArray1};
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
+use pyo3::types::PyAny;
 
 use crate::simulation_core::engine::simulate;
 use crate::simulation_core::h3_batch::batch_latlng_to_cells;
@@ -113,7 +114,21 @@ fn opt_i64_as_usize_vec(v: &Option<PyReadonlyArray1<'_, i64>>) -> PyResult<Optio
     on_day_flush=None,
     on_encounter_day_flush=None,
     on_trip_day_flush=None,
-    on_activity_day_flush=None
+    on_activity_day_flush=None,
+    dynamic_friendships_enabled=false,
+    friendship_update_interval_s=86400i64,
+    encounter_window_s=604800i64,
+    regularity_threshold=0.3f64,
+    topological_overlap_threshold=0.05f64,
+    recast_random_baseline_samples=256usize,
+    recast_random_chance_probability=0.001f64,
+    strength_initial=0.1f64,
+    strength_growth_mu_ln=-2.3f64,
+    strength_growth_sigma_ln=0.5f64,
+    strength_decay_rate=0.05f64,
+    max_dynamic_degree=200usize,
+    max_colocation_group_size=50usize,
+    return_social_edges=false
 ))]
 pub fn simulation_core_simulate_agents<'py>(
     py: Python<'py>,
@@ -198,39 +213,21 @@ pub fn simulation_core_simulate_agents<'py>(
     on_encounter_day_flush: Option<Py<PyAny>>,
     on_trip_day_flush: Option<Py<PyAny>>,
     on_activity_day_flush: Option<Py<PyAny>>,
-) -> PyResult<(
-    (
-        Bound<'py, PyArray1<u32>>,
-        Bound<'py, PyArray1<u32>>,
-        Bound<'py, PyArray1<i32>>,
-        Bound<'py, PyArray1<i32>>,
-        Bound<'py, PyArray1<u32>>,
-        Bound<'py, PyArray1<u32>>,
-        Bound<'py, PyArray1<u32>>,
-        Bound<'py, PyArray1<u32>>,
-        Bound<'py, PyArray1<i32>>,
-        Bound<'py, PyArray1<u8>>,
-    ),
-    (
-        Bound<'py, PyArray1<u32>>,
-        Bound<'py, PyArray1<u32>>,
-        Bound<'py, PyArray1<u32>>,
-        Bound<'py, PyArray1<u16>>,
-        Bound<'py, PyArray1<f32>>,
-        Bound<'py, PyArray1<f32>>,
-        Bound<'py, PyArray1<i32>>,
-        Bound<'py, PyArray1<u8>>,
-    ),
-    (
-        Bound<'py, PyArray1<u32>>,
-        Bound<'py, PyArray1<u32>>,
-        Bound<'py, PyArray1<u16>>,
-        Bound<'py, PyArray1<u16>>,
-        Bound<'py, PyArray1<i32>>,
-        Bound<'py, PyArray1<i32>>,
-        Bound<'py, PyArray1<i32>>,
-    ),
-)> {
+    dynamic_friendships_enabled: bool,
+    friendship_update_interval_s: i64,
+    encounter_window_s: i64,
+    regularity_threshold: f64,
+    topological_overlap_threshold: f64,
+    recast_random_baseline_samples: usize,
+    recast_random_chance_probability: f64,
+    strength_initial: f64,
+    strength_growth_mu_ln: f64,
+    strength_growth_sigma_ln: f64,
+    strength_decay_rate: f64,
+    max_dynamic_degree: usize,
+    max_colocation_group_size: usize,
+    return_social_edges: bool,
+) -> PyResult<Py<PyAny>> {
     let lats = latitudes.as_slice()?;
     let lngs = longitudes.as_slice()?;
     let rels = relevances.as_slice()?;
@@ -462,6 +459,19 @@ pub fn simulation_core_simulate_agents<'py>(
                 bike_speed_kmh,
                 n_agents,
                 master_seed,
+                dynamic_friendships_enabled,
+                friendship_update_interval_s,
+                encounter_window_s,
+                regularity_threshold,
+                topological_overlap_threshold,
+                recast_random_baseline_samples,
+                recast_random_chance_probability,
+                strength_initial,
+                strength_growth_mu_ln,
+                strength_growth_sigma_ln,
+                strength_decay_rate,
+                max_dynamic_degree,
+                max_colocation_group_size,
             },
             initial_locations: InitialLocationInputs {
                 starting_locs: sl,
@@ -524,39 +534,51 @@ pub fn simulation_core_simulate_agents<'py>(
     )
     .map_err(PyValueError::new_err)?;
 
-    Ok((
-        (
-            output.agents.into_pyarray(py),
-            output.loc_id.into_pyarray(py),
-            output.arrival.into_pyarray(py),
-            output.departure.into_pyarray(py),
-            output.duration.into_pyarray(py),
-            output.encounter_agent.into_pyarray(py),
-            output.encounter_contact.into_pyarray(py),
-            output.encounter_tile.into_pyarray(py),
-            output.encounter_ts.into_pyarray(py),
-            output.stop_abstract_loc.into_pyarray(py),
-        ),
-        (
-            output.stop_id.into_pyarray(py),
-            output.path_agent.into_pyarray(py),
-            output.path_stop_id.into_pyarray(py),
-            output.path_seq.into_pyarray(py),
-            output.path_lat.into_pyarray(py),
-            output.path_lng.into_pyarray(py),
-            output.path_t.into_pyarray(py),
-            output.path_mode.into_pyarray(py),
-        ),
-        (
-            output.act_agent.into_pyarray(py),
-            output.act_stop_id.into_pyarray(py),
-            output.act_seq.into_pyarray(py),
-            output.act_activity.into_pyarray(py),
-            output.act_arrival.into_pyarray(py),
-            output.act_departure.into_pyarray(py),
-            output.act_block_id.into_pyarray(py),
-        ),
-    ))
+    let trip = (
+        output.agents.into_pyarray(py),
+        output.loc_id.into_pyarray(py),
+        output.arrival.into_pyarray(py),
+        output.departure.into_pyarray(py),
+        output.duration.into_pyarray(py),
+        output.encounter_agent.into_pyarray(py),
+        output.encounter_contact.into_pyarray(py),
+        output.encounter_tile.into_pyarray(py),
+        output.encounter_ts.into_pyarray(py),
+        output.stop_abstract_loc.into_pyarray(py),
+    );
+    let paths = (
+        output.stop_id.into_pyarray(py),
+        output.path_agent.into_pyarray(py),
+        output.path_stop_id.into_pyarray(py),
+        output.path_seq.into_pyarray(py),
+        output.path_lat.into_pyarray(py),
+        output.path_lng.into_pyarray(py),
+        output.path_t.into_pyarray(py),
+        output.path_mode.into_pyarray(py),
+    );
+    let activities = (
+        output.act_agent.into_pyarray(py),
+        output.act_stop_id.into_pyarray(py),
+        output.act_seq.into_pyarray(py),
+        output.act_activity.into_pyarray(py),
+        output.act_arrival.into_pyarray(py),
+        output.act_departure.into_pyarray(py),
+        output.act_block_id.into_pyarray(py),
+    );
+    if return_social_edges {
+        let social = (
+            output.social_source.into_pyarray(py),
+            output.social_target.into_pyarray(py),
+            output.social_weight.into_pyarray(py),
+            output.social_kind.into_pyarray(py),
+        );
+        Ok((trip, paths, activities, social)
+            .into_pyobject(py)?
+            .unbind()
+            .into())
+    } else {
+        Ok((trip, paths, activities).into_pyobject(py)?.unbind().into())
+    }
 }
 
 /// Groups `(day, location, node)` presence rows by `(day, location)` and
