@@ -71,6 +71,19 @@ pub(crate) struct SimulationParams {
     pub(crate) bike_speed_kmh: f64,
     pub(crate) n_agents: usize,
     pub(crate) master_seed: Option<u64>,
+    pub(crate) dynamic_friendships_enabled: bool,
+    pub(crate) friendship_update_interval_s: i64,
+    pub(crate) encounter_window_s: i64,
+    pub(crate) regularity_threshold: f64,
+    pub(crate) topological_overlap_threshold: f64,
+    pub(crate) recast_random_baseline_samples: usize,
+    pub(crate) recast_random_chance_probability: f64,
+    pub(crate) strength_initial: f64,
+    pub(crate) strength_growth_mu_ln: f64,
+    pub(crate) strength_growth_sigma_ln: f64,
+    pub(crate) strength_decay_rate: f64,
+    pub(crate) max_dynamic_degree: usize,
+    pub(crate) max_colocation_group_size: usize,
 }
 
 pub(crate) struct TransportInputs<'a> {

@@ -96,6 +96,31 @@ schedule:
   alpha_beta_a: 1.0         # Beta shape a for per-agent exploration alpha
   alpha_beta_b: 6.0         # Beta shape b for per-agent exploration alpha (lower mean -> stronger preferential return to already-used diaries)
 
+social:
+  home_h3_resolution: 7
+  work_h3_resolution: 7
+  degree_mu_ln: 2.1776
+  degree_sigma_ln: 0.5
+  max_degree: 200
+  similarity_temperature: 0.3
+  max_candidate_pool: 2000
+  max_ring_expansion: 2
+  social_graph_k: 20
+  profile_graph_exact_threshold: 10000
+  dynamic_friendships_enabled: true
+  friendship_update_interval_hours: 24.0
+  encounter_window_hours: 168.0
+  regularity_threshold: 0.3
+  topological_overlap_threshold: 0.05
+  recast_random_baseline_samples: 256
+  recast_random_chance_probability: 0.001
+  strength_initial: 0.1
+  strength_growth_mu_ln: -2.3
+  strength_growth_sigma_ln: 0.5
+  strength_decay_rate: 0.05
+  max_dynamic_degree: 200
+  max_colocation_group_size: 50
+
 activities:
   enabled: true
   # Duration overrides layer over the MTUS catalog's log-normal duration

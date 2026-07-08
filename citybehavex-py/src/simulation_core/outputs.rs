@@ -29,6 +29,10 @@ pub(crate) struct SimulationOutput {
     pub(crate) act_arrival: Vec<i32>,
     pub(crate) act_departure: Vec<i32>,
     pub(crate) act_block_id: Vec<i32>,
+    pub(crate) social_source: Vec<u32>,
+    pub(crate) social_target: Vec<u32>,
+    pub(crate) social_weight: Vec<f64>,
+    pub(crate) social_kind: Vec<u8>,
 }
 
 impl SimulationOutput {
@@ -59,6 +63,10 @@ impl SimulationOutput {
             act_arrival: Vec::new(),
             act_departure: Vec::new(),
             act_block_id: Vec::new(),
+            social_source: Vec::new(),
+            social_target: Vec::new(),
+            social_weight: Vec::new(),
+            social_kind: Vec::new(),
         }
     }
 }
@@ -337,6 +345,10 @@ impl TripOutputBuffers {
         encounter_ts: Vec<i32>,
         paths: RoadPathOutputBuffers,
         activities: ActivityOutputBuffers,
+        social_source: Vec<u32>,
+        social_target: Vec<u32>,
+        social_weight: Vec<f64>,
+        social_kind: Vec<u8>,
     ) -> SimulationOutput {
         SimulationOutput {
             agents: self.agents,
@@ -364,6 +376,10 @@ impl TripOutputBuffers {
             act_arrival: activities.arrival,
             act_departure: activities.departure,
             act_block_id: activities.block_id,
+            social_source,
+            social_target,
+            social_weight,
+            social_kind,
         }
     }
 }

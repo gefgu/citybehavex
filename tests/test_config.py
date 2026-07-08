@@ -61,9 +61,20 @@ def test_simulation_config_rejects_removed_social_graph_radius():
 
 
 def test_social_network_config_accepts_bounded_social_graph_settings():
-    config = SocialNetworkConfig(social_graph_k=30, profile_graph_exact_threshold=5000)
+    config = SocialNetworkConfig(
+        social_graph_k=30,
+        profile_graph_exact_threshold=5000,
+        dynamic_friendships_enabled=True,
+        friendship_update_interval_hours=12.0,
+        regularity_threshold=0.4,
+        max_colocation_group_size=10,
+    )
     assert config.social_graph_k == 30
     assert config.profile_graph_exact_threshold == 5000
+    assert config.dynamic_friendships_enabled is True
+    assert config.friendship_update_interval_hours == 12.0
+    assert config.regularity_threshold == 0.4
+    assert config.max_colocation_group_size == 10
 
 
 def test_social_network_config_rejects_non_positive_settings():
@@ -73,6 +84,12 @@ def test_social_network_config_rejects_non_positive_settings():
         SocialNetworkConfig(degree_sigma_ln=0)
     with pytest.raises(ValueError):
         SocialNetworkConfig(home_h3_resolution=16)
+    with pytest.raises(ValueError):
+        SocialNetworkConfig(regularity_threshold=1.5)
+    with pytest.raises(ValueError):
+        SocialNetworkConfig(strength_decay_rate=-0.1)
+    with pytest.raises(ValueError):
+        SocialNetworkConfig(max_colocation_group_size=1)
 
 
 def test_llm_config_defaults_to_thirty_diaries():
