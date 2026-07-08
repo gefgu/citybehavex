@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import os
+import json
 from concurrent.futures import ThreadPoolExecutor
 from types import SimpleNamespace
 from typing import Any, Optional
 
 from fastapi import APIRouter, HTTPException, Query
+from fastapi.responses import Response
 
 from ..cache import get_or_build
 from ..executor import get_executor
@@ -17,6 +19,7 @@ from ..models import ApiResponseWrapper
 from ..payload import (
     build_chart_base_payload,
     build_chart_section_payload,
+    build_metrics_export_payload,
     build_network_validation_payload,
 )
 
@@ -169,6 +172,58 @@ async def get_chart_section(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     payload = {**payload, "run_id": selected.run_id}
     return ApiResponseWrapper(data=payload)
+
+
+@router.get("/experiments/{exp_id}/metrics-export")
+async def get_metrics_export(
+    exp_id: str,
+    run: Optional[str] = Query(None, description="Run id (timestamp). Defaults to the latest run."),
+    format: str = Query("json", description="Export format. Only json is currently supported."),
+    refresh: bool = Query(False, description="Bypass the cache and recompute."),
+) -> Response:
+    if format.lower() != "json":
+        raise HTTPException(status_code=400, detail="only json metrics export is supported")
+
+    experiment = get_experiment(exp_id)
+    if experiment is None:
+        raise HTTPException(status_code=404, detail=f"unknown experiment {exp_id!r}")
+
+    selected = experiment.run(run)
+    if selected is None:
+        raise HTTPException(status_code=404, detail=f"no runs found for experiment {exp_id!r}")
+    observed_path = _observed_path(experiment)
+    time_use_path = _time_use_path(experiment)
+
+    payload = await get_or_build(
+        f"{exp_id}__metrics_export",
+        selected.run_id,
+        selected.path,
+        observed_path,
+        build_fn=build_metrics_export_payload,
+        build_kwargs=_chart_build_kwargs(experiment, selected, observed_path, time_use_path),
+        executor=_chart_executor,
+        refresh=refresh,
+        extra_paths=tuple(
+            p
+            for p in (
+                selected.activities_path,
+                time_use_path,
+            )
+            if p is not None
+        ),
+        extra_key={"format": "json"},
+    )
+    payload = {
+        "experiment_id": exp_id,
+        "run_id": selected.run_id,
+        **payload,
+    }
+    filename = f"citybehavex-{exp_id}-{selected.run_id}-metrics.json"
+    return Response(
+        content=json.dumps(payload, indent=2),
+        media_type="application/json",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @router.get("/experiments/{exp_id}/network-validation")

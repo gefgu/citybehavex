@@ -7,6 +7,7 @@ import {
   fetchCharts,
   fetchHomeWork,
   fetchNetworkValidation,
+  downloadMetricsExport,
   type ChartPayload,
   type DemographicFilter as DemographicFilterValue,
   type HomeWorkResponse,
@@ -147,9 +148,11 @@ function mergeChartPayload(current: ChartPayload, incoming: ChartPayload): Chart
     warnings: Array.from(new Set([...current.warnings, ...incoming.warnings])),
     loaded_filters: Array.from(loaded),
     metrics: {
-      wasserstein: mergeMetricRows(current.metrics.wasserstein, incoming.metrics.wasserstein),
-      jsd: mergeMetricRows(current.metrics.jsd, incoming.metrics.jsd),
-      cpc: mergeMetricRows(current.metrics.cpc, incoming.metrics.cpc),
+      wasserstein: mergeMetricRows(current.metrics.wasserstein ?? [], incoming.metrics.wasserstein ?? []),
+      jsd: mergeMetricRows(current.metrics.jsd ?? [], incoming.metrics.jsd ?? []),
+      cpc: mergeMetricRows(current.metrics.cpc ?? [], incoming.metrics.cpc ?? []),
+      time_use: mergeMetricRows(current.metrics.time_use ?? [], incoming.metrics.time_use ?? []),
+      stvd: mergeMetricRows(current.metrics.stvd ?? [], incoming.metrics.stvd ?? []),
     },
     ecdf: mergeGroups(current.ecdf, incoming.ecdf) ?? current.ecdf,
     mobility_laws: mergeGroups(current.mobility_laws, incoming.mobility_laws),
@@ -299,6 +302,41 @@ function NetworkValidationSection({
   );
 }
 
+function TimeUseDifferenceTable({ block }: { block: { rows: {
+  category: string;
+  mtus_minutes?: number;
+  simulation_minutes?: number;
+  observed_minutes: number;
+  synthetic_minutes: number;
+  share_of_day_difference_pct_points: number;
+}[] } }) {
+  return (
+    <div className="time-use-table">
+      <h4>MTUS activity differences</h4>
+      <table className="metrics">
+        <thead>
+          <tr>
+            <th>Activity</th>
+            <th>MTUS minutes</th>
+            <th>Simulation minutes</th>
+            <th>Share-of-day difference</th>
+          </tr>
+        </thead>
+        <tbody>
+          {block.rows.map((row) => (
+            <tr key={row.category}>
+              <td>{row.category}</td>
+              <td className="value">{(row.mtus_minutes ?? row.observed_minutes).toFixed(1)}</td>
+              <td className="value">{(row.simulation_minutes ?? row.synthetic_minutes).toFixed(1)}</td>
+              <td className="value">{row.share_of_day_difference_pct_points.toFixed(3)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 export function Charts() {
   const { id = "" } = useParams();
   const [params] = useSearchParams();
@@ -312,6 +350,7 @@ export function Charts() {
   const [homeWork, setHomeWork] = useState<HomeWorkResponse | null>(null);
   const [networkValidation, setNetworkValidation] = useState<NetworkValidationResponse | null>(null);
   const [networkValidationError, setNetworkValidationError] = useState<string | null>(null);
+  const [exportingMetrics, setExportingMetrics] = useState(false);
   const requestScopeRef = useRef(0);
   const loadingSectionsRef = useRef<Set<string>>(new Set());
   const loadedSectionsRef = useRef<Set<string>>(new Set());
@@ -514,9 +553,11 @@ export function Charts() {
   };
   const metricFilter = distributionFilter === "all" ? dayFilter : distributionFilter;
   const metricRows = {
-    wasserstein: metrics.wasserstein.filter((m) => m.filter_key === metricFilter),
-    jsd: metrics.jsd.filter((m) => (m.filter_key ?? "all") === dayFilter),
-    cpc: metrics.cpc.filter((m) => m.filter_key === dayFilter),
+    wasserstein: (metrics.wasserstein ?? []).filter((m) => m.filter_key === metricFilter),
+    jsd: (metrics.jsd ?? []).filter((m) => (m.filter_key ?? "all") === dayFilter),
+    cpc: (metrics.cpc ?? []).filter((m) => m.filter_key === dayFilter),
+    time_use: (metrics.time_use ?? []).filter((m) => m.filter_key === dayFilter),
+    stvd: (metrics.stvd ?? []).filter((m) => m.filter_key === metricFilter),
   };
   const ecdfGroup =
     payload.ecdf.groups.find((group) => group.filter_key === distributionFilter) ??
@@ -550,6 +591,22 @@ export function Charts() {
     payload.mode === "comparison" && payload.labels.observed
       ? `${payload.labels.observed} vs synthetic`
       : "Synthetic analysis";
+  const handleMetricsExport = async () => {
+    setExportingMetrics(true);
+    try {
+      const blob = await downloadMetricsExport(id, run);
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `citybehavex-${id}-${payload.run_id}-metrics.json`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+    } finally {
+      setExportingMetrics(false);
+    }
+  };
 
   return (
     <>
@@ -569,12 +626,22 @@ export function Charts() {
 
       <SectionHeading
         controls={
-          <SegmentedControl
-            label="Metrics day type filter"
-            onChange={setSyncedDayFilter}
-            options={dayFilters}
-            value={dayFilter}
-          />
+          <>
+            <SegmentedControl
+              label="Metrics day type filter"
+              onChange={setSyncedDayFilter}
+              options={dayFilters}
+              value={dayFilter}
+            />
+            <button
+              className="btn btn-secondary"
+              disabled={exportingMetrics}
+              onClick={() => void handleMetricsExport()}
+              type="button"
+            >
+              {exportingMetrics ? "Exporting..." : "Export JSON"}
+            </button>
+          </>
         }
         title="Metrics"
       />
@@ -590,6 +657,8 @@ export function Charts() {
           <FilteredMetricTable title="Wasserstein distances" rows={metricRows.wasserstein} />
           <FilteredMetricTable title="Jensen-Shannon divergences" rows={metricRows.jsd} />
           <FilteredMetricTable title="Common Part of Commuters" rows={metricRows.cpc} />
+          <FilteredMetricTable title="Time-use metrics" rows={metricRows.time_use} />
+          <FilteredMetricTable title="STVD distances" rows={metricRows.stvd} />
         </div>
       )}
 
@@ -723,6 +792,7 @@ export function Charts() {
               wide
             />
           </div>
+          <TimeUseDifferenceTable block={timeUseGroup.block} />
         </>
       )}
 

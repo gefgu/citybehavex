@@ -24,6 +24,8 @@ import numpy as np
 import pandas as pd
 import polars as pl
 import skmob2
+import h3
+from pyproj import Transformer
 from skmob2 import (
     activity_distribution_jensen_shannon_divergence,
     activity_transition_matrix,
@@ -35,6 +37,7 @@ from skmob2 import (
     visits_per_user_wasserstein_distance,
     wasserstein_distance,
 )
+from skmob2.measures.evaluation import stvd_emd
 from skmob_vis._core import compute_ecdf
 from skmob_vis.motifs import (
     _literature_distribution_rows,
@@ -70,6 +73,7 @@ from ..reports_bridge import (
     _micro_activity_daily_usage_data,
     _mobility_law_visits,
     _motif_visits,
+    _stvd_hourly_histogram,
     _truncated_powerlaw_dataset,
     compute_profiles,
     detect_column,
@@ -93,6 +97,8 @@ STVD_COLORS = [
     ["#2166ac", "#6e6e6e", "#b2182b"],
 ]
 STVD_VOLUME_THRESHOLD = 3.0
+STVD_METRIC_RESOLUTIONS = [7, 8, 9]
+_STVD_METRIC_TRANSFORMER = Transformer.from_crs("EPSG:4326", "EPSG:3857", always_xy=True)
 
 _MAX_ECDF_POINTS = 400
 _MAX_SCATTER_POINTS = 4000
@@ -337,6 +343,17 @@ def _time_use_synthetic_group(segments: pl.DataFrame, meta: dict[str, Any]) -> d
     }
 
 
+def _mean_abs_share_of_day_difference(rows: list[dict[str, Any]]) -> float | None:
+    values = [
+        abs(float(row["share_of_day_difference_pct_points"]))
+        for row in rows
+        if row.get("share_of_day_difference_pct_points") is not None
+    ]
+    if not values:
+        return None
+    return float(np.mean(values))
+
+
 def _build_time_use_comparison_block(
     *,
     time_use_path: str | None,
@@ -378,6 +395,8 @@ def _build_time_use_comparison_block(
             rows.append(
                 {
                     "category": category,
+                    "mtus_minutes": round(obs, 6),
+                    "simulation_minutes": round(syn, 6),
                     "observed_minutes": round(obs, 6),
                     "synthetic_minutes": round(syn, 6),
                     "difference_minutes": round(diff, 6),
@@ -397,6 +416,25 @@ def _build_time_use_comparison_block(
             }
         )
     return {"groups": groups}
+
+
+def _time_use_metric_rows(
+    comparison: dict[str, Any] | None,
+) -> list[dict[str, Any]]:
+    if comparison is None:
+        return []
+    rows = []
+    for group in comparison.get("groups", []):
+        value = _mean_abs_share_of_day_difference(group.get("block", {}).get("rows", []))
+        metric = _metric_row(
+            {"key": group["filter_key"], "label": group["filter_label"]},
+            "Mean absolute time-use share difference",
+            value,
+            "pct points",
+        )
+        if metric is not None:
+            rows.append(metric)
+    return rows
 
 
 def _traj_like(source: skmob2.TrajDataFrame, df: pl.DataFrame) -> skmob2.TrajDataFrame:
@@ -604,6 +642,78 @@ def _annotate_stvd(layers: dict[int, dict]) -> dict[str, Any]:
         center = [(min(lngs) + max(lngs)) / 2, (min(lats) + max(lats)) / 2]
     return {"center": center, "layers": out_layers, "colors": STVD_COLORS,
             "threshold": STVD_VOLUME_THRESHOLD}
+
+
+def _stvd_emd_distribution(hourly: pl.DataFrame) -> pl.DataFrame:
+    rows: list[dict[str, Any]] = []
+    hour_cols = [str(h) for h in range(24)]
+    for row in hourly.iter_rows(named=True):
+        cell = row.get("_cell")
+        if cell is None:
+            continue
+        cell_hex = format(int(cell), "x")
+        lat, lng = h3.cell_to_latlng(cell_hex)
+        x, y = _STVD_METRIC_TRANSFORMER.transform(lng, lat)
+        centroid = f"POINT ({x} {y})"
+        for hour in hour_cols:
+            volume = float(row.get(hour) or 0.0)
+            if volume <= 0:
+                continue
+            rows.append(
+                {
+                    "time_bin": f"{int(hour):02d}:00",
+                    "mean_volume": volume,
+                    "centroid": centroid,
+                }
+            )
+    if not rows:
+        return pl.DataFrame({"time_bin": [], "mean_volume": [], "centroid": []})
+    return pl.DataFrame(rows)
+
+
+def _stvd_metric_rows(
+    *,
+    traj: skmob2.TrajDataFrame,
+    real_traj: skmob2.TrajDataFrame,
+    filters: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for meta in filters:
+        synth_df = _filter_df(traj.df, traj.datetime_col, meta)
+        real_df = _filter_df(real_traj.df, real_traj.datetime_col, meta)
+        if synth_df.is_empty() or real_df.is_empty():
+            continue
+        synth_hourly = _stvd_hourly_histogram(
+            synth_df,
+            lat_col=traj.lat_col,
+            lng_col=traj.lng_col,
+            datetime_col=traj.datetime_col,
+            resolutions=STVD_METRIC_RESOLUTIONS,
+        )
+        real_hourly = _stvd_hourly_histogram(
+            real_df,
+            lat_col=real_traj.lat_col,
+            lng_col=real_traj.lng_col,
+            datetime_col=real_traj.datetime_col,
+            resolutions=STVD_METRIC_RESOLUTIONS,
+        )
+        for resolution in STVD_METRIC_RESOLUTIONS:
+            synth_dist = _stvd_emd_distribution(synth_hourly[resolution])
+            real_dist = _stvd_emd_distribution(real_hourly[resolution])
+            if synth_dist.is_empty() or real_dist.is_empty():
+                continue
+            value = stvd_emd(
+                synth_dist,
+                real_dist,
+                time_col="time_bin",
+                weight_col="mean_volume",
+                centroid_col="centroid",
+            )
+            row = _metric_row(meta, "STVD-EMD", value, "m")
+            if row is not None:
+                row["resolution"] = resolution
+                rows.append(row)
+    return rows
 
 
 def _load_social_network_sidecar(synthetic_path: str) -> dict[str, Any] | None:
@@ -826,6 +936,8 @@ def _build_comparison_payload(
     wasserstein: list[dict[str, Any]] = []
     jsd: list[dict[str, Any]] = []
     cpc_metrics: list[dict[str, Any]] = []
+    time_use_metrics: list[dict[str, Any]] = []
+    stvd_metrics: list[dict[str, Any]] = []
 
     # Per-filter jump-length / radius-of-gyration arrays, cached to disk per
     # file (see features.get_jumps_rog) since preparing them -- especially
@@ -1079,7 +1191,7 @@ def _build_comparison_payload(
         else None
     )
 
-    time_use_comparison = (
+    time_use_comparison_for_metrics = (
         guard(
             "time_use_comparison",
             lambda: _build_time_use_comparison_block(
@@ -1092,9 +1204,12 @@ def _build_comparison_payload(
                 filters=filters,
             ),
         )
-        if wants("time-use")
+        if wants("time-use") or wants("metrics")
         else None
     )
+    if wants("metrics"):
+        time_use_metrics.extend(_time_use_metric_rows(time_use_comparison_for_metrics))
+    time_use_comparison = time_use_comparison_for_metrics if wants("time-use") else None
 
     # ---- mobility laws --------------------------------------------------- #
     def _mobility_laws_group(meta: dict[str, Any]):
@@ -1224,6 +1339,18 @@ def _build_comparison_payload(
                     "resolution": resolution_value,
                     "value": float(value),
                 })
+        if traj.lat_col and traj.lng_col and real_traj.lat_col and real_traj.lng_col:
+            stvd_metrics.extend(
+                guard(
+                    "stvd_metrics",
+                    lambda: _stvd_metric_rows(
+                        traj=traj,
+                        real_traj=real_traj,
+                        filters=distribution_filters,
+                    ),
+                )
+                or []
+            )
 
     # ---- social network --------------------------------------------------- #
     # network_validation is served by its own endpoint/cache entry now (see
@@ -1239,7 +1366,13 @@ def _build_comparison_payload(
     payload = {
         "mode": mode,
         "labels": labels,
-        "metrics": {"wasserstein": wasserstein, "jsd": jsd, "cpc": cpc_metrics},
+        "metrics": {
+            "wasserstein": wasserstein,
+            "jsd": jsd,
+            "cpc": cpc_metrics,
+            "time_use": time_use_metrics,
+            "stvd": stvd_metrics,
+        },
         "ecdf": ecdf,
         "mobility_laws": mobility_laws,
         "activity": activity,

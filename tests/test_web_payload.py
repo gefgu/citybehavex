@@ -17,6 +17,7 @@ from web.backend.app.payload import (
     build_chart_filter_payload,
     build_chart_section_payload,
     build_comparison_payload,
+    build_metrics_export_payload,
     build_network_validation_payload,
 )
 
@@ -325,7 +326,125 @@ def test_build_comparison_payload_includes_time_use_comparison(monkeypatch, tmp_
     sleep = next(row for row in all_block["rows"] if row["category"] == "sleep")
     assert sleep["observed_minutes"] == 570.0
     assert sleep["synthetic_minutes"] == 480.0
+    assert sleep["mtus_minutes"] == 570.0
+    assert sleep["simulation_minutes"] == 480.0
     assert sleep["difference_minutes"] == -90.0
+    metric = next(
+        row
+        for row in payload["metrics"]["time_use"]
+        if row["filter_key"] == "all"
+        and row["metric_name"] == "Mean absolute time-use share difference"
+    )
+    assert metric["unit"] == "pct points"
+    assert metric["value"] > 0
+
+
+def test_metrics_section_includes_stvd_distances(monkeypatch, tmp_path):
+    synthetic = tmp_path / "synthetic.parquet"
+    observed = tmp_path / "observed.parquet"
+    pd.DataFrame(
+        {
+            "uid": ["u1", "u1"],
+            "datetime": pd.to_datetime(["2026-01-05 08:00", "2026-01-05 09:00"]),
+            "lat": [48.85, 48.86],
+            "lng": [2.35, 2.36],
+            "purpose": ["HOME", "WORK"],
+            "dwell_minutes": [60.0, 60.0],
+        }
+    ).to_parquet(synthetic, index=False)
+    pd.DataFrame(
+        {
+            "uid": ["u2", "u2"],
+            "datetime": pd.to_datetime(["2026-01-05 08:00", "2026-01-05 10:00"]),
+            "lat": [48.8505, 48.8605],
+            "lng": [2.3505, 2.3605],
+            "purpose": ["HOME", "WORK"],
+            "location_id": ["home", "work"],
+        }
+    ).to_parquet(observed, index=False)
+    monkeypatch.setattr("web.backend.app.payload._common_part_of_commuters", lambda *args, **kwargs: [])
+    monkeypatch.setattr("web.backend.app.payload.stvd_emd", lambda *args, **kwargs: 123.456)
+
+    payload = build_chart_section_payload(
+        "metrics",
+        "all",
+        synthetic_path=str(synthetic),
+        observed_path=str(observed),
+        observed_label="observed",
+    )
+
+    stvd_rows = payload["metrics"]["stvd"]
+    assert [(row["filter_key"], row["resolution"], row["unit"]) for row in stvd_rows] == [
+        ("all", 7, "m"),
+        ("all", 8, "m"),
+        ("all", 9, "m"),
+    ]
+    assert {row["metric_name"] for row in stvd_rows} == {"STVD-EMD"}
+    assert {row["value"] for row in stvd_rows} == {123.456}
+
+
+def test_metrics_export_payload_includes_all_metric_groups(monkeypatch, tmp_path):
+    synthetic = tmp_path / "synthetic.parquet"
+    activities = tmp_path / "synthetic_activities.parquet"
+    time_use = tmp_path / "time_use.parquet"
+    pd.DataFrame(
+        {
+            "uid": ["u1"],
+            "datetime": pd.to_datetime(["2026-01-05 08:00"]),
+            "lat": [48.85],
+            "lng": [2.35],
+            "purpose": ["HOME"],
+        }
+    ).to_parquet(synthetic, index=False)
+    pd.DataFrame(
+        {
+            "uid": [1],
+            "activity": [0],
+            "arrival": pd.to_datetime(["2026-01-05 00:00"]),
+            "departure": pd.to_datetime(["2026-01-05 08:00"]),
+        }
+    ).to_parquet(activities, index=False)
+    rows = []
+    for day in ["Monday", "Saturday"]:
+        rows.append(
+            {
+                "country": "France",
+                "survey": 2009,
+                "day": day,
+                "propwt": 1.0,
+                **{category: 0.0 for category in TIME_USE_CATEGORIES},
+                "sleep": 480.0,
+            }
+        )
+    pd.DataFrame(rows).to_parquet(time_use, index=False)
+    monkeypatch.setattr(
+        "web.backend.app.payload._mobility_law_visits",
+        lambda *args, **kwargs: pl.DataFrame(
+            {
+                "user_id": ["u1"],
+                "timestamp": pl.Series(["2026-01-01 00:00"]).str.to_datetime(),
+                "location_id": ["a"],
+                "lat": [48.85],
+                "lng": [2.35],
+            }
+        ),
+    )
+
+    payload = build_metrics_export_payload(
+        str(synthetic),
+        None,
+        "observed",
+        synthetic_activities_path=str(activities),
+        time_use_path=str(time_use),
+        time_use_label="MTUS France 2009",
+        time_use_country="France",
+        time_use_survey=2009,
+    )
+
+    assert set(payload["metrics"]) == {"wasserstein", "jsd", "cpc", "time_use", "stvd"}
+    assert any(row["filter_key"] == "weekday" for row in payload["metrics"]["time_use"])
+    assert any(row["key"] == "morning" for row in payload["filters"])
+    assert {row["category"] for row in payload["time_use_table"]} == set(TIME_USE_CATEGORIES)
 
 
 def test_build_comparison_payload_supports_synthetic_only(monkeypatch, tmp_path):
@@ -365,6 +484,8 @@ def test_build_comparison_payload_supports_synthetic_only(monkeypatch, tmp_path)
     assert payload["metrics"]["wasserstein"] == []
     assert payload["metrics"]["jsd"] == []
     assert payload["metrics"]["cpc"] == []
+    assert payload["metrics"]["time_use"] == []
+    assert payload["metrics"]["stvd"] == []
     all_activity = payload["activity"]["groups"][0]
     assert all_activity["transition_difference"]["matrix_mode"] == "raw"
     assert all_activity["daily_activity_difference"]["matrix_mode"] == "raw"

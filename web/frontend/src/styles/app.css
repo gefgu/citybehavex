@@ -350,6 +350,8 @@ body {
 .section-controls {
   display: flex;
   justify-content: flex-end;
+  align-items: center;
+  gap: var(--space-sm);
   min-width: 0;
 }
 
@@ -364,6 +366,13 @@ table.metrics {
   font-size: 14px;
 }
 table.metrics td { padding: 4px 16px 4px 0; }
+table.metrics th {
+  padding: 4px 16px 6px 0;
+  text-align: left;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+}
 table.metrics td.value { font-family: ui-monospace, monospace; color: var(--ink); }
 table.metrics td.unit { color: var(--muted); }
 .metric-filter {
@@ -371,6 +380,10 @@ table.metrics td.unit { color: var(--muted); }
   min-width: 74px;
   color: var(--muted);
   font-size: 12px;
+}
+.time-use-table {
+  margin-top: var(--space-md);
+  overflow-x: auto;
 }
 
 /* ---- charts ---- */

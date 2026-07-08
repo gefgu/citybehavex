@@ -182,6 +182,11 @@ profiles:
 comparison:
   path: data/gparis/gparis_visitation_df.parquet
   label: gparis
+  time_use_path: data/mtus/MTUS_haf.dta
+  time_use_label: MTUS France 2009
+  time_use_country: France
+  time_use_survey: 2009
+  time_use_weight_col: propwt
   # WIP: road-network-based jump_lengths/radius_of_gyration is implemented
   # (citybehavex/metrics/road_distance.py) but disabled by default pending
   # further performance validation on large real datasets. Set true to use
