@@ -1,3 +1,5 @@
+# AUTO-GENERATED half-population base for the ablation table.
+# Derived from configs/yjmob_simulation.yaml: simulation.agents halved, comparison.path -> held-out half A.
 tessellation:
   min_lon: 136.5
   min_lat: 34.6
@@ -7,12 +9,12 @@ tessellation:
   enrich_overture: true
   output: data/yjmob/yjmob_h3_tessellation.parquet
 simulation:
-  agents: 100000
+  agents: 50000
   days: 75
   start_date: '2019-09-15'
   output: data/yjmob/yjmob_simulation_trajectories.parquet
   random_state: 42
-  stream_output: true  # flush waypoints to disk per-day; RSS grew unbounded otherwise at this scale
+  stream_output: true
   relevance_column: total_poi_count
   granularity_minutes: 30
   car_speed_kmh: 40.0
@@ -65,7 +67,12 @@ embedding:
   auto_launch: true
   vllm_executable: /home/gustavo/vllm/.venv/bin/vllm
   vllm_port: 8001
-  vllm_extra_args: ["--gpu-memory-utilization", "0.08", "--enforce-eager", "--max-model-len", "512"]
+  vllm_extra_args:
+  - --gpu-memory-utilization
+  - '0.08'
+  - --enforce-eager
+  - --max-model-len
+  - '512'
   cache_dir: data/llm_diaries_yjmob
   cache_path: data/llm_diaries_yjmob/diary_embeddings.npz
 schedule:
@@ -87,9 +94,6 @@ activities:
   alignment_base_url: http://localhost:8083
   alignment_model: models/modernbert-activity-aligner
   alignment_batch_size: 512
-  poi_type_choice_enabled: true
-  poi_type_choice_temperature: 0.5
-  poi_type_choice_alpha: 1.0
   alignment_cache_path: data/llm_diaries_yjmob/activity_alignment_cache.npz
   durations:
     sleep:
@@ -147,7 +151,7 @@ profiles:
   ownership_alignment_cache_path: data/llm_diaries_yjmob/vehicle_ownership_alignment_cache.npz
   ownership_alignment_concurrency: 4
 comparison:
-  path: data/yjmob/yjmob_wgs84_simple.parquet
+  path: data/yjmob/yjmob_wgs84_half_a.parquet
   label: yjmob100k
   network_validation:
     enabled: true
@@ -156,8 +160,4 @@ comparison:
     location_mode: h3
     h3_resolution: 9
     max_group_size: 200
-  # WIP: road-network-based jump_lengths/radius_of_gyration is implemented
-  # (citybehavex/metrics/road_distance.py) but disabled by default pending
-  # further performance validation on large real datasets. Set true to use
-  # road-network distance instead of straight-line Haversine.
   road_network_distance: false

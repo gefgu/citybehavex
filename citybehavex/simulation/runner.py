@@ -716,6 +716,7 @@ def maybe_build_diaries(
         config.diaries.location_count_sigma,
         config.diaries.max_locations,
         config.llm.diary_count,
+        max_one_location=config.diaries.max_one_location_diaries,
     )
     day_types = config.diaries.day_types_for_range(
         start_date.date(), (end_date - timedelta(days=1)).date()

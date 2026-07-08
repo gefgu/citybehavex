@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -165,6 +166,33 @@ def test_truncated_lognormal_probabilities_and_allocations():
         5,
         6,
     ]
+
+
+def test_location_count_allocation_can_cap_one_location_diaries():
+    counts = allocate_location_counts(1.0, 0.75, 6, 30, max_one_location=1)
+
+    assert len(counts) == 30
+    assert counts.count(1) == 1
+    assert counts == sorted(counts)
+    assert all(1 <= count <= 6 for count in counts)
+
+
+def test_gparis_validated_diary_caches_have_single_all_home_schedule():
+    expected_counts = allocate_location_counts(1.0, 0.75, 6, 30, max_one_location=1)
+    for day_type in ("weekday", "weekend"):
+        path = Path(f"data/llm_diaries_gparis/validated_diaries_{day_type}.json")
+        if not path.exists():
+            pytest.skip(f"{path} is not available")
+        batch = load_validated_diary_cache(
+            path,
+            expected_location_counts=expected_counts,
+        )
+        signatures = [
+            tuple((episode.start, episode.end, episode.purpose) for episode in diary.episodes)
+            for diary in batch.diaries
+        ]
+        assert signatures.count((("00:00", "24:00", "HOME"),)) == 1
+        assert len(set(signatures)) == len(signatures)
 
 
 def test_one_location_prompt_requires_single_home_episode():
