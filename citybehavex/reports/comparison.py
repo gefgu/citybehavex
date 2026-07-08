@@ -1127,6 +1127,12 @@ def generate_comparison_report(
         # downstream arithmetic/comparisons.
         synth_jumps = np.asarray(traj.jump_lengths(merge=True), dtype=float)
         real_jumps = np.asarray(real_traj.jump_lengths(merge=True), dtype=float)
+    # Zero-length "jumps" between consecutive same-location rows (e.g. repeat
+    # check-ins at one venue, more common after coordinate rounding) aren't
+    # movement -- exclude them from both sides so the distribution reflects
+    # actual trips, not ping density.
+    synth_jumps = synth_jumps[synth_jumps > 0]
+    real_jumps = real_jumps[real_jumps > 0]
     w_jump = wasserstein_distance(synth_jumps, real_jumps)
     metrics["wasserstein"]["jump_lengths_km"] = w_jump
 

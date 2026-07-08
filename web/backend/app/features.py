@@ -190,6 +190,11 @@ def get_jumps_rog(
                 # are pyarrow scalars, not plain floats.
                 jumps = np.asarray(tr.jump_lengths(merge=True), dtype=float)
                 rog = tr.radius_of_gyration()["radius_of_gyration"].to_numpy()
+            # Zero-length "jumps" between consecutive same-location rows
+            # (e.g. repeat check-ins, more common after coordinate rounding)
+            # aren't movement -- exclude so the ECDF reflects actual trips.
+            jumps = np.asarray(jumps, dtype=float)
+            jumps = jumps[jumps > 0]
             result[meta["key"]] = {
                 "jumps": np.asarray(jumps, dtype=float).tolist(),
                 "rog": np.asarray(rog, dtype=float).tolist(),
