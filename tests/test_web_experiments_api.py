@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import yaml
 import pandas as pd
 from types import SimpleNamespace
@@ -296,6 +297,52 @@ def test_chart_section_endpoint_passes_section_and_filter(monkeypatch, tmp_path)
     assert calls == [("distributions", "weekday", None)]
     assert response.data["ecdf"]["groups"][0]["filter_key"] == "weekday"
     assert response.data["run_id"] == "20260101T010203"
+
+
+def test_metrics_export_endpoint_returns_json_attachment(monkeypatch, tmp_path):
+    run = tmp_path / "trajectories_20260101T010203.parquet"
+    pd.DataFrame({"uid": [1]}).to_parquet(run, index=False)
+    selected = SimpleNamespace(
+        run_id="20260101T010203",
+        path=run,
+        activities_path=tmp_path / "missing_activities.parquet",
+    )
+    experiment = SimpleNamespace(
+        observed_path=None,
+        label="observed",
+        run=lambda run_id=None: selected,
+        time_use_path=None,
+        time_use_label="time-use",
+        time_use_country=None,
+        time_use_survey=None,
+        time_use_weight_col="propwt",
+        special_days=[],
+    )
+    monkeypatch.setattr(charts_mod, "get_experiment", lambda exp_id: experiment)
+
+    def fake_build(**kwargs):
+        return {
+            "mode": "synthetic_only",
+            "labels": {"synthetic": "synthetic"},
+            "filters": [{"key": "all", "label": "All"}],
+            "metrics": {"wasserstein": [], "jsd": [], "cpc": [], "time_use": [], "stvd": []},
+            "time_use_table": [],
+            "warnings": [],
+        }
+
+    monkeypatch.setattr(charts_mod, "build_metrics_export_payload", fake_build)
+    monkeypatch.setattr(charts_mod, "_chart_executor", None)
+
+    response = asyncio.run(
+        charts_mod.get_metrics_export("demo", run="20260101T010203", format="json", refresh=True)
+    )
+
+    assert response.media_type == "application/json"
+    assert 'filename="citybehavex-demo-20260101T010203-metrics.json"' in response.headers["content-disposition"]
+    data = json.loads(response.body)
+    assert data["experiment_id"] == "demo"
+    assert data["run_id"] == "20260101T010203"
+    assert set(data["metrics"]) == {"wasserstein", "jsd", "cpc", "time_use", "stvd"}
 
 
 def test_network_validation_endpoint_is_independent_of_charts(monkeypatch, tmp_path):

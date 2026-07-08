@@ -22,6 +22,10 @@ SECTION_NAMES = [
 ]
 
 
+def _empty_metrics() -> dict[str, list[Any]]:
+    return {"wasserstein": [], "jsd": [], "cpc": [], "time_use": [], "stvd": []}
+
+
 def _labels(ctx: ComparisonContext) -> dict[str, str]:
     labels = {"synthetic": "synthetic"}
     if ctx.observed_path:
@@ -39,7 +43,7 @@ def _empty_payload(ctx: ComparisonContext, loaded_filters: Optional[list[str]] =
         "distribution_filters": [legacy._public_filter(meta) for meta in distribution_filters],
         "enabled_sections": SECTION_NAMES,
         "loaded_filters": loaded_filters or [],
-        "metrics": {"wasserstein": [], "jsd": [], "cpc": []},
+        "metrics": _empty_metrics(),
         "ecdf": {"groups": []},
         "mobility_laws": None,
         "activity": None,
@@ -135,6 +139,74 @@ def build_chart_base_payload(
     return payload
 
 
+def build_metrics_export_payload(
+    synthetic_path: str,
+    observed_path: Optional[str],
+    observed_label: str,
+    synthetic_activities_path: Optional[str] = None,
+    time_use_path: Optional[str] = None,
+    time_use_label: str = "time-use",
+    time_use_country: Optional[str] = None,
+    time_use_survey: Optional[int] = None,
+    time_use_weight_col: str = "propwt",
+    special_days: Optional[list[dict[str, str]]] = None,
+) -> dict[str, Any]:
+    ctx = _context_from_kwargs(
+        synthetic_path=synthetic_path,
+        observed_path=observed_path,
+        observed_label=observed_label,
+        synthetic_activities_path=synthetic_activities_path,
+        time_use_path=time_use_path,
+        time_use_label=time_use_label,
+        time_use_country=time_use_country,
+        time_use_survey=time_use_survey,
+        time_use_weight_col=time_use_weight_col,
+        special_days=special_days,
+    )
+    key = (*ctx.artifact_key("all"), "metrics-export")
+    artifact = artifact_store.get_or_build(
+        key,
+        lambda: legacy._build_comparison_payload(
+            synthetic_path=ctx.synthetic_path,
+            observed_path=ctx.observed_path,
+            observed_label=ctx.observed_label,
+            synthetic_activities_path=ctx.synthetic_activities_path,
+            time_use_path=ctx.time_use_path,
+            time_use_label=ctx.time_use_label,
+            time_use_country=ctx.time_use_country,
+            time_use_survey=ctx.time_use_survey,
+            time_use_weight_col=ctx.time_use_weight_col,
+            special_days=ctx.special_day_dicts(),
+            filter_keys=None,
+            include_progressive_metadata=True,
+            include_profiles=False,
+            include_social_network=False,
+            sections=["metrics", "time-use"],
+        ),
+    )
+    time_use_table = []
+    for group in (artifact.get("time_use_comparison") or {}).get("groups", []):
+        for row in group.get("block", {}).get("rows", []):
+            time_use_table.append(
+                {
+                    "filter_key": group["filter_key"],
+                    "filter_label": group["filter_label"],
+                    **row,
+                }
+            )
+    return {
+        "mode": artifact.get("mode", "synthetic_only"),
+        "labels": artifact.get("labels", _labels(ctx)),
+        "filters": artifact.get(
+            "distribution_filters",
+            [legacy._public_filter(meta) for meta in legacy._distribution_filter_options(ctx.special_day_dicts())],
+        ),
+        "metrics": {**_empty_metrics(), **artifact.get("metrics", {})},
+        "time_use_table": time_use_table,
+        "warnings": artifact.get("warnings", []),
+    }
+
+
 def _section_payload(ctx: ComparisonContext, filter_key: str) -> dict[str, Any]:
     payload = _empty_payload(ctx, loaded_filters=[filter_key])
     artifact = _regular_artifact(ctx, filter_key, "metrics")
@@ -154,9 +226,7 @@ def build_section_metrics(ctx: ComparisonContext, filter_key: str) -> dict[str, 
     artifact = _regular_artifact(ctx, filter_key, "metrics")
     payload = _empty_payload(ctx, loaded_filters=[filter_key])
     payload["warnings"] = artifact.get("warnings", [])
-    payload["metrics"] = artifact.get(
-        "metrics", {"wasserstein": [], "jsd": [], "cpc": []}
-    )
+    payload["metrics"] = {**_empty_metrics(), **artifact.get("metrics", {})}
     return payload
 
 

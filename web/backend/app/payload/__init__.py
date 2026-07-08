@@ -15,6 +15,7 @@ from .sections import (
     SECTION_BUILDERS,
     build_chart_base_payload,
     build_chart_section_payload,
+    build_metrics_export_payload,
     build_section_activity,
     build_section_distributions,
     build_section_metrics,

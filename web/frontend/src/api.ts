@@ -127,6 +127,19 @@ export function fetchChartSection(
   );
 }
 
+export async function downloadMetricsExport(id: string, run?: string): Promise<Blob> {
+  const q = new URLSearchParams({ format: "json" });
+  if (run) q.set("run", run);
+  const res = await fetch(
+    `/api/experiments/${encodeURIComponent(id)}/metrics-export?${q.toString()}`,
+  );
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error((body as { detail?: string }).detail || `HTTP ${res.status}`);
+  }
+  return res.blob();
+}
+
 export interface HomeWorkFeatureCollection {
   type: string;
   features: {
@@ -475,6 +488,8 @@ export interface MicroActivityUsageBlock {
 }
 export interface TimeUseComparisonRow {
   category: string;
+  mtus_minutes: number;
+  simulation_minutes: number;
   observed_minutes: number;
   synthetic_minutes: number;
   difference_minutes: number;
@@ -574,6 +589,8 @@ export interface ChartPayload {
     wasserstein: { filter_key: string; filter_label: string; metric_name: string; name?: string; value: number; unit?: string }[];
     jsd: { filter_key?: string; filter_label?: string; metric_name?: string; name?: string; value: number }[];
     cpc: { filter_key: string; filter_label: string; resolution: number; value: number }[];
+    time_use: { filter_key: string; filter_label: string; metric_name: string; name?: string; value: number; unit?: string }[];
+    stvd: { filter_key: string; filter_label: string; metric_name: string; name?: string; resolution: number; value: number; unit?: string }[];
   };
   ecdf: { groups: FilteredBlockMap<EcdfBlock>[] };
   mobility_laws: { groups: FilteredBlockMap<LawBlock>[] } | null;

@@ -6,6 +6,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
+ARTIFACT_SCHEMA_VERSION = "v2"
+
 
 def path_mtime(path: str | Path | None) -> int | str:
     if path is None:
@@ -66,6 +68,7 @@ class ComparisonContext:
     def artifact_key(self, filter_key: str) -> tuple[object, ...]:
         return (
             "comparison-filter",
+            ARTIFACT_SCHEMA_VERSION,
             self.synthetic_path,
             path_mtime(self.synthetic_path),
             self.observed_path,
