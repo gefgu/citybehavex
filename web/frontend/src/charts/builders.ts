@@ -42,10 +42,54 @@ function lineOrScatter(s: SeriesPoints) {
   };
 }
 
+function ecdfValueAt(points: number[][], x: number): number | null {
+  if (!points.length || !Number.isFinite(x)) return null;
+  if (x < points[0][0]) return 0;
+
+  let lo = 0;
+  let hi = points.length - 1;
+  while (lo <= hi) {
+    const mid = Math.floor((lo + hi) / 2);
+    if ((points[mid]?.[0] ?? Number.POSITIVE_INFINITY) <= x) lo = mid + 1;
+    else hi = mid - 1;
+  }
+
+  return points[Math.max(0, hi)]?.[1] ?? null;
+}
+
+function formatEcdfX(value: number, unit: string) {
+  const suffix = unit ? ` ${unit}` : "";
+  return `${value.toLocaleString(undefined, { maximumFractionDigits: 2 })}${suffix}`;
+}
+
 export function ecdfOption(block: EcdfBlock): EChartsOption {
   const unit = block.x_unit ? ` · ${block.x_unit}` : "";
+  const rawUnit = block.x_unit ?? "";
   return {
     ...baseOption(),
+    tooltip: {
+      ...baseOption().tooltip,
+      trigger: "axis",
+      axisPointer: { type: "line", snap: false },
+      formatter: (params: unknown) => {
+        const rows = Array.isArray(params) ? params : [params];
+        const axisValue = Number(
+          (rows[0] as { axisValue?: number | string; value?: [number, number] } | undefined)
+            ?.axisValue ?? (rows[0] as { value?: [number, number] } | undefined)?.value?.[0],
+        );
+        if (!Number.isFinite(axisValue)) return "";
+
+        const title = `${block.x_label}: ${formatEcdfX(axisValue, rawUnit)}`;
+        const values = block.series.map((s) => {
+          const color = ROLE_COLOR[s.role] ?? COLORS.ink;
+          const cdf = ecdfValueAt(s.points, axisValue);
+          const display = cdf == null ? "n/a" : cdf.toFixed(3);
+          const marker = `<span style="display:inline-block;margin-right:6px;border-radius:50%;width:8px;height:8px;background:${color}"></span>`;
+          return `${marker}${s.name}: ${display}`;
+        });
+        return [title, ...values].join("<br/>");
+      },
+    },
     xAxis: axisCommon(block.x_label + unit),
     yAxis: { ...axisCommon("cdf"), min: 0, max: 1 },
     series: block.series.map((s) => ({
