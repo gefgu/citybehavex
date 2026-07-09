@@ -150,82 +150,102 @@ def _transport_mode_map(config: Optional[object]) -> dict[str, str]:
     return {str(k).strip().lower(): str(v).strip().lower() for k, v in dict(raw).items()}
 
 
+def _empty_transport_records() -> pl.DataFrame:
+    return pl.DataFrame(
+        schema={
+            "source": pl.Utf8,
+            "mode": pl.Utf8,
+            "jump_km": pl.Float64,
+            "duration_min": pl.Float64,
+        }
+    )
+
+
 def _synthetic_transport_leg_records(
     moving_path: Path,
     *,
     mode_map: dict[str, str],
 ) -> pl.DataFrame:
+    """One row per (uid, stop_id) transport leg: total path length and time
+    span. Fully columnar (group_by/window aggregations) instead of a Python
+    ``for`` loop per leg -- this sidecar is 100M+ rows at yjmob2 scale, so a
+    per-group Python loop dominates report runtime (measured: the single
+    biggest cost in the ablation sweep's report step after CPC).
+    """
     moving = pl.read_parquet(moving_path)
     required = {"uid", "stop_id", "seq", "lat", "lng", "t", "mode"}
     missing = required - set(moving.columns)
     if missing:
         raise ValueError(f"synthetic moving sidecar missing columns: {sorted(missing)}")
     if moving.is_empty():
-        return pl.DataFrame(
-            schema={
-                "source": pl.Utf8,
-                "mode": pl.Utf8,
-                "jump_km": pl.Float64,
-                "duration_min": pl.Float64,
-            }
-        )
+        return _empty_transport_records()
 
-    pdf = (
+    work = (
         moving.select(["uid", "stop_id", "seq", "lat", "lng", "t", "mode"])
-        .with_columns(_to_datetime(moving["t"]).alias("t"))
+        .with_columns(
+            _to_datetime(moving["t"]).alias("t"),
+            pl.col("lat").cast(pl.Float64, strict=False),
+            pl.col("lng").cast(pl.Float64, strict=False),
+        )
         .drop_nulls(subset=["uid", "stop_id", "seq", "lat", "lng", "t", "mode"])
-        .to_pandas()
     )
-    if pdf.empty:
-        return pl.DataFrame(
-            schema={
-                "source": pl.Utf8,
-                "mode": pl.Utf8,
-                "jump_km": pl.Float64,
-                "duration_min": pl.Float64,
-            }
-        )
-    rows: list[dict[str, Any]] = []
-    for (_uid, _stop_id), group in pdf.sort_values(["uid", "stop_id", "seq"]).groupby(
-        ["uid", "stop_id"],
-        sort=False,
-    ):
-        if len(group) < 2:
-            continue
-        mode = _normalize_transport_mode(group["mode"].dropna().iloc[0], mode_map)
-        if mode is None:
-            continue
-        lat = group["lat"].to_numpy(dtype=float)
-        lng = group["lng"].to_numpy(dtype=float)
-        valid = np.isfinite(lat) & np.isfinite(lng)
-        if valid.sum() < 2:
-            continue
-        lat = lat[valid]
-        lng = lng[valid]
-        jump_km = float(np.nansum(_haversine_km_np(lat[:-1], lng[:-1], lat[1:], lng[1:])))
-        t = group["t"].dropna()
-        duration_min = None
-        if len(t) >= 2:
-            duration_min = float((t.max() - t.min()).total_seconds() / 60.0)
-        rows.append(
-            {
-                "source": "synthetic",
-                "mode": mode,
-                "jump_km": jump_km,
-                "duration_min": duration_min,
-            }
-        )
-    return (
-        pl.DataFrame(rows)
-        if rows
-        else pl.DataFrame(
-            schema={
-                "source": pl.Utf8,
-                "mode": pl.Utf8,
-                "jump_km": pl.Float64,
-                "duration_min": pl.Float64,
-            }
-        )
+    if work.is_empty():
+        return _empty_transport_records()
+    work = work.sort(["uid", "stop_id", "seq"])
+
+    # Per-leg raw row count, time span, and first-in-sequence mode.
+    legs = work.group_by(["uid", "stop_id"], maintain_order=True).agg(
+        pl.len().alias("_n"),
+        pl.col("t").max().alias("_t_max"),
+        pl.col("t").min().alias("_t_min"),
+        pl.col("mode").drop_nulls().first().alias("_raw_mode"),
+    )
+
+    # Consecutive-point distance within each leg, restricted to finite
+    # coordinates (lat/lng are already non-null from the drop_nulls above;
+    # this guards against stray inf values, same as the old np.isfinite mask).
+    finite = work.filter(pl.col("lat").is_finite() & pl.col("lng").is_finite())
+    finite = finite.with_columns(
+        pl.col("lat").shift(1).over(["uid", "stop_id"]).alias("_prev_lat"),
+        pl.col("lng").shift(1).over(["uid", "stop_id"]).alias("_prev_lng"),
+    )
+    step_km = _haversine_km_np(
+        finite["_prev_lat"].to_numpy(),
+        finite["_prev_lng"].to_numpy(),
+        finite["lat"].to_numpy(),
+        finite["lng"].to_numpy(),
+    )
+    # A leg's first point has no predecessor (shift produces null -> NaN here)
+    # -- turn it back into a null so the group sum below skips it instead of
+    # propagating NaN, matching the old code's np.nansum.
+    finite = finite.with_columns(pl.Series("_step_km", step_km).fill_nan(None))
+    distances = finite.group_by(["uid", "stop_id"], maintain_order=True).agg(
+        pl.col("_step_km").sum().alias("jump_km"),
+        pl.len().alias("_valid_n"),
+    )
+
+    legs = legs.join(distances, on=["uid", "stop_id"], how="left").filter(
+        (pl.col("_n") >= 2) & (pl.col("_valid_n").fill_null(0) >= 2)
+    )
+    if legs.is_empty():
+        return _empty_transport_records()
+
+    # Mode normalization is a Python-level string/dict lookup, but only over
+    # the small set of *distinct* raw mode values -- not every row.
+    raw_modes = legs["_raw_mode"].unique().drop_nulls().to_list()
+    mode_lookup = {raw: _normalize_transport_mode(raw, mode_map) for raw in raw_modes}
+    legs = legs.with_columns(
+        pl.col("_raw_mode").replace_strict(mode_lookup, default=None, return_dtype=pl.Utf8).alias("mode"),
+        ((pl.col("_t_max") - pl.col("_t_min")).dt.total_seconds() / 60.0).alias("duration_min"),
+    ).filter(pl.col("mode").is_not_null())
+    if legs.is_empty():
+        return _empty_transport_records()
+
+    return legs.select(
+        pl.lit("synthetic").alias("source"),
+        "mode",
+        pl.col("jump_km").fill_null(0.0),
+        "duration_min",
     )
 
 
@@ -240,6 +260,11 @@ def _observed_transport_leg_records(
     duration_col: Optional[str],
     mode_map: dict[str, str],
 ) -> pl.DataFrame:
+    """One row per consecutive pair of observations for the same uid (each
+    row's leg ends at that observation). Fully columnar (window-function
+    shifts) instead of a per-user Python ``for`` loop -- see
+    ``_synthetic_transport_leg_records`` for why that loop matters at scale.
+    """
     uid = uid_col or detect_column(observed_df, _UID_CANDIDATES)
     dt = datetime_col or detect_column(observed_df, _DATETIME_CANDIDATES)
     lat = lat_col or detect_column(observed_df, _LAT_CANDIDATES)
@@ -263,71 +288,65 @@ def _observed_transport_leg_records(
     dur = duration_col if duration_col and duration_col in observed_df.columns else None
     if dur:
         select_cols.append(dur)
-    pdf = (
+    work = (
         observed_df.select(select_cols)
-        .with_columns(_to_datetime(observed_df[dt]).alias(dt))
+        .with_columns(
+            _to_datetime(observed_df[dt]).alias(dt),
+            pl.col(lat).cast(pl.Float64, strict=False),
+            pl.col(lng).cast(pl.Float64, strict=False),
+        )
         .drop_nulls(subset=[uid, dt, lat, lng, mode_col])
         .sort([uid, dt])
-        .to_pandas()
     )
-    if pdf.empty:
-        return pl.DataFrame(
-            schema={
-                "source": pl.Utf8,
-                "mode": pl.Utf8,
-                "jump_km": pl.Float64,
-                "duration_min": pl.Float64,
-            }
+    if work.is_empty():
+        return _empty_transport_records()
+
+    work = work.with_columns(
+        pl.col(lat).shift(1).over(uid).alias("_prev_lat"),
+        pl.col(lng).shift(1).over(uid).alias("_prev_lng"),
+        pl.col(dt).shift(1).over(uid).alias("_prev_t"),
+    )
+    # A user's first observation has no predecessor -> no leg.
+    work = work.filter(pl.col("_prev_lat").is_not_null())
+    if work.is_empty():
+        return _empty_transport_records()
+
+    jump_km = _haversine_km_np(
+        work["_prev_lat"].to_numpy(),
+        work["_prev_lng"].to_numpy(),
+        work[lat].to_numpy(),
+        work[lng].to_numpy(),
+    )
+    work = work.with_columns(pl.Series("jump_km", jump_km)).filter(pl.col("jump_km").is_finite())
+    if work.is_empty():
+        return _empty_transport_records()
+
+    if dur:
+        dur_f = pl.col(dur).cast(pl.Float64, strict=False)
+        valid_dur = dur_f.is_not_null() & dur_f.is_finite()
+        work = work.with_columns(
+            pl.when(valid_dur).then(dur_f).otherwise(None).alias("duration_min")
+        )
+    else:
+        work = work.with_columns(
+            ((pl.col(dt) - pl.col("_prev_t")).dt.total_seconds() / 60.0).alias("duration_min")
         )
 
-    rows: list[dict[str, Any]] = []
-    for _uid, group in pdf.groupby(uid, sort=False):
-        group = group.sort_values(dt)
-        if len(group) < 2:
-            continue
-        prev_lat = group[lat].shift(1)
-        prev_lng = group[lng].shift(1)
-        prev_t = group[dt].shift(1)
-        distances = _haversine_km_np(
-            prev_lat.iloc[1:],
-            prev_lng.iloc[1:],
-            group[lat].iloc[1:],
-            group[lng].iloc[1:],
-        )
-        for idx, jump_km in zip(group.index[1:], distances):
-            if not np.isfinite(jump_km):
-                continue
-            mode = _normalize_transport_mode(group.at[idx, mode_col], mode_map)
-            if mode is None:
-                continue
-            duration_min = None
-            if dur:
-                raw_duration = group.at[idx, dur]
-                if raw_duration is not None and np.isfinite(float(raw_duration)):
-                    duration_min = float(raw_duration)
-            else:
-                delta = group.at[idx, dt] - prev_t.loc[idx]
-                if delta is not None:
-                    duration_min = float(delta.total_seconds() / 60.0)
-            rows.append(
-                {
-                    "source": "observed",
-                    "mode": mode,
-                    "jump_km": float(jump_km),
-                    "duration_min": duration_min,
-                }
-            )
-    return (
-        pl.DataFrame(rows)
-        if rows
-        else pl.DataFrame(
-            schema={
-                "source": pl.Utf8,
-                "mode": pl.Utf8,
-                "jump_km": pl.Float64,
-                "duration_min": pl.Float64,
-            }
-        )
+    # Mode normalization over the distinct raw values only, not every row.
+    raw_modes = work[mode_col].unique().drop_nulls().to_list()
+    mode_lookup = {raw: _normalize_transport_mode(raw, mode_map) for raw in raw_modes}
+    work = work.with_columns(
+        pl.col(mode_col).replace_strict(mode_lookup, default=None, return_dtype=pl.Utf8).alias("mode")
+    )
+    work = work.filter(pl.col("mode").is_not_null())
+    if work.is_empty():
+        return _empty_transport_records()
+
+    return work.select(
+        pl.lit("observed").alias("source"),
+        "mode",
+        "jump_km",
+        "duration_min",
     )
 
 
