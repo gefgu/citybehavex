@@ -185,6 +185,9 @@ The dashboard includes:
 - home/work maps, transport summaries, and social-network validation
 - animated trajectory replay with agent-level inspection
 
+For metric-by-metric calibration guidance, including config knobs and
+fine-tuning levers, see [`CALIBRATION.md`](CALIBRATION.md).
+
 ### Alignment Services
 
 CityBehavEx can run with cached alignment scores, simple fallbacks, or live
