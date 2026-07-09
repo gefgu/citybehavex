@@ -46,13 +46,42 @@ body {
   margin-left: auto;
 }
 .top-nav nav a {
+  position: relative;
   color: var(--muted);
   text-decoration: none;
   font-size: 15px;
+  border-radius: var(--radius-sm);
+  padding: 6px 2px;
+  transition:
+    color 140ms ease,
+    background-color 140ms ease;
+}
+.top-nav nav a::after {
+  content: "";
+  position: absolute;
+  left: 2px;
+  right: 2px;
+  bottom: 1px;
+  height: 2px;
+  background: var(--ink);
+  transform: scaleX(0);
+  transform-origin: center;
+  transition: transform 140ms ease;
+}
+.top-nav nav a:hover {
+  color: var(--ink);
+  background: var(--surface-soft);
+}
+.top-nav nav a:hover::after {
+  transform: scaleX(1);
 }
 .top-nav nav a.active,
 .top-nav nav a[aria-current="page"] {
   color: var(--ink);
+}
+.top-nav nav a.active::after,
+.top-nav nav a[aria-current="page"]::after {
+  transform: scaleX(1);
 }
 
 /* ---- hero band ---- */
@@ -101,22 +130,60 @@ body {
   text-decoration: none;
   cursor: pointer;
   border: 1px solid transparent;
+  transition:
+    background-color 140ms ease,
+    border-color 140ms ease,
+    color 140ms ease,
+    box-shadow 140ms ease,
+    transform 140ms ease;
+}
+.btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(24, 29, 38, 0.1);
+}
+.btn:disabled,
+.btn[aria-disabled="true"] {
+  cursor: not-allowed;
+  opacity: 0.58;
+  transform: none;
+  box-shadow: none;
+}
+.btn-compact {
+  border-radius: var(--radius-sm);
+  min-height: 38px;
+  padding: 9px 14px;
+  font-size: 13px;
+  line-height: 1;
 }
 .btn-primary {
   background: var(--ink);
   color: #fff;
 }
+.btn-primary:hover {
+  background: var(--ink-active);
+  border-color: var(--ink-active);
+}
 .btn-primary:active {
   background: var(--ink-active);
+  transform: translateY(0);
 }
 .btn-secondary {
   background: var(--canvas);
   color: var(--ink);
   border-color: var(--hairline);
 }
+.btn-secondary:hover {
+  background: var(--surface-soft);
+  border-color: var(--surface-strong);
+  color: var(--ink);
+}
 .btn-danger {
   background: var(--canvas);
   color: var(--coral);
+  border-color: var(--coral);
+}
+.btn-danger:hover {
+  background: color-mix(in srgb, var(--coral) 8%, var(--canvas));
   border-color: var(--coral);
 }
 
@@ -205,13 +272,15 @@ body {
 }
 .exp-card .exp-head {
   display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: var(--space-md);
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-xs);
 }
 .exp-card h3 {
   margin: 0;
-  overflow-wrap: anywhere;
+  max-width: 100%;
+  overflow-wrap: normal;
+  word-break: normal;
 }
 .exp-toggle {
   align-self: flex-start;
@@ -326,14 +395,20 @@ body {
 .run-row .run-meta { color: var(--muted); font-variant-numeric: tabular-nums; }
 .run-actions {
   display: flex;
+  align-items: center;
   flex-wrap: wrap;
   gap: var(--space-xs);
   justify-content: flex-end;
   margin-left: auto;
 }
 .run-actions .btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 34px;
   padding: 4px 12px;
   font-size: 13px;
+  line-height: 1;
 }
 
 /* ---- section headers ---- */
@@ -351,6 +426,13 @@ body {
   letter-spacing: 0.1em;
   color: var(--muted);
   margin: 0;
+}
+.section-description {
+  max-width: 760px;
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.45;
 }
 .section-controls {
   display: flex;
@@ -385,6 +467,87 @@ table.metrics td.unit { color: var(--muted); }
   min-width: 74px;
   color: var(--muted);
   font-size: 12px;
+}
+.title-with-help {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  vertical-align: baseline;
+}
+.metric-help {
+  position: relative;
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+}
+.metric-help-button {
+  display: inline-grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--hairline);
+  border-radius: 999px;
+  background: var(--surface-soft);
+  color: var(--muted);
+  cursor: help;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  transition:
+    background-color 140ms ease,
+    border-color 140ms ease,
+    color 140ms ease,
+    transform 140ms ease;
+}
+.metric-help-button:hover,
+.metric-help-button:focus-visible {
+  background: var(--ink);
+  border-color: var(--ink);
+  color: #ffffff;
+  transform: translateY(-1px);
+  outline: none;
+}
+.metric-help-tooltip {
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 8px);
+  z-index: 40;
+  width: min(280px, 70vw);
+  padding: 8px 10px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-sm);
+  background: var(--ink);
+  color: #ffffff;
+  box-shadow: 0 8px 20px rgba(24, 29, 38, 0.18);
+  font-size: 12px;
+  font-weight: 400;
+  letter-spacing: 0;
+  line-height: 1.35;
+  opacity: 0;
+  pointer-events: none;
+  text-transform: none;
+  transform: translate(-50%, 4px);
+  transition:
+    opacity 140ms ease,
+    transform 140ms ease;
+}
+.metric-help-tooltip::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 100%;
+  width: 8px;
+  height: 8px;
+  background: var(--ink);
+  transform: translate(-50%, -4px) rotate(45deg);
+}
+.metric-help:hover .metric-help-tooltip,
+.metric-help:focus-within .metric-help-tooltip {
+  opacity: 1;
+  transform: translate(-50%, 0);
 }
 /* ---- charts ---- */
 .segmented-control {

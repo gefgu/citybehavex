@@ -41,18 +41,118 @@ function ChartCard({
   option,
   wide = false,
   subtitle,
+  helpKey,
 }: {
   title: string;
   option: EChartsOption;
   wide?: boolean;
   subtitle?: ReactNode;
+  helpKey?: string;
 }) {
   return (
     <div className={`chart-card${wide ? " wide" : ""}`}>
-      <h4>{title}</h4>
+      <h4><TitleWithHelp label={title} helpKey={helpKey} /></h4>
       <EChart option={option} />
       {subtitle}
     </div>
+  );
+}
+
+const CALIBRATION_HELP: Record<string, string> = {
+  "Wasserstein distances": "Tune the metric-specific generator knobs, then rerun. Wasserstein falls when the synthetic distribution shifts toward the observed distribution.",
+  "Jensen-Shannon divergences": "Tune activity, schedule, and motif settings or retrain aligners. JSD falls when the categorical profiles assign similar probability mass.",
+  "Common Part of Commuters": "Improve home/work placement with profiles.home_* and profiles.work_distance_*. CPC rises when synthetic commute flows overlap observed OD flows.",
+  "Time-use metrics": "Tune activities.durations.*, activities.kappa, and activities.temperature. Time-use error falls when synthetic daily minutes match survey shares.",
+  "STVD distances": "Tune home/work placement, gravity, and schedule timing. STVD falls when volume appears in the same places at the same times.",
+  "Spatial-temporal volume difference": "Tune spatial placement and schedule timing. The map improves when volume errors shrink in both H3 cells and time bins.",
+  "Jump lengths": "Adjust simulation.gravity_deterrence_exponent, simulation.rho, and transport routing. These control destination distance and exploration pressure.",
+  "Jump length": "Adjust simulation.gravity_deterrence_exponent, simulation.rho, and transport routing. These control destination distance and exploration pressure.",
+  "jump_length": "Adjust simulation.gravity_deterrence_exponent, simulation.rho, and transport routing. These control destination distance and exploration pressure.",
+  "Visits per user": "Tune diaries.location_count_*, schedule.alpha_beta_*, and simulation.gamma. These change how many distinct stops agents accumulate.",
+  "Radius of gyration": "Tune simulation.gravity_deterrence_exponent, profiles.work_distance_*, and simulation.rho. These change each agent's activity-space spread.",
+  "radius_of_gyration": "Tune simulation.gravity_deterrence_exponent, profiles.work_distance_*, and simulation.rho. These change each agent's activity-space spread.",
+  "Dwell time": "Tune activities.durations.* and simulation.granularity_minutes. Dwell-time fit improves when stop durations match the observed stay process.",
+  "Trip duration (car)": "Tune car_speed_kmh, road_network routing, and max_leg_waypoints. Trip duration tracks route distance and speed assumptions.",
+  "Trip duration": "Tune car_speed_kmh, road_network routing, and max_leg_waypoints. Trip duration tracks route distance and speed assumptions.",
+  "Activity distribution": "Tune activities.kappa, activities.temperature, and the activity aligner. They control which micro-activities are selected inside diary blocks.",
+  "Daily activity profile": "Tune schedule.temperature_beta_* and activity durations. The profile improves when activity timing and duration match by time of day.",
+  "Daily motifs": "Tune diaries.motif_exploration_rate, diaries.location_count_*, and schedule.alpha_beta_*. Motifs improve when daily stop patterns have matching complexity.",
+  "STVD-EMD": "Tune spatial placement, gravity deterrence, and schedule timing. EMD falls when spatial-temporal volume moves closer to observed cells.",
+  "Mean absolute time-use share difference": "Tune activities.durations.* and activity alignment. The error falls when each activity category consumes the right share of the day.",
+  "Travel-distance mobility law": "Tune gravity_deterrence_exponent, simulation.rho, and road-network distance. The fitted tail follows the generated trip-distance process.",
+  "Radius-of-gyration mobility law": "Tune work-distance placement, gravity deterrence, and exploration. These determine each agent's spatial range.",
+  "Daily visited locations": "Tune diaries.location_count_mu, diaries.location_count_sigma, max_locations, and schedule exploration. These set daily stop-count shape.",
+  "Distance-frequency visitation law": "Tune simulation.gamma and schedule.alpha_beta_*. Preferential return controls how often agents revisit near/frequent places.",
+  "Trips by transport mode": "Tune vehicle ownership, walking/bike thresholds, and road/rail availability. Mode share changes when eligibility and thresholds change.",
+  "Trips": "Tune vehicle ownership, walking/bike thresholds, and road/rail availability. Trip counts by mode follow mode eligibility and routing availability.",
+  "Share": "Tune ownership, thresholds, and road/rail availability. Share improves when mode choice proportions match observed behavior.",
+  "Mean jump": "Tune gravity deterrence and mode thresholds. Mean jump improves when each transport mode covers realistic distance ranges.",
+  "Mean duration": "Tune speeds and routing. Mean duration follows path distance, waypoints, and per-mode speed assumptions.",
+  "Jump length by transport mode": "Tune transport thresholds and routing speeds. Mode-specific distance improves when mode assignment matches trip-length regimes.",
+  "Visit purpose comparison": "Tune diary prompts, schedule aligner, and activity purpose mapping. Purpose share follows macro-diary composition.",
+  "Activity transition difference": "Tune schedule aligner and diary pools. Transition gaps fall when consecutive macro-activities resemble observed sequences.",
+  "Activity transitions": "Tune schedule aligner and diary pools. Transition gaps fall when consecutive macro-activities resemble observed sequences.",
+  "Daily activity difference": "Tune activity durations and activity aligner temperature. Time-bin differences fall when activity timing is better calibrated.",
+  "Daily activity": "Tune activity durations and activity aligner temperature. Time-bin differences fall when activity timing is better calibrated.",
+  "Mean daily usage over the day": "Tune activities.durations.*, activities.kappa, and the activity aligner. Usage curves improve when micro-activities occupy the right times.",
+  "Mean daily minutes": "Tune duration overrides and diary prompts. Category minutes improve when generated routines allocate the right daily time budget.",
+  "Synthetic difference from time-use": "Tune the categories with the largest bars first through activities.durations.* or diary prompts. The chart is signed error by category.",
+  "Motif literature comparison": "Tune motif_exploration_rate, location-count distribution, and schedule exploration. Motif shares reflect daily sequence complexity.",
+  "Home locations": "Tune profiles.home_building_weight, profiles.home_poi_inverse_weight, and home anchors. Home maps improve when residences land in realistic cells.",
+  "Work locations": "Tune profiles.work_distance_*, work_poi_weight, and work_building_weight. Work maps improve when employment anchors and commute distances match.",
+  "Social network": "Tune social degree, similarity, and dynamic friendship settings. Network metrics improve when durable ties and repeated encounters match baselines.",
+  "Degree": "Tune social.degree_*, social.social_graph_k, and max_dynamic_degree. Degree tracks how many durable and encounter ties each agent has.",
+  "Clustering coefficient": "Tune social.similarity_temperature, H3 resolutions, and dynamic friendship thresholds. Clustering rises when friends share local neighborhoods.",
+  "Edge persistence": "Tune encounter_window_hours, regularity_threshold, and schedule repeatability. Persistence improves when repeated co-presence is calibrated.",
+  "Topological overlap": "Tune social.topological_overlap_threshold and profile similarity. Overlap improves when connected agents share neighbor sets realistically.",
+  "Synthetic vs observed Wasserstein": "Tune the social config against observed network summaries. Lower values mean synthetic network metric distributions moved closer to observed.",
+  "Synthetic vs random Wasserstein": "Tune social tie formation if the synthetic graph is too random-like or too structured. This compares against a degree-preserving baseline.",
+  "Observed vs random Wasserstein": "Use comparison.network_validation.* to make observed co-presence construction meaningful. Bad location/time grouping can distort this baseline.",
+  "Intermittency vs degree of return": "Tune simulation.gamma, schedule.alpha_beta_*, and diary diversity. These profile axes separate routine from exploratory mobility.",
+  "Intermittency": "Tune schedule.alpha_beta_* and simulation.gamma. Intermittency changes when agents alternate between routine and exploratory days.",
+  "intermittency": "Tune schedule.alpha_beta_* and simulation.gamma. Intermittency changes when agents alternate between routine and exploratory days.",
+  "Degree of return": "Tune simulation.gamma and schedule reuse. Degree of return rises when agents repeatedly revisit the same locations.",
+  "degree_of_return": "Tune simulation.gamma and schedule reuse. Degree of return rises when agents repeatedly revisit the same locations.",
+  "Visits": "Tune diaries.location_count_* and schedule exploration. Visit counts reflect how many stops each agent-day generates.",
+  "visits": "Tune diaries.location_count_* and schedule exploration. Visit counts reflect how many stops each agent-day generates.",
+  "Mobility profiles": "Tune exploration, return, and schedule reuse. Profile charts improve when routine and exploratory behavior match observed agents.",
+};
+
+function calibrationHelpFor(label?: string) {
+  if (!label) return null;
+  const direct = CALIBRATION_HELP[label];
+  if (direct) return direct;
+  const withoutEcdf = label.replace(/\s+ECDF$/i, "");
+  return CALIBRATION_HELP[withoutEcdf] ?? null;
+}
+
+function HelpIcon({ help }: { help: string }) {
+  return (
+    <span className="metric-help">
+      <button aria-label={`Calibration tip: ${help}`} className="metric-help-button" type="button">
+        ?
+      </button>
+      <span className="metric-help-tooltip" role="tooltip">
+        {help}
+      </span>
+    </span>
+  );
+}
+
+function TitleWithHelp({
+  label,
+  helpKey,
+}: {
+  label: ReactNode;
+  helpKey?: string;
+}) {
+  const text = typeof label === "string" ? label : helpKey;
+  const help = calibrationHelpFor(helpKey ?? text);
+  return (
+    <span className="title-with-help">
+      <span>{label}</span>
+      {help && <HelpIcon help={help} />}
+    </span>
   );
 }
 
@@ -295,13 +395,18 @@ function SegmentedControl({
 function SectionHeading({
   title,
   controls,
+  description,
 }: {
   title: string;
   controls?: ReactNode;
+  description?: string;
 }) {
   return (
     <div className="section-heading-row">
-      <div className="section-header">{title}</div>
+      <div>
+        <div className="section-header"><TitleWithHelp label={title} /></div>
+        {description && <p className="section-description">{description}</p>}
+      </div>
       {controls && <div className="section-controls">{controls}</div>}
     </div>
   );
@@ -323,19 +428,23 @@ function FilteredMetricTable({
   if (rows.length === 0) return null;
   return (
     <div>
-      <h4>{title}</h4>
+      <h4><TitleWithHelp label={title} /></h4>
       <table className="metrics">
         <tbody>
-          {rows.map((m, i) => (
-            <tr key={`${m.filter_key ?? "all"}:${metricName(m)}:${m.resolution ?? i}`}>
-              <td>
-                <span className="metric-filter">{m.filter_label ?? "All"}</span>
-                {m.resolution ? `H3 ${m.resolution}` : metricName(m)}
-              </td>
-              <td className="value">{m.value.toFixed(4)}</td>
-              <td className="unit">{m.unit ?? unit ?? ""}</td>
-            </tr>
-          ))}
+          {rows.map((m, i) => {
+            const label = m.resolution ? `H3 ${m.resolution}` : metricName(m);
+            const helpKey = m.resolution ? title : metricName(m);
+            return (
+              <tr key={`${m.filter_key ?? "all"}:${metricName(m)}:${m.resolution ?? i}`}>
+                <td>
+                  <span className="metric-filter">{m.filter_label ?? "All"}</span>
+                  <TitleWithHelp label={label} helpKey={helpKey} />
+                </td>
+                <td className="value">{m.value.toFixed(4)}</td>
+                <td className="unit">{m.unit ?? unit ?? ""}</td>
+              </tr>
+            );
+          })}
         </tbody>
       </table>
     </div>
@@ -350,9 +459,10 @@ function NetworkValidationTable({
   sourceLabel: "synthetic" | "observed";
 }) {
   if (!validation) return null;
+  const title = `${sourceLabel === "synthetic" ? "Synthetic" : "Observed"} vs random Wasserstein`;
   return (
     <div>
-      <h4>{sourceLabel === "synthetic" ? "Synthetic" : "Observed"} vs random Wasserstein</h4>
+      <h4><TitleWithHelp label={title} /></h4>
       <table className="metrics">
         <tbody>
           {Object.entries(NETWORK_VALIDATION_TITLES).map(([key, label]) => {
@@ -362,7 +472,7 @@ function NetworkValidationTable({
             return (
               <tr key={key}>
                 <td>
-                  {label}
+                  <TitleWithHelp label={label} />
                   <span className="metric-filter">
                     {sourceLabel} n={source?.count ?? 0} · random n={rnd?.count ?? 0}
                   </span>
@@ -386,7 +496,7 @@ function NetworkObservedComparisonTable({
   if (!validation) return null;
   return (
     <div>
-      <h4>Synthetic vs observed Wasserstein</h4>
+      <h4><TitleWithHelp label="Synthetic vs observed Wasserstein" /></h4>
       <table className="metrics">
         <tbody>
           {Object.entries(NETWORK_VALIDATION_TITLES).map(([key, label]) => {
@@ -396,7 +506,7 @@ function NetworkObservedComparisonTable({
             return (
               <tr key={key}>
                 <td>
-                  {label}
+                  <TitleWithHelp label={label} />
                   <span className="metric-filter">
                     synthetic n={synthetic?.count ?? 0} · observed n={observed?.count ?? 0}
                   </span>
@@ -734,15 +844,18 @@ export function Charts() {
               value={dayFilter}
             />
             <button
-              className="btn btn-secondary"
+              aria-label="Export chart metrics as JSON"
+              className="btn btn-secondary btn-compact"
               disabled={exportingMetrics}
               onClick={() => void handleMetricsExport()}
+              title="Download the current run's validation metrics as a JSON file"
               type="button"
             >
               {exportingMetrics ? "Exporting..." : "Export JSON"}
             </button>
           </>
         }
+        description="Summary distances between synthetic and observed behavior; smaller Wasserstein, Jensen-Shannon, time-use, STVD, and CPC gaps indicate closer agreement."
         title="Metrics"
       />
       {payload.mode === "synthetic_only" ? (
@@ -775,6 +888,7 @@ export function Charts() {
             value={distributionFilter}
           />
         }
+        description="ECDFs show the share of people or visits below each value, comparing trip lengths, visit counts, mobility radius, dwell time, and trip duration."
         title="Distribution comparisons"
       />
       {distributionFilterLoading && (
@@ -789,7 +903,12 @@ export function Charts() {
       {!distributionFilterLoading && ecdfGroup && (
         <div className="chart-grid">
           {Object.entries(ecdfGroup.blocks).map(([key, block]) => (
-            <ChartCard key={key} title={`${ECDF_TITLES[key] ?? key} ECDF`} option={ecdfOption(block)} />
+            <ChartCard
+              key={key}
+              title={`${ECDF_TITLES[key] ?? key} ECDF`}
+              helpKey={ECDF_TITLES[key] ?? key}
+              option={ecdfOption(block)}
+            />
           ))}
         </div>
       )}
@@ -797,14 +916,19 @@ export function Charts() {
       {isSectionLoading("transport-spatial") && <div className="state">Building transport mobility…</div>}
       {!isSectionLoading("transport-spatial") && payload.transport_spatial && (
         <>
-          <SectionHeading title="Transport mobility" />
+          <SectionHeading
+            description="Breaks trips down by inferred transport mode and compares the distance distribution within each mode."
+            title="Transport mobility"
+          />
           <div className="chart-grid">
             <ChartCard
               title="Trips by transport mode"
+              helpKey="Trips by transport mode"
               option={transportShareOption(payload.transport_spatial.share)}
             />
             <ChartCard
               title="Jump length by transport mode"
+              helpKey="Jump length by transport mode"
               option={ecdfOption(payload.transport_spatial.jump_ecdf)}
             />
           </div>
@@ -815,10 +939,10 @@ export function Charts() {
                 <thead>
                   <tr>
                     <th>Mode</th>
-                    <th>Trips</th>
-                    <th>Share</th>
-                    <th>Mean jump</th>
-                    <th>Mean duration</th>
+                    <th><TitleWithHelp label="Trips" /></th>
+                    <th><TitleWithHelp label="Share" /></th>
+                    <th><TitleWithHelp label="Mean jump" /></th>
+                    <th><TitleWithHelp label="Mean duration" /></th>
                   </tr>
                 </thead>
                 <tbody>
@@ -850,6 +974,7 @@ export function Charts() {
             value={dayFilter}
           />
         }
+        description="Power-law and log-normal fits test whether travel distances, radius of gyration, daily locations, and visitation frequency follow known mobility laws."
         title="Mobility laws"
       />
       {mobilityLawsLoading ? (
@@ -862,6 +987,7 @@ export function Charts() {
               <ChartCard
                 key={key}
                 title={block.title}
+                helpKey={block.title}
                 option={lawOption(block)}
                 subtitle={<FitParams block={block} />}
               />
@@ -880,6 +1006,7 @@ export function Charts() {
             value={dayFilter}
           />
         }
+        description="Compares visit purposes, transitions between activities, and time-of-day activity intensity between synthetic and observed traces."
         title="Activity comparison"
       />
       {activityLoading ? (
@@ -888,14 +1015,21 @@ export function Charts() {
         <div className="state">Failed to load activity comparison: {sectionError("activity", dayFilter)}</div>
       ) : activityGroup ? (
           <div className="chart-grid">
-            <ChartCard title="Visit purpose comparison" option={purposeOption(activityGroup.purpose)} wide />
+            <ChartCard
+              title="Visit purpose comparison"
+              helpKey="Visit purpose comparison"
+              option={purposeOption(activityGroup.purpose)}
+              wide
+            />
             <ChartCard
               title={activityGroup.transition_difference.matrix_mode === "raw" ? "Activity transitions" : "Activity transition difference"}
+              helpKey={activityGroup.transition_difference.matrix_mode === "raw" ? "Activity transitions" : "Activity transition difference"}
               option={transitionOption(activityGroup.transition_difference)}
             />
             {activityGroup.daily_activity_difference && (
               <ChartCard
                 title={activityGroup.daily_activity_difference.matrix_mode === "raw" ? "Daily activity" : "Daily activity difference"}
+                helpKey={activityGroup.daily_activity_difference.matrix_mode === "raw" ? "Daily activity" : "Daily activity difference"}
                 option={dailyActivityOption(activityGroup.daily_activity_difference)}
               />
             )}
@@ -913,6 +1047,7 @@ export function Charts() {
             value={dayFilter}
           />
         }
+        description="Shows how synthetic fine-grained activity labels are distributed through the day, useful for checking generated diary rhythms."
         title="Synthetic micro-activity usage"
       />
       {microActivityLoading ? (
@@ -922,6 +1057,7 @@ export function Charts() {
       ) : microActivityGroup ? (
           <ChartCard
             title="Mean daily usage over the day"
+            helpKey="Mean daily usage over the day"
             option={microActivityUsageOption(microActivityGroup.block)}
             wide
           />
@@ -938,6 +1074,7 @@ export function Charts() {
             value={dayFilter}
           />
         }
+        description="Compares minutes per day in broad activity categories against time-use survey targets and shows synthetic-minus-reference deviations."
         title="Time-use comparison"
       />
       {timeUseLoading ? (
@@ -948,11 +1085,13 @@ export function Charts() {
           <div className="chart-grid">
             <ChartCard
               title="Mean daily minutes"
+              helpKey="Mean daily minutes"
               option={timeUseGroupedOption(timeUseGroup.block)}
               wide
             />
             <ChartCard
               title="Synthetic difference from time-use"
+              helpKey="Synthetic difference from time-use"
               option={timeUseDifferenceOption(timeUseGroup.block)}
               wide
             />
@@ -970,6 +1109,7 @@ export function Charts() {
             value={dayFilter}
           />
         }
+        description="Daily motifs summarize each agent-day as a compact sequence of visited activity types, then compare motif frequencies with literature patterns."
         title="Daily motifs"
       />
       {motifsLoading ? (
@@ -978,7 +1118,12 @@ export function Charts() {
         <div className="state">Failed to load motifs: {sectionError("motifs", dayFilter)}</div>
       ) : motifGroup ? (
           <div className="chart-grid">
-            <ChartCard title="Motif literature comparison" option={motifOption(motifGroup.block)} wide />
+            <ChartCard
+              title="Motif literature comparison"
+              helpKey="Motif literature comparison"
+              option={motifOption(motifGroup.block)}
+              wide
+            />
           </div>
       ) : (
         <div className="state">No motifs returned for {dayFilter}.</div>
@@ -993,6 +1138,7 @@ export function Charts() {
             value={dayFilter}
           />
         }
+        description="STVD maps where and when synthetic traffic volume differs from observed volume; values are spatial-temporal cell differences."
         title="Spatial-temporal volume difference"
       />
       {stvdLoading ? (
@@ -1017,6 +1163,7 @@ export function Charts() {
                 />
               ) : undefined
             }
+            description="Maps estimated home locations by H3 cell so residential spatial density can be compared across synthetic and observed populations."
             title="Home locations"
           />
           {homeWork.has_profiles && (
@@ -1031,7 +1178,10 @@ export function Charts() {
             observedLabel={payload.labels.observed}
           />
 
-          <SectionHeading title="Work locations" />
+          <SectionHeading
+            description="Maps estimated work locations by H3 cell, highlighting whether simulated commuters concentrate in the same employment areas."
+            title="Work locations"
+          />
           <HomeWorkMap
             block={homeWork.work}
             syntheticLabel={payload.labels.synthetic}
@@ -1040,7 +1190,10 @@ export function Charts() {
         </>
       )}
 
-      <SectionHeading title="Social network" />
+      <SectionHeading
+        description="Validates encounter and social-network structure using degree, clustering, component, and path metrics against random or observed baselines."
+        title="Social network"
+      />
       {networkValidationBlock ? (
         <>
           {networkValidationBlock.synthetic_vs_observed && (
@@ -1078,7 +1231,10 @@ export function Charts() {
         </div>
       )}
 
-      <SectionHeading title="Mobility profiles" />
+      <SectionHeading
+        description="Classifies mobility regularity with degree of return, intermittency, and related profile metrics that separate routine from exploratory behavior."
+        title="Mobility profiles"
+      />
       {profilesLoading ? (
         <div className="state">Building mobility profiles…</div>
       ) : sectionError("profiles") ? (
@@ -1087,6 +1243,7 @@ export function Charts() {
           <div className="chart-grid">
             <ChartCard
               title="Intermittency vs degree of return"
+              helpKey="Intermittency vs degree of return"
               option={profileScatterOption(payload.profiles)}
               wide
             />
@@ -1094,6 +1251,7 @@ export function Charts() {
               <ChartCard
                 key={metric}
                 title={metric[0].toUpperCase() + metric.slice(1)}
+                helpKey={metric}
                 option={profileBoxOption(payload.profiles!, metric)}
               />
             ))}
