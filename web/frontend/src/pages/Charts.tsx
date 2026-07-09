@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import type { EChartsOption } from "echarts";
@@ -11,6 +11,7 @@ import {
   type ChartPayload,
   type DemographicFilter as DemographicFilterValue,
   type HomeWorkResponse,
+  type LawBlock,
   type NetworkValidationComparisonBlock,
   type NetworkValidationMetricComparisonBlock,
   type NetworkValidationResponse,
@@ -44,13 +45,99 @@ function ChartCard({
   title: string;
   option: EChartsOption;
   wide?: boolean;
-  subtitle?: string;
+  subtitle?: ReactNode;
 }) {
   return (
     <div className={`chart-card${wide ? " wide" : ""}`}>
       <h4>{title}</h4>
       <EChart option={option} />
-      {subtitle && <div className="fit-params">{subtitle}</div>}
+      {subtitle}
+    </div>
+  );
+}
+
+const PARAM_SYMBOLS: Record<string, string> = {
+  beta: "β",
+  c: "c",
+  eta: "η",
+  kappa: "κ",
+  mu: "μ",
+  r0: "r₀",
+  sigma: "σ",
+};
+
+function mobilityParamSymbol(key: string, block: LawBlock) {
+  if (key === "r0" && block.x_label === "travel distance") return "Δr₀";
+  if (key === "r0" && block.x_label === "radius of gyration") return "rᵍ₀";
+  return PARAM_SYMBOLS[key] ?? key;
+}
+
+function displayLawLabel(label: string) {
+  return label.replace(/\bGonzalez\b/g, "González");
+}
+
+function formatParamValue(value: number, unit?: string) {
+  const formatted = Number(value).toPrecision(3);
+  return unit ? `${formatted} ${unit}` : formatted;
+}
+
+function mobilityParamUnit(key: string, block: LawBlock) {
+  if (key === "r0" || key === "kappa") return block.x_unit || undefined;
+  return undefined;
+}
+
+function referenceParams(block: LawBlock): { label: string; params: Record<string, string> } | null {
+  if (block.title === "Daily visited locations") {
+    return { label: "Log-normal reference", params: { mu: "1.00", sigma: "0.5" } };
+  }
+  if (block.x_label === "r · f") {
+    return { label: "Distance-frequency reference", params: { eta: "2.0", mu: "dataset-dependent" } };
+  }
+  if (block.x_label === "travel distance") {
+    return {
+      label: "González reference",
+      params: { beta: "1.75", r0: "1.5 km", kappa: "400 km" },
+    };
+  }
+  if (block.x_label === "radius of gyration") {
+    return {
+      label: "González reference",
+      params: { r0: "5.8 km", beta: "1.65", kappa: "350 km" },
+    };
+  }
+  return null;
+}
+
+function FitParams({ block }: { block: LawBlock }) {
+  const reference = referenceParams(block);
+  return (
+    <div className="fit-params">
+      {block.fits.map((fit) => (
+        <div className="fit-param-row" key={fit.label}>
+          <span className="fit-param-label">{displayLawLabel(fit.label)}</span>
+          <span>
+            {Object.entries(fit.params).map(([key, value], index) => (
+              <span key={key}>
+                {index > 0 && ", "}
+                {mobilityParamSymbol(key, block)}={formatParamValue(value, mobilityParamUnit(key, block))}
+              </span>
+            ))}
+          </span>
+        </div>
+      ))}
+      {reference && (
+        <div className="fit-param-row reference">
+          <span className="fit-param-label">{reference.label}</span>
+          <span>
+            {Object.entries(reference.params).map(([key, value], index) => (
+              <span key={key}>
+                {index > 0 && ", "}
+                {mobilityParamSymbol(key, block)}={value}
+              </span>
+            ))}
+          </span>
+        </div>
+      )}
     </div>
   );
 }
@@ -533,19 +620,6 @@ export function Charts() {
     };
   }, [demoFilter]);
 
-  const fitSubtitle = useMemo(
-    () => (fits: { label: string; params: Record<string, number> }[]) =>
-      fits
-        .map(
-          (f) =>
-            `${f.label}: ${Object.entries(f.params)
-              .map(([k, v]) => `${k}=${Number(v).toPrecision(3)}`)
-              .join(", ")}`,
-        )
-        .join("  ·  "),
-    [],
-  );
-
   if (error) return <div className="state">Failed to load charts: {error}</div>;
   if (!payload)
     return <div className="state">Building comparison… (first load can take a while)</div>;
@@ -789,7 +863,7 @@ export function Charts() {
                 key={key}
                 title={block.title}
                 option={lawOption(block)}
-                subtitle={fitSubtitle(block.fits)}
+                subtitle={<FitParams block={block} />}
               />
             ))}
           </div>
