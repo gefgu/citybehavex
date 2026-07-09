@@ -227,7 +227,14 @@ def embed_texts(
                         api_key=config.api_key,
                         timeout=config.timeout_seconds,
                     )
-        except Exception:  # noqa: BLE001 - any failure falls back to caller default.
+            else:
+                print(
+                    "Embedding backend unavailable: no reachable base_url "
+                    f"({config.base_url!r}) and auto_launch is disabled.",
+                    flush=True,
+                )
+        except Exception as exc:  # noqa: BLE001 - any failure falls back to caller default.
+            print(f"Embedding backend failed: {exc}", flush=True)
             return None
         if computed is None:
             return None

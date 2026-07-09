@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional
 
 import numpy as np
 import requests
@@ -32,6 +33,7 @@ def fetch_diary_batch(
     random_state: int = 0,
     variant: str = "",
     stats: Optional[LLMStats] = None,
+    progress_callback: Optional[Callable[[str, int, int, LLMStats], None]] = None,
     requests_module=requests,
 ) -> DiaryBatch:
     base_valid_path = cache_path(config)
@@ -100,7 +102,11 @@ def fetch_diary_batch(
         generated_by_count: dict[int, list[Diary]] = {}
         last_error: Exception | None = None
 
-        for diary_number, diary_location_count in enumerate(expected_location_counts, start=1):
+        def generate_one(
+            diary_number: int,
+            diary_location_count: int,
+            previous_diaries: list[Diary] | None,
+        ) -> Diary:
             diary_rng = np.random.default_rng(
                 np.random.SeedSequence([int(random_state), diary_number])
             )
@@ -117,11 +123,10 @@ def fetch_diary_batch(
                 representative_day=representative_day,
                 purpose_distribution=purpose_distribution,
                 location_count=diary_location_count,
-                previous_diaries=generated_by_count.get(diary_location_count),
+                previous_diaries=previous_diaries,
                 motif_rule=motif_rule,
             )
 
-            diary: Diary | None = None
             for _ in range(max(config.retries, 1)):
                 try:
                     payload = client.generate_json(prompt, stats=stats)
@@ -133,13 +138,68 @@ def fetch_diary_batch(
                             "one-location diary must contain only HOME episodes"
                         )
                     diary.diary_id = f"routine-{diary_number:03d}"
-                    break
+                    return diary
                 except Exception as exc:  # noqa: BLE001 - converted to cache fallback or domain error.
-                    last_error = exc
-            if diary is None:
+                    last_attempt_error = exc
+            raise DiaryValidationError(
+                f"failed to generate diary {diary_number}: {last_attempt_error}"
+            )
+
+        pending = list(enumerate(expected_location_counts, start=1))
+        while pending:
+            wave = pending[: max(config.concurrency, 1)]
+            pending = pending[len(wave) :]
+            snapshots = {
+                diary_number: list(generated_by_count.get(location_count, []))
+                for diary_number, location_count in wave
+            }
+            wave_results: dict[int, tuple[int, Diary]] = {}
+            if config.concurrency <= 1:
+                for diary_number, location_count in wave:
+                    try:
+                        diary = generate_one(diary_number, location_count, snapshots[diary_number])
+                    except Exception as exc:  # noqa: BLE001
+                        last_error = exc
+                        break
+                    wave_results[diary_number] = (location_count, diary)
+                    if progress_callback is not None:
+                        progress_callback(
+                            variant,
+                            len(diaries) + len(wave_results),
+                            config.diary_count,
+                            stats or LLMStats(),
+                        )
+            else:
+                with ThreadPoolExecutor(max_workers=config.concurrency) as executor:
+                    futures = {
+                        executor.submit(
+                            generate_one,
+                            diary_number,
+                            location_count,
+                            snapshots[diary_number],
+                        ): (diary_number, location_count)
+                        for diary_number, location_count in wave
+                    }
+                    for future in as_completed(futures):
+                        diary_number, location_count = futures[future]
+                        try:
+                            wave_results[diary_number] = (location_count, future.result())
+                        except Exception as exc:  # noqa: BLE001
+                            last_error = exc
+                            break
+                        if progress_callback is not None:
+                            progress_callback(
+                                variant,
+                                len(diaries) + len(wave_results),
+                                config.diary_count,
+                                stats or LLMStats(),
+                            )
+            if last_error is not None:
                 break
-            diaries.append(diary)
-            generated_by_count.setdefault(diary_location_count, []).append(diary)
+            for diary_number in sorted(wave_results):
+                location_count, diary = wave_results[diary_number]
+                diaries.append(diary)
+                generated_by_count.setdefault(location_count, []).append(diary)
 
         if len(diaries) == config.diary_count:
             try:

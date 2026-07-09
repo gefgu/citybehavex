@@ -12,6 +12,7 @@ import {
   type DemographicFilter as DemographicFilterValue,
   type HomeWorkResponse,
   type NetworkValidationComparisonBlock,
+  type NetworkValidationMetricComparisonBlock,
   type NetworkValidationResponse,
 } from "../api";
 import { EChart } from "../charts/EChart";
@@ -283,21 +284,59 @@ function NetworkValidationTable({
   );
 }
 
+function NetworkObservedComparisonTable({
+  validation,
+}: {
+  validation: NetworkValidationMetricComparisonBlock | undefined;
+}) {
+  if (!validation) return null;
+  return (
+    <div>
+      <h4>Synthetic vs observed Wasserstein</h4>
+      <table className="metrics">
+        <tbody>
+          {Object.entries(NETWORK_VALIDATION_TITLES).map(([key, label]) => {
+            const value = validation.wasserstein[key as keyof typeof validation.wasserstein];
+            const synthetic = validation.distributions.synthetic[key];
+            const observed = validation.distributions.observed[key];
+            return (
+              <tr key={key}>
+                <td>
+                  {label}
+                  <span className="metric-filter">
+                    synthetic n={synthetic?.count ?? 0} · observed n={observed?.count ?? 0}
+                  </span>
+                </td>
+                <td className="value">{value == null ? "n/a" : value.toFixed(4)}</td>
+                <td className="unit" />
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 function NetworkValidationSection({
   block,
   sourceLabel,
   sourceTitle,
+  showWasserstein = true,
 }: {
   block: NetworkValidationComparisonBlock | undefined;
   sourceLabel: "synthetic" | "observed";
   sourceTitle: string;
+  showWasserstein?: boolean;
 }) {
   if (!block) return null;
   return (
     <>
-      <div className="metric-tables">
-        <NetworkValidationTable validation={block} sourceLabel={sourceLabel} />
-      </div>
+      {showWasserstein && (
+        <div className="metric-tables">
+          <NetworkValidationTable validation={block} sourceLabel={sourceLabel} />
+        </div>
+      )}
       <div className="network-validation-grid">
         <SocialNetworkGraph block={block.source_network} title={sourceTitle} />
         <SocialNetworkGraph block={block.random_network} title="Degree-preserving random" />
@@ -556,6 +595,8 @@ export function Charts() {
   const metricSectionFilter = distributionFilter === "all" ? dayFilter : distributionFilter;
   const metricsLoading = isSectionLoading("metrics", metricSectionFilter);
   const distributionFilterLoading = isSectionLoading("distributions", distributionFilter);
+  const networkValidationBlock = networkValidation?.network_validation;
+  const hasObservedSocialNetwork = Boolean(networkValidationBlock?.observed_vs_random);
   const titleLabel =
     payload.mode === "comparison" && payload.labels.observed
       ? `${payload.labels.observed} vs synthetic`
@@ -885,17 +926,26 @@ export function Charts() {
       )}
 
       <SectionHeading title="Social network" />
-      {networkValidation?.network_validation ? (
+      {networkValidationBlock ? (
         <>
+          {networkValidationBlock.synthetic_vs_observed && (
+            <div className="metric-tables">
+              <NetworkObservedComparisonTable
+                validation={networkValidationBlock.synthetic_vs_observed}
+              />
+            </div>
+          )}
           <NetworkValidationSection
-            block={networkValidation.network_validation.synthetic_vs_random}
+            block={networkValidationBlock.synthetic_vs_random}
             sourceLabel="synthetic"
             sourceTitle="Synthetic social + encounters"
+            showWasserstein={!hasObservedSocialNetwork}
           />
           <NetworkValidationSection
-            block={networkValidation.network_validation.observed_vs_random}
+            block={networkValidationBlock.observed_vs_random}
             sourceLabel="observed"
             sourceTitle="Observed daily co-presence"
+            showWasserstein={!hasObservedSocialNetwork}
           />
         </>
       ) : payload.social_network ? (

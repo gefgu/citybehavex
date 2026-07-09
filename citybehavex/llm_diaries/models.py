@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
+import threading
+from dataclasses import dataclass, field
 from typing import Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -37,6 +38,7 @@ class DiaryValidationError(ValueError):
 class LLMStats:
     calls: int = 0
     cache_hits: int = 0
+    lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
 
 
 class ChatMessage(BaseModel):

@@ -69,6 +69,17 @@ from citybehavex.simulation.core import CoreTiming, simulate_agents, social_netw
 from citybehavex.tessellation import build_poi_tessellation, build_tessellation, purpose_distribution
 
 _WORK_SCORE_COLUMN = "work_score"
+_PROGRESS_INTERVAL_SECONDS = 5.0
+
+
+def _format_duration(seconds: float) -> str:
+    if not np.isfinite(seconds):
+        return "unknown"
+    if seconds < 60:
+        return f"{seconds:.0f}s"
+    if seconds < 3600:
+        return f"{seconds / 60:.1f}min"
+    return f"{seconds / 3600:.1f}h"
 
 
 def _minmax(values: np.ndarray) -> np.ndarray:
@@ -722,6 +733,27 @@ def maybe_build_diaries(
         start_date.date(), (end_date - timedelta(days=1)).date()
     )
     batches: dict[str, DiaryBatch] = {}
+    total_diaries = len(day_types) * config.llm.diary_count
+    completed_by_day_type = {day_type: 0 for day_type in day_types}
+    last_progress_at = 0.0
+
+    def _report_progress(day_type: str, completed: int, total: int, current_stats: LLMStats) -> None:
+        nonlocal last_progress_at
+        completed_by_day_type[day_type] = completed
+        done = sum(completed_by_day_type.values())
+        elapsed = time.perf_counter() - started
+        if done < total_diaries and elapsed - last_progress_at < _PROGRESS_INTERVAL_SECONDS:
+            return
+        last_progress_at = elapsed
+        rate = done / elapsed if elapsed > 0 else 0.0
+        remaining = total_diaries - done
+        eta = remaining / rate if rate > 0 else float("nan")
+        typer.echo(
+            f"LLM diary generation: {done}/{total_diaries} diaries "
+            f"({day_type} {completed}/{total}), {current_stats.calls:,} chat calls, "
+            f"{rate:.2f} diaries/sec, {elapsed:.1f}s elapsed, ETA {_format_duration(eta)}"
+        )
+
     for day_type in day_types:
         batches[day_type] = fetch_diary_batch(
             config.llm,
@@ -736,6 +768,7 @@ def maybe_build_diaries(
             random_state=config.simulation.random_state,
             variant=day_type,
             stats=stats,
+            progress_callback=_report_progress,
         )
     return batches, stats, time.perf_counter() - started
 
@@ -812,9 +845,27 @@ def _build_schedule(
     profile_clusters = None
     if profiles is not None:
         narratives = [profile_to_narrative(p) for p in profiles]
-        profile_embeddings = embed_profiles(narratives, config.embedding)
-        if profile_embeddings is not None:
+        if config.embedding.enabled:
+            typer.echo(
+                f"Profile embeddings: embedding {len(narratives)} profile narratives "
+                f"(requires an embedding server reachable at "
+                f"{config.embedding.base_url or '<auto-launch: ' + config.embedding.model + '>'}) ..."
+            )
+            profile_embeddings = embed_profiles(narratives, config.embedding)
+            if profile_embeddings is None:
+                raise RuntimeError(
+                    "Profile embeddings are required for profile-driven schedule "
+                    "selection (profile clustering + macro-schedule alignment) but "
+                    "could not be computed. Check that the embedding server is "
+                    f"reachable (embedding.base_url={config.embedding.base_url!r}, "
+                    f"auto_launch={config.embedding.auto_launch}) and, if auto-launched, "
+                    "that the GPU has enough free memory for it -- see the error above "
+                    "and the vllm_embed.log next to embedding.cache_dir "
+                    f"({config.embedding.cache_dir}) for details. To intentionally run "
+                    "without profile similarity, set embedding.enabled: false."
+                )
             typer.echo(f"Profile embeddings: {profile_embeddings.shape}")
+            typer.echo("Profile alignment clusters: clustering profile embeddings ...")
             profile_clusters = cluster_profile_embeddings(
                 narratives,
                 profile_embeddings,
@@ -825,7 +876,10 @@ def _build_schedule(
                 f"for {len(narratives)} profiles"
             )
         else:
-            typer.echo("Profile embeddings unavailable — falling back to popularity CRP")
+            typer.echo(
+                "Embeddings disabled (embedding.enabled: false) — using popularity "
+                "CRP without profile similarity."
+            )
             profile_clusters = cluster_profile_embeddings(narratives, None, 1.0)
 
     agent_diary_sim = None
@@ -835,7 +889,31 @@ def _build_schedule(
         and config.schedule.similarity_backend == "alignment_model"
     ):
         scoring_narratives = profile_clusters.narratives if profile_clusters is not None else narratives
-        scored = score_alignment_matrix(scoring_narratives, bank.diaries, config.schedule)
+        typer.echo(
+            f"Macro-schedule alignment: scoring {len(scoring_narratives)} profile rows "
+            f"x {len(bank.diaries)} diaries ..."
+        )
+        last_alignment_progress_at = 0.0
+
+        def _report_alignment_progress(done: int, total: int, elapsed: float) -> None:
+            nonlocal last_alignment_progress_at
+            if done < total and elapsed - last_alignment_progress_at < _PROGRESS_INTERVAL_SECONDS:
+                return
+            last_alignment_progress_at = elapsed
+            rate = done / elapsed if elapsed > 0 else 0.0
+            remaining = total - done
+            eta = remaining / rate if rate > 0 else float("nan")
+            typer.echo(
+                f"Macro-schedule alignment: {done}/{total} rows, {rate:.2f} rows/sec, "
+                f"{elapsed:.1f}s elapsed, ETA {_format_duration(eta)}"
+            )
+
+        scored = score_alignment_matrix(
+            scoring_narratives,
+            bank.diaries,
+            config.schedule,
+            progress_callback=_report_alignment_progress,
+        )
         if scored is not None and profile_clusters is not None:
             agent_diary_sim = expand_cluster_scores(scored, profile_clusters.labels)
         else:
@@ -849,6 +927,27 @@ def _build_schedule(
         config.diaries.resolve_day_type((start_date + pd.Timedelta(days=d)).date())
         for d in range(config.simulation.days)
     ]
+    typer.echo(
+        f"ddCRP schedule selection: assigning diaries for "
+        f"{config.simulation.agents} agents x {config.simulation.days} days ..."
+    )
+    ddcrp_started = time.perf_counter()
+    last_ddcrp_progress_at = 0.0
+
+    def _report_ddcrp_progress(done: int, total: int) -> None:
+        nonlocal last_ddcrp_progress_at
+        elapsed = time.perf_counter() - ddcrp_started
+        if done < total and elapsed - last_ddcrp_progress_at < _PROGRESS_INTERVAL_SECONDS:
+            return
+        last_ddcrp_progress_at = elapsed
+        rate = done / elapsed if elapsed > 0 else 0.0
+        remaining = total - done
+        eta = remaining / rate if rate > 0 else float("nan")
+        typer.echo(
+            f"ddCRP schedule selection: {done}/{total} agents, {rate:.1f} agents/sec, "
+            f"{elapsed:.1f}s elapsed, ETA {_format_duration(eta)}"
+        )
+
     diary_arrays, chosen, crp_info = build_ddcrp_diary(
         bank,
         start_date,
@@ -859,6 +958,7 @@ def _build_schedule(
         config.schedule,
         profile_embeddings=profile_embeddings,
         agent_diary_sim=agent_diary_sim,
+        progress_callback=_report_ddcrp_progress,
     )
     return bank, diary_arrays, chosen, profile_embeddings, crp_info, profile_clusters
 

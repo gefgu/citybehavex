@@ -52,6 +52,7 @@ llm:
   model: "Qwen/Qwen2.5-32B-Instruct-AWQ"
   diary_count: 30
   max_tokens: 768
+  concurrency: 8
   cache_dir: data/llm_diaries_shanghai
   validated_diaries_path: data/llm_diaries_shanghai/validated_diaries.json
 
@@ -61,7 +62,7 @@ diaries:
   city_profile_weekend: "Shanghai weekend routines: later mornings at home, family outings to malls, parks, or restaurants, leisure trips by metro or car, tourism in central districts."
   representative_day: "2015-12-27"
   location_count_mu: 1.5
-  location_count_sigma: 0.6
+  location_count_sigma: 0.65
   max_locations: 9
   motif_exploration_rate: 0.25
 
@@ -164,8 +165,7 @@ comparison:
   label: shanghai_500sample
   evaluation_adaptation:
     mode: auto
-    location_col: venueId
-    h3_resolution: 10
+    h3_resolution: 8
   network_validation:
     enabled: true
     observed_enabled: true

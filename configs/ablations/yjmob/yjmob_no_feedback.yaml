@@ -37,6 +37,7 @@ rail_network:
   edges_output: data/yjmob/yjmob_rail_graph_edges.parquet
   snap_output: data/yjmob/yjmob_rail_graph_snap.parquet
 llm:
+  concurrency: 8
   base_url: http://localhost:8081
   api_key: none
   model: Qwen/Qwen2.5-32B-Instruct-AWQ
@@ -54,9 +55,9 @@ diaries:
   city_profile_weekend: 'Aichi weekend routines: later mornings at home, family outings
     to shopping malls or parks, leisure trips by car, reduced industry activity.'
   representative_day: '2019-09-15'
-  location_count_mu: 1.0
+  location_count_mu: 1.5
   location_count_sigma: 0.5
-  max_locations: 6
+  max_locations: 9
   motif_exploration_rate: 1.0
 embedding:
   enabled: true
@@ -89,11 +90,14 @@ activities:
   materialize_travel: true
   kappa: 1.0
   temperature: 0.5
-  embed_activities: true
+  embed_activities: false
   alignment_backend: rerank
   alignment_base_url: http://localhost:8083
   alignment_model: models/modernbert-activity-aligner
   alignment_batch_size: 512
+  poi_type_choice_enabled: true
+  poi_type_choice_temperature: 0.5
+  poi_type_choice_alpha: 1.0
   alignment_cache_path: data/llm_diaries_yjmob/activity_alignment_cache.npz
 profiles:
   enabled: true
@@ -107,7 +111,7 @@ profiles:
   work_poi_weight: 0.75
   work_distance_model: exponential
   work_distance_exponential_lambda: 0.3
-  work_distance_max_km: 60.0
+  work_distance_max_km: 30.0
   work_distance_min_km: 0.25
   work_distance_fallback: expand
   work_distance_density_correction_power: 1.0
@@ -129,6 +133,9 @@ profiles:
 comparison:
   path: data/yjmob/yjmob_wgs84_half_a.parquet
   label: yjmob100k
+  evaluation_adaptation:
+    mode: auto
+    h3_resolution: 8
   network_validation:
     enabled: true
     observed_enabled: true
