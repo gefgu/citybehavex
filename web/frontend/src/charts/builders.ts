@@ -62,6 +62,10 @@ function formatEcdfX(value: number, unit: string) {
   return `${value.toLocaleString(undefined, { maximumFractionDigits: 2 })}${suffix}`;
 }
 
+function displaySeriesName(name: string) {
+  return name.replace(/\bGonzalez\b/g, "González");
+}
+
 export function ecdfOption(block: EcdfBlock): EChartsOption {
   const unit = block.x_unit ? ` · ${block.x_unit}` : "";
   const rawUnit = block.x_unit ?? "";
@@ -110,7 +114,7 @@ export function lawOption(block: LawBlock): EChartsOption {
     tooltip: { ...baseOption().tooltip, trigger: "item" },
     xAxis: axisCommon(block.x_label + xUnit, block.x_log),
     yAxis: axisCommon("P", true),
-    series: block.series.map(lineOrScatter),
+    series: block.series.map((series) => lineOrScatter({ ...series, name: displaySeriesName(series.name) })),
   };
 }
 
