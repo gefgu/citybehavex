@@ -58,7 +58,8 @@ class OpenAICompatibleDiaryClient:
             request_payload["max_tokens"] = self.config.max_tokens
 
         if stats is not None:
-            stats.calls += 1
+            with stats.lock:
+                stats.calls += 1
         response = self.requests.post(
             self.chat_url,
             headers=self.headers,

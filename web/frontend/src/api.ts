@@ -585,9 +585,23 @@ export interface NetworkValidationComparisonBlock {
   source_network: SocialNetworkBlock;
   random_network: SocialNetworkBlock;
 }
+export interface NetworkValidationMetricComparisonBlock {
+  comparison: "synthetic_vs_observed";
+  wasserstein: {
+    degree: number | null;
+    clustering_coefficient: number | null;
+    edge_persistence: number | null;
+    topological_overlap: number | null;
+  };
+  distributions: {
+    synthetic: Record<string, NetworkMetricSummary>;
+    observed: Record<string, NetworkMetricSummary>;
+  };
+}
 export interface NetworkValidationBlock {
   synthetic_vs_random?: NetworkValidationComparisonBlock;
   observed_vs_random?: NetworkValidationComparisonBlock;
+  synthetic_vs_observed?: NetworkValidationMetricComparisonBlock;
 }
 export interface ChartPayload {
   mode: "comparison" | "synthetic_only";

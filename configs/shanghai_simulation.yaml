@@ -24,7 +24,7 @@ simulation:
   alpha: 0.2
   dt_update_mob_sim_hours: 168.0
   indipendency_window_hours: 0.5
-  gravity_deterrence_exponent: -2.0
+  gravity_deterrence_exponent: -3.5
   gravity_origin_exponent: 1.0
   gravity_destination_exponent: 1.0
 
@@ -45,6 +45,7 @@ rail_network:
   snap_output: data/shanghai/shanghai_rail_graph_snap.parquet
 
 llm:
+  concurrency: 8
   base_url: "http://localhost:8081"
   api_key: "none"
   model: "Qwen/Qwen2.5-32B-Instruct-AWQ"
@@ -58,10 +59,10 @@ diaries:
   city_profile_weekday: "Shanghai weekday routines: early metro/bus commutes to offices, factories, or universities; midday meals near workplaces; evening shopping or leisure along commercial streets; late returns home."
   city_profile_weekend: "Shanghai weekend routines: later mornings at home, family outings to malls, parks, or restaurants, leisure trips by metro or car, tourism in central districts."
   representative_day: "2015-12-27"
-  location_count_mu: 1.0
-  location_count_sigma: 0.5
-  max_locations: 6
-  motif_exploration_rate: 0.5
+  location_count_mu: 1.5
+  location_count_sigma: 0.65
+  max_locations: 9
+  motif_exploration_rate: 0.25
 
 embedding:
   enabled: true 
@@ -91,7 +92,7 @@ activities:
   materialize_travel: true
   kappa: 0.3
   temperature: 0.25
-  embed_activities: true
+  embed_activities: false
   alignment_backend: rerank
   alignment_base_url: http://localhost:8083
   alignment_model: models/modernbert-activity-aligner
@@ -137,7 +138,7 @@ profiles:
   work_poi_weight: 0.75
   work_distance_model: exponential
   work_distance_exponential_lambda: 0.3
-  work_distance_max_km: 60.0
+  work_distance_max_km: 30.0
   work_distance_min_km: 0.25
   work_distance_fallback: expand
   work_distance_density_correction_power: 1.0

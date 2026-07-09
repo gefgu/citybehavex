@@ -61,3 +61,5 @@ ablation_logs/
 
 
 *.npz
+
+EVALUATION_NOTES.md

@@ -375,7 +375,7 @@ def _validation_block(
     source_kind: str,
     random_seed: int,
     source_sidecar: dict[str, Any] | None = None,
-) -> tuple[dict[str, Any], list[str]]:
+) -> tuple[dict[str, Any], list[str], dict[str, np.ndarray]]:
     warnings: list[str] = []
     degrees = source_graph.degrees().astype(float)
     random_graph = degree_preserving_random_graph(degrees, seed=random_seed)
@@ -425,6 +425,43 @@ def _validation_block(
             ),
         },
         warnings,
+        source_metrics,
+    )
+
+
+def _metric_wasserstein_block(
+    *,
+    comparison: str,
+    left_label: str,
+    left_metrics: dict[str, np.ndarray],
+    right_label: str,
+    right_metrics: dict[str, np.ndarray],
+) -> tuple[dict[str, Any], list[str]]:
+    wasserstein = {
+        name: _safe_wasserstein(left_metrics[name], right_metrics[name])
+        for name in NETWORK_METRIC_LABELS
+    }
+    warnings = [
+        f"{NETWORK_METRIC_LABELS[name]} distribution is empty; Wasserstein unavailable"
+        for name, value in wasserstein.items()
+        if value is None
+    ]
+    return (
+        {
+            "comparison": comparison,
+            "wasserstein": wasserstein,
+            "distributions": {
+                left_label: {
+                    name: _distribution_summary(values)
+                    for name, values in left_metrics.items()
+                },
+                right_label: {
+                    name: _distribution_summary(values)
+                    for name, values in right_metrics.items()
+                },
+            },
+        },
+        warnings,
     )
 
 
@@ -432,12 +469,12 @@ def _synthetic_validation_block(
     synthetic_path: str | Path,
     *,
     seed: int = 42,
-) -> tuple[dict[str, Any] | None, list[str]]:
+) -> tuple[dict[str, Any] | None, list[str], dict[str, np.ndarray] | None]:
     warnings: list[str] = []
     synthetic = Path(synthetic_path)
     social_path = social_network_sidecar_path(synthetic)
     if not social_path.exists():
-        return None, [f"social network sidecar not found: {social_path}"]
+        return None, [f"social network sidecar not found: {social_path}"], None
 
     social_data = _load_social_sidecar(social_path)
     node_count = int(social_data["node_count"])
@@ -456,7 +493,7 @@ def _synthetic_validation_block(
         warnings.append(f"encounters sidecar not found: {enc_path}; edge persistence unavailable")
 
     synthetic_graph = graph_from_edges(node_count, edges)
-    block, block_warnings = _validation_block(
+    block, block_warnings, metrics = _validation_block(
         comparison="synthetic_vs_random",
         source_label="synthetic",
         source_graph=synthetic_graph,
@@ -466,7 +503,7 @@ def _synthetic_validation_block(
         random_seed=seed,
         source_sidecar=social_data,
     )
-    return block, [*warnings, *block_warnings]
+    return block, [*warnings, *block_warnings], metrics
 
 
 def _resolve_observed_location(
@@ -584,11 +621,11 @@ def _observed_validation_block(
     h3_resolution: int = 9,
     max_group_size: int = 200,
     seed: int = 42,
-) -> tuple[dict[str, Any] | None, list[str]]:
+) -> tuple[dict[str, Any] | None, list[str], dict[str, np.ndarray] | None]:
     uid_name = uid_col or _detect_column(observed_df, _UID_CANDIDATES)
     datetime_name = datetime_col or _detect_column(observed_df, _DATETIME_CANDIDATES)
     if uid_name is None or datetime_name is None:
-        return None, ["observed network validation requires user and datetime columns"]
+        return None, ["observed network validation requires user and datetime columns"], None
 
     graph, persistence, time_steps, warnings = _observed_edges_and_persistence(
         observed_df,
@@ -599,7 +636,7 @@ def _observed_validation_block(
         h3_resolution=h3_resolution,
         max_group_size=max_group_size,
     )
-    block, block_warnings = _validation_block(
+    block, block_warnings, metrics = _validation_block(
         comparison="observed_vs_random",
         source_label="observed",
         source_graph=graph,
@@ -609,7 +646,7 @@ def _observed_validation_block(
         random_seed=seed,
         source_sidecar=None,
     )
-    return block, [*warnings, *block_warnings]
+    return block, [*warnings, *block_warnings], metrics
 
 
 def build_network_validation(
@@ -632,8 +669,9 @@ def build_network_validation(
 
     payload: dict[str, Any] = {}
     warnings: list[str] = []
+    synthetic_metrics: dict[str, np.ndarray] | None = None
     if synthetic_enabled:
-        block, block_warnings = _synthetic_validation_block(synthetic_path, seed=seed)
+        block, block_warnings, synthetic_metrics = _synthetic_validation_block(synthetic_path, seed=seed)
         if block is not None:
             payload["synthetic_vs_random"] = block
         warnings.extend(f"synthetic_vs_random: {warning}" for warning in block_warnings)
@@ -642,7 +680,7 @@ def build_network_validation(
         if observed_df is None:
             warnings.append("observed_vs_random: observed dataframe unavailable")
         else:
-            block, block_warnings = _observed_validation_block(
+            block, block_warnings, observed_metrics = _observed_validation_block(
                 observed_df,
                 uid_col=observed_uid_col,
                 datetime_col=observed_datetime_col,
@@ -655,5 +693,17 @@ def build_network_validation(
             if block is not None:
                 payload["observed_vs_random"] = block
             warnings.extend(f"observed_vs_random: {warning}" for warning in block_warnings)
+            if synthetic_metrics is not None and observed_metrics is not None:
+                observed_block, observed_warnings = _metric_wasserstein_block(
+                    comparison="synthetic_vs_observed",
+                    left_label="synthetic",
+                    left_metrics=synthetic_metrics,
+                    right_label="observed",
+                    right_metrics=observed_metrics,
+                )
+                payload["synthetic_vs_observed"] = observed_block
+                warnings.extend(
+                    f"synthetic_vs_observed: {warning}" for warning in observed_warnings
+                )
 
     return (payload or None), warnings

@@ -26,6 +26,7 @@ tile, mirroring the HOME short-circuit.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Callable
 
 import numpy as np
 import pandas as pd
@@ -183,6 +184,7 @@ def build_ddcrp_diary(
     params: ScheduleConfig,
     profile_embeddings: np.ndarray | None = None,
     agent_diary_sim: np.ndarray | None = None,
+    progress_callback: Callable[[int, int], None] | None = None,
 ) -> tuple[DiaryArrays, np.ndarray, DdcrpAgentInfo]:
     """Run profile-driven CRP schedule selection for every agent and day.
 
@@ -244,7 +246,7 @@ def build_ddcrp_diary(
 
     slots = days * slots_per_day
 
-    def _process_agent(agent: int) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, float, float]:
+    def _process_agent(agent: int) -> tuple[int, np.ndarray, np.ndarray, np.ndarray, np.ndarray, float, float]:
         rng = np.random.default_rng(np.random.SeedSequence([int(random_state), agent]))
         T_a = float(rng.beta(params.temperature_beta_a, params.temperature_beta_b))
         T_a = max(T_a, 1e-6)
@@ -279,14 +281,23 @@ def build_ddcrp_diary(
             agent_block_ids[base : base + slots_per_day] = bank.slot_block_ids[pick]
             agent_ts[base : base + slots_per_day] = day_ts[d] + slot_offsets
 
-        return agent_locs, agent_block_ids, agent_ts, agent_chosen, T_a, alpha_a
+        return agent, agent_locs, agent_block_ids, agent_ts, agent_chosen, T_a, alpha_a
 
     if _JOBLIB_AVAILABLE and n_agents > 4:
-        results = Parallel(n_jobs=-1, backend="loky")(
+        result_iter = Parallel(n_jobs=-1, backend="loky", return_as="generator_unordered")(
             _delayed(_process_agent)(agent) for agent in range(n_agents)
         )
+        results = []
+        for done, result in enumerate(result_iter, start=1):
+            results.append(result)
+            if progress_callback is not None:
+                progress_callback(done, n_agents)
     else:
-        results = [_process_agent(agent) for agent in range(n_agents)]
+        results = []
+        for agent in range(n_agents):
+            results.append(_process_agent(agent))
+            if progress_callback is not None:
+                progress_callback(agent + 1, n_agents)
 
     diary_timestamps = np.empty(n_agents * slots, dtype=np.int64)
     diary_abs_locs = np.empty(n_agents * slots, dtype=np.int32)
@@ -295,7 +306,7 @@ def build_ddcrp_diary(
     d_ends = d_starts + slots
     T_per_agent = np.empty(n_agents, dtype=np.float64)
     alpha_per_agent = np.empty(n_agents, dtype=np.float64)
-    for agent, (agent_locs, agent_block_ids, agent_ts, agent_chosen, T_a, alpha_a) in enumerate(results):
+    for agent, agent_locs, agent_block_ids, agent_ts, agent_chosen, T_a, alpha_a in results:
         off = agent * slots
         diary_abs_locs[off : off + slots] = agent_locs
         diary_block_ids[off : off + slots] = agent_block_ids

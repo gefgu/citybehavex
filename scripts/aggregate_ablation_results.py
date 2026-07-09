@@ -357,9 +357,7 @@ def parse_args(argv: Iterable[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--manifest", default="data/ablation_logs/manifest.jsonl")
     parser.add_argument("--ablation-tex", default="paper/ablation.tex")
-    parser.add_argument("--spatial-tex", default="paper/comparision/spatial_table.tex")
-    parser.add_argument("--temporal-tex", default="paper/comparision/temporal_table.tex")
-    parser.add_argument("--semantic-tex", default="paper/comparision/semantic_table.tex")
+    parser.add_argument("--comparison-tex", default="paper/comparision_table.tex")
     parser.add_argument("--targets", nargs="+", choices=["ablation", "comparison"], default=["ablation", "comparison"])
     parser.add_argument("--apply", action="store_true", help="Write changes (default: dry-run)")
     return parser.parse_args(argv)
@@ -399,39 +397,29 @@ def main(argv: Iterable[str] | None = None) -> None:
         shanghai_full = results.get(("shanghai", "500sample"), {}) or results.get(
             ("shanghai", "full"), {}
         )
+        # Single merged table: Dataset | Source | dr | rg | TD | DT | Vf | VPD | ATM | DARD
+        metrics_in_order = [
+            ("delta_r", 2), ("r_g", 2), ("td", 2), ("dt", 2), ("vf", 2),
+            ("vpd", 2), ("atm", 2), ("dard", 2),
+        ]
+        per_dataset = {"gparis": gparis_full, "shanghai": shanghai_full}
 
-        for tex_path, metrics_in_order, per_dataset in [
-            (
-                Path(args.spatial_tex),
-                [("delta_r", 2), ("r_g", 2)],
-                {"gparis": gparis_full, "shanghai": shanghai_full},
-            ),
-            (
-                Path(args.temporal_tex),
-                [("td", 2), ("dt", 2), ("vf", 2)],
-                {"gparis": gparis_full, "shanghai": shanghai_full},
-            ),
-            (
-                Path(args.semantic_tex),
-                [("vpd", 2), ("atm", 2), ("dard", 2)],
-                {"gparis": gparis_full, "shanghai": shanghai_full},
-            ),
-        ]:
-            text = tex_path.read_text()
-            all_changes: list[str] = []
-            for dataset, values in per_dataset.items():
-                if not values:
-                    continue
-                text, changes = patch_comparison_row(text, dataset, metrics_in_order, values)
-                all_changes += changes
-            print(f"=== {tex_path} ({len(all_changes)} cells) ===")
-            for c in all_changes:
-                print(" ", c)
-            if args.apply:
-                tex_path.write_text(text)
-                print(f"wrote {tex_path}")
-            else:
-                print("(dry-run, not written; pass --apply to write)")
+        tex_path = Path(args.comparison_tex)
+        text = tex_path.read_text()
+        all_changes: list[str] = []
+        for dataset, values in per_dataset.items():
+            if not values:
+                continue
+            text, changes = patch_comparison_row(text, dataset, metrics_in_order, values)
+            all_changes += changes
+        print(f"=== {tex_path} ({len(all_changes)} cells) ===")
+        for c in all_changes:
+            print(" ", c)
+        if args.apply:
+            tex_path.write_text(text)
+            print(f"wrote {tex_path}")
+        else:
+            print("(dry-run, not written; pass --apply to write)")
 
 
 if __name__ == "__main__":
