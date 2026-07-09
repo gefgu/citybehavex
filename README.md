@@ -10,7 +10,7 @@ This repository accompanies an EMNLP Demo Track submission:
 > **CityBehavEx: A Scalable and Empirically Validated LLM-Assisted Urban
 > Simulation Platform**
 
-![Map Timeline View with Sprites](web/frontend/public/map_timeline_view.jpg)
+<img width="1915" height="1273" alt="Timeline View" src="https://github.com/user-attachments/assets/a68ae9c1-b426-407a-adc6-fc44fee13d60" />
 
 The demo focuses on the complete workflow: configure a city scenario, run a
 simulation, replay agent trajectories, inspect profiles and activity traces, and
@@ -40,6 +40,14 @@ patterns. CityBehavEx separates semantic reasoning from trajectory execution:
 In the paper experiments, CityBehavEx runs orders of magnitude faster than recent
 LLM-based urban simulation baselines while matching empirical spatial and
 temporal mobility distributions more closely.
+
+## UI Screenshots:
+
+### Experiments 
+<img width="1465" height="1113" alt="image" src="https://github.com/user-attachments/assets/817e7206-cad5-4ff9-b18b-131333070c54" />
+
+### Charts 
+<img width="1648" height="2013" alt="image" src="https://github.com/user-attachments/assets/29632960-64a3-4978-a659-34da807cb139" />
 
 ## License
 
