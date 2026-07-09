@@ -5,21 +5,26 @@ export function Home() {
     <>
       <section className="hero">
         <div className="hero-copy">
-          <h1>Synthetic urban mobility, measured against the real thing.</h1>
+          <h1>Scalable urban simulation, validated against the real thing.</h1>
           <p className="lead">
-            CityBehavEx simulates agent trajectories for a city and compares them to
-            observed mobility data. This is the interactive report — distributions,
-            mobility laws, activity patterns, profiles and spatial differences, straight
-            from the simulation outputs.
+            CityBehavEx is an LLM-assisted urban simulation platform that scales to
+            city-size populations while keeping behavior inspectable. It combines
+            mobility models, semantic alignment, trajectory replay and empirical
+            validation against spatial, temporal, activity and social patterns.
           </p>
-          <Link to="/experiments" className="btn btn-primary">
-            Browse experiments
-          </Link>
+          <div className="hero-actions">
+            <Link to="/experiments" className="btn btn-primary">
+              Browse experiments
+            </Link>
+            <a href="#" className="btn btn-secondary">
+              Read paper
+            </a>
+          </div>
         </div>
         <img
           className="hero-figure"
-          src="/notre_dame_with_character.jpg"
-          alt="CityBehavEx character beside Notre-Dame"
+          src="/map_timeline_view.jpg"
+          alt="CityBehavEx time-line map view"
         />
       </section>
 
@@ -27,22 +32,22 @@ export function Home() {
         <div className="signature-card sig-coral">
           <h3>Distributions &amp; laws</h3>
           <p>
-            ECDFs and fitted mobility laws — jump lengths, radius of gyration, trip
-            and dwell time, visitation frequency.
+            Spatial and temporal validation with travel distance, radius of gyration,
+            trip duration, dwell time, visitation frequency and mobility laws.
           </p>
         </div>
         <div className="signature-card sig-forest">
           <h3>Activity &amp; profiles</h3>
           <p>
-            Visit-purpose mixes, activity transitions, daily rhythms, motifs and
-            Routiner / Regular / Scouter mobility profiles.
+            Profile-aware diaries, MTUS-grounded micro-schedules, activity transitions,
+            daily motifs and Routiner / Regular / Scouter mobility profiles.
           </p>
         </div>
         <div className="signature-card sig-dark">
           <h3>Spatial difference</h3>
           <p>
-            An H3 choropleth of where and when synthetic volume and peak timing
-            diverge from the observed city.
+            Interactive replay, H3 spatial differences, HOME and WORK locations, transport choices and social
+            network metrics for debugging synthetic behavior.
           </p>
         </div>
       </section>

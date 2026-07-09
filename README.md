@@ -1,288 +1,299 @@
 # CityBehavEx
 
-CityBehavEx ships a small Rust extension (`citybehavex._core`, built with maturin)
-that implements the project simulation core: agents follow a sub-hourly Markov
-schedule (5/15-min slots, weekday/weekend chains), social/EPR-style logic chooses
-locations, and a car trip-duration heuristic (`haversine / car_speed_kmh`) shifts
-arrivals and departures off the slot grid. The extension path-depends on the
-sibling `../skmob2` crate.
+**CityBehavEx** is a scalable, empirically validated, LLM-assisted urban behavior
+simulation platform. It generates synthetic city-scale mobility trajectories and
+lets users inspect, replay, debug, and evaluate them against observed mobility,
+time-use, semantic, transport, and social-network patterns.
 
-## Building
+This repository accompanies an EMNLP Demo Track submission:
 
-The project uses the **maturin** build backend. After cloning (or after any change
-to the Rust sources), build the extension into the project `.venv`:
+> **CityBehavEx: A Scalable and Empirically Validated LLM-Assisted Urban
+> Simulation Platform**
 
-```bash
-./scripts/update_local_skmob.sh        # if ../skmob2 Rust changed
-./scripts/update_local_citybehavex.sh  # builds citybehavex._core
+The demo focuses on the complete workflow: configure a city scenario, run a
+simulation, replay agent trajectories, inspect profiles and activity traces, and
+compare synthetic behavior with empirical validation metrics through the web
+dashboard.
+
+## Why CityBehavEx?
+
+Recent LLM-based urban simulators can produce rich behavior descriptions, but
+they are often expensive to scale and weakly validated against real mobility
+patterns. CityBehavEx separates semantic reasoning from trajectory execution:
+
+- **Scalable simulation core.** A Rust-backed engine simulates large populations
+  with sub-hourly schedules, exploration and preferential return, social ties,
+  transport choices, and micro-activities.
+- **LLM-assisted, not LLM-per-action.** LLMs help generate and calibrate diaries
+  and semantic supervision, while fine-tuned cross-encoders score profile,
+  schedule, POI, vehicle-ownership, and activity compatibility efficiently.
+- **Empirical validation.** The dashboard reports spatial, temporal, semantic,
+  time-use, transport, behavioral-profile, motif, OD, and social-network metrics.
+- **Inspectable agents.** The interface supports trajectory replay, profile
+  inspection, macro-schedules, micro-activities, transport legs, and social
+  encounters.
+- **Reproducible experiments.** Scenarios are configured with YAML files, outputs
+  are stored as parquet/JSON sidecars, and chart payloads are cached.
+
+In the paper experiments, CityBehavEx runs orders of magnitude faster than recent
+LLM-based urban simulation baselines while matching empirical spatial and
+temporal mobility distributions more closely.
+
+## License
+
+CityBehavEx is released under the **GNU Affero General Public License v3.0
+(AGPLv3)**. See [`LICENSE`](LICENSE).
+
+The AGPLv3 license is intentional: it guarantees that improvements to hosted or
+modified versions of the simulator remain available to the research community.
+
+## Repository Overview
+
+```text
+citybehavex/                 Python package and report/evaluation logic
+citybehavex-py/              Rust simulation core exposed as citybehavex._core
+configs/                     Reproducible scenario and ablation configurations
+scripts/                     Simulation, training, serving, and sweep utilities
+web/backend/                 FastAPI backend for experiment discovery and charts
+web/frontend/                React/Vite validation and trajectory-replay UI
+data/                        Input/output location for scenarios and runs
+models/                      Optional fine-tuned alignment models
 ```
 
-`scripts/update_local_citybehavex.sh` compiles `citybehavex-py` and installs the
-package editable. Rust edits are **not** hot-reloaded — rerun the script after
-changing any `.rs` file.
+The simulator reads scenario settings from `configs/*.yaml`. The web UI discovers
+those configs, finds their generated runs, and builds validation views on demand.
 
-## Running
+## Requirements
 
-Run the configured Greater Paris simulation from the repository root:
+Core requirements:
+
+- Python 3.11+
+- Rust toolchain
+- `uv`
+- Node.js 18+ and npm, for the web frontend
+
+Optional requirements:
+
+- A CUDA GPU for embedding, cross-encoder, or LLM serving
+- A Mapbox token for the high-performance animated timeline map
+- An OpenAI-compatible LLM endpoint when regenerating diaries or training
+  semantic aligners
+
+The Python package uses `maturin` to build the Rust extension. When installing
+from source, make sure the mobility dependencies `skmob2` and `skmob-vis` are
+available in the locations declared in `pyproject.toml`, or update those entries
+to point to installed/vendored copies included with the artifact.
+
+## Quick Start
+
+From the repository root:
 
 ```bash
-uv run citybehavex simulate --config configs/gparis_simulation_core.yaml
+uv sync --extra web
+./scripts/update_local_citybehavex.sh
 ```
 
-LLM generation creates 30 weekday and 30 weekend diaries by default. Override
-the number, within the supported range of 10 to 30, from the CLI:
+Run a public-data-oriented YJMOB scenario:
 
 ```bash
-uv run citybehavex simulate --config configs/gparis_simulation_core.yaml --diary-count 20
+uv run citybehavex simulate --config configs/yjmob_simulation.yaml
 ```
 
-Equivalently, run the package as a Python module:
+The command writes simulation outputs under the paths configured in the YAML
+file, typically inside `data/.../results/`. Existing caches are reused when
+available.
+
+## Web Demo
+
+Start the backend:
 
 ```bash
-uv run python -m citybehavex simulate --config configs/gparis_simulation_core.yaml
+.venv/bin/python -m uvicorn app.main:app --app-dir web/backend --reload --port 8000
 ```
 
-Open the live web UI to analyze simulation runs and comparison data. The old
-standalone HTML report path is deprecated; chart payloads are built on demand by
-the web backend.
+Start the frontend:
 
-### Embedding model (ddCRP schedule selection)
+```bash
+cd web/frontend
+npm install
+npm run dev
+```
 
-Schedule selection embeds each diary with `nomic-embed-text-v2-moe`. With
-`embedding.auto_launch: true` (the default) citybehavex starts the server below on
-demand and shuts it down afterwards, caching vectors so it rarely reruns. To run it
-yourself and reuse it (set `embedding.auto_launch: false` and point
-`embedding.base_url` at it), serve the model with vLLM:
+Open:
+
+```text
+http://localhost:5173
+```
+
+The frontend proxies `/api` requests to the FastAPI backend on port `8000`.
+The Experiments page is populated from `configs/*.yaml`. Opening charts for a
+run builds the validation payload on first request and caches it under
+`data/.web_cache/`.
+
+### Timeline Map
+
+The animated timeline uses Mapbox GL. To enable it, create
+`web/frontend/.env.local`:
+
+```bash
+VITE_MAPBOX_TOKEN=pk.your_token_here
+```
+
+Restart `npm run dev` after creating or editing this file.
+
+## Running the Main Components
+
+### Simulation CLI
+
+```bash
+uv run citybehavex simulate --config configs/yjmob_simulation.yaml
+```
+
+Equivalent module entry point:
+
+```bash
+uv run python -m citybehavex simulate --config configs/yjmob_simulation.yaml
+```
+
+Override the number of generated candidate diaries:
+
+```bash
+uv run citybehavex simulate \
+  --config configs/yjmob_simulation.yaml \
+  --diary-count 20
+```
+
+### Validation Dashboard
+
+The dashboard includes:
+
+- ECDFs and fitted mobility laws for travel distance, radius of gyration, trip
+  duration, dwell time, and visitation frequency
+- visit-purpose distributions and activity-transition matrices
+- daily routines, motifs, mobility profiles, and time-use summaries
+- H3 spatio-temporal visit difference maps
+- home/work maps, transport summaries, and social-network validation
+- animated trajectory replay with agent-level inspection
+
+### Alignment Services
+
+CityBehavEx can run with cached alignment scores, simple fallbacks, or live
+alignment services. The convention used by the project is:
+
+```text
+8081  diary-generation LLM, OpenAI-compatible chat endpoint
+8082  macro-schedule alignment reranker
+8083  activity alignment reranker
+8001  optional embedding server for schedule-selection embeddings
+```
+
+If `embedding.auto_launch: true` is enabled and embeddings are missing,
+CityBehavEx can launch the embedding server on demand. To serve it manually:
 
 ```bash
 uv run --extra embeddings vllm serve nomic-ai/nomic-embed-text-v1.5 \
-  --runner pooling --trust-remote-code --port 8001
+  --runner pooling \
+  --trust-remote-code \
+  --port 8001
 ```
 
-The `embeddings` extra (vLLM) is required only for serving; without a GPU set
-`embedding.enabled: false` to fall back to identity similarity.
-
-### Fine-tuning the ModernBERT schedule aligner
-
-To label sampled profile-diary pairs with the LLM server and fine-tune the
-macro-schedule alignment scorer, run:
+To serve a fine-tuned cross-encoder reranker:
 
 ```bash
-uv run --extra finetuning python scripts/train_modernbert_schedule_aligner.py \
-  --profiles-path data/gparis/results/gparis_agent_profiles.parquet \
-  --diary-path data/llm_diaries_gparis/validated_diaries_weekday.json \
-  --diary-path data/llm_diaries_gparis/validated_diaries_weekend.json \
-  --llm-base-url http://localhost:8081 \
-  --llm-model Qwen/Qwen2.5-32B-Instruct-AWQ \
-  --dataset-output data/llm_diaries_gparis/schedule_alignment_scores.parquet \
-  --output-model-path models/modernbert-schedule-aligner \
-  --sample-size 1000 \
-  --epochs 1 \
-  --batch-size 8 \
-  --learning-rate 2e-5
-```
-
-The script asks the LLM for a reason and a score, but only persists the numeric
-alignment score and pair metadata. To use the trained scorer for macro-schedule
-ddCRP selection, serve the saved model with TEI and set:
-
-```yaml
-schedule:
-  similarity_backend: alignment_model
-  alignment_base_url: http://localhost:8082
-  alignment_model: models/modernbert-schedule-aligner
-```
-
-### Fine-tuning the ModernBERT vehicle ownership aligner
-
-To replace fixed car/bike ownership probabilities with profile-conditioned
-probabilities, first generate or load agent profiles, then label
-transport-neutral profile/vehicle pairs with the LLM and fine-tune one shared
-car+bike scorer:
-
-```bash
-uv run --extra finetuning python scripts/train_modernbert_vehicle_ownership_aligner.py \
-  --profiles-path data/gparis/results/gparis_agent_profiles.parquet \
-  --city-profile "Greater Paris metropolitan region, urban mobility with commuting, errands, leisure, healthcare, studies, and home routines." \
-  --llm-base-url http://localhost:8081 \
-  --llm-model Qwen/Qwen2.5-32B-Instruct-AWQ \
-  --dataset-output data/llm_diaries_gparis/vehicle_ownership_alignment_scores.parquet \
-  --output-model-path models/modernbert-vehicle-ownership-aligner \
-  --sample-size 2000 \
-  --llm-concurrency 8 \
-  --epochs 1 \
-  --batch-size 8 \
-  --learning-rate 2e-5
-```
-
-The training query excludes existing transport ownership text so the model
-learns from demographics and city context rather than echoing old random
-labels. To use the scorer during profile generation, serve it with the same
-rerank-compatible server on a free port and set:
-
-```bash
-PYTHONPATH=/home/gustavo/vllm/.venv/lib/python3.12/site-packages \
-  .venv/bin/python scripts/serve_schedule_aligner.py \
-  --model-path models/modernbert-vehicle-ownership-aligner \
-  --port 8084 \
-  --device cuda \
-  --predict-batch-size 128
-```
-
-```yaml
-profiles:
-  ownership_alignment_backend: rerank
-  ownership_alignment_base_url: http://localhost:8084
-  ownership_alignment_model: models/modernbert-vehicle-ownership-aligner
-  ownership_alignment_batch_size: 256
-  ownership_alignment_cache_path: data/llm_diaries_gparis/vehicle_ownership_alignment_cache.npz
-  ownership_alignment_concurrency: 4
-```
-
-At runtime, the car and bike scores are treated as Bernoulli probabilities.
-The sampled booleans still populate `has_car` and `has_bike`, and the numeric
-scores are saved as `car_ownership_score` and `bike_ownership_score`.
-
-### Fine-tuning the ModernBERT profile coherence aligner
-
-To repair incoherent demographic combinations before vehicle ownership
-alignment, first run a simulation once so `profiles.output` exists, or point the
-script at another generated profile parquet. Then label real profiles plus
-synthetic inconsistent variants and fine-tune the scorer:
-
-```bash
-uv run --extra finetuning python scripts/train_modernbert_profile_coherence_aligner.py \
-  --profiles-path data/gparis/results/gparis_agent_profiles.parquet \
-  --city-profile "Greater Paris metropolitan region, urban mobility with commuting, errands, leisure, healthcare, studies, and home routines." \
-  --llm-base-url http://localhost:8081 \
-  --llm-model Qwen/Qwen2.5-32B-Instruct-AWQ \
-  --dataset-output data/llm_diaries_gparis/profile_coherence_scores.parquet \
-  --output-model-path models/modernbert-profile-coherence-aligner \
-  --sample-size 2000 \
-  --mutation-ratio 0.5 \
-  --llm-concurrency 8 \
-  --device cuda
-```
-
-Serve the saved model with the rerank-compatible server on a free port:
-
-```bash
-PYTHONPATH=/home/gustavo/vllm/.venv/lib/python3.12/site-packages \
-  .venv/bin/python scripts/serve_schedule_aligner.py \
-  --model-path models/modernbert-profile-coherence-aligner \
-  --port 8085 \
-  --device cuda \
-  --predict-batch-size 128
-```
-
-Then enable it under `profiles`:
-
-```yaml
-profiles:
-  coherence_alignment_backend: rerank
-  coherence_alignment_base_url: http://localhost:8085
-  coherence_alignment_model: models/modernbert-profile-coherence-aligner
-  coherence_alignment_batch_size: 256
-  coherence_alignment_cache_path: data/llm_diaries_gparis/profile_coherence_alignment_cache.npz
-  coherence_alignment_concurrency: 4
-  coherence_rerun_rounds: 3
-  coherence_rerun_threshold: 0.6
-```
-
-Each round scores profile clusters, reruns demographics for invalid agents, and
-preserves `uid`, `home_tile`, `work_tile`, `has_car`, and `has_bike`. If the
-scorer is disabled or unavailable, profile generation continues unchanged.
-
-### Fine-tuning the ModernBERT activity aligner
-
-To label sampled profile/block/activity pairs with the same running LLM server
-and fine-tune the micro-activity alignment scorer, run:
-
-```bash
-uv run --extra finetuning python scripts/train_modernbert_activity_aligner.py \
-  --profiles-path data/gparis/results/gparis_agent_profiles.parquet \
-  --diary-path data/llm_diaries_gparis/validated_diaries_weekday.json \
-  --diary-path data/llm_diaries_gparis/validated_diaries_weekend.json \
-  --llm-base-url http://localhost:8081 \
-  --llm-model Qwen/Qwen2.5-32B-Instruct-AWQ \
-  --dataset-output data/llm_diaries_gparis/activity_alignment_scores.parquet \
-  --output-model-path models/modernbert-activity-aligner \
-  --sample-size 5000 \
-  --llm-concurrency 8 \
-  --epochs 1 \
-  --batch-size 8 \
-  --learning-rate 2e-5
-```
-
-The script scores only activity categories valid for each HOME/WORK/OTHER
-schedule block and includes previous-activity context in the training query.
-`--llm-concurrency` controls how many labeling requests are in flight at once;
-raise it when the vLLM server has batching headroom, and lower it if requests
-start timing out.
-To use the trained scorer for micro-activity CRP alignment, serve the saved
-model with the same rerank-compatible server and set:
-
-```bash
-PYTHONPATH=/home/gustavo/vllm/.venv/lib/python3.12/site-packages \
-  .venv/bin/python scripts/serve_schedule_aligner.py \
+.venv/bin/python scripts/serve_schedule_aligner.py \
   --model-path models/modernbert-activity-aligner \
   --port 8083 \
   --device cuda \
   --predict-batch-size 128
 ```
 
-On this RTX 5090 workstation, keep the vLLM environment's CUDA 13 / PyTorch
-build first on `PYTHONPATH` when serving rerankers on GPU; the project
-environment's older CUDA 12.4 PyTorch build cannot run sm_120 kernels.
+Disable these services in YAML when running without the corresponding models or
+GPU. The simulator will use configured fallbacks and existing caches where
+possible.
 
-```yaml
-activities:
-  enabled: true
-  alignment_backend: rerank
-  alignment_base_url: http://localhost:8083
-  alignment_model: models/modernbert-activity-aligner
-  alignment_batch_size: 512
-  alignment_cache_path: data/llm_diaries_gparis/activity_alignment_cache.npz
-  alignment_concurrency: 4
-  alignment_retries: 2
-  alignment_checkpoint_every: 20
+## Configuration
+
+Important scenario files:
+
+```text
+configs/gparis_simulation.yaml       Greater Paris scenario
+configs/shanghai_simulation.yaml     Shanghai scenario
+configs/yjmob_simulation.yaml        YJMOB regular scenario
+configs/yjmob2_simulation.yaml       YJMOB disaster/special-event scenario
+configs/ablations/                   Module-level ablation configurations
 ```
 
-## Web app
+The major configurable modules are:
 
-`web/` is the supported comparison UI: a FastAPI backend serves comparison and
-synthetic-only chart payloads as JSON, and a React/Vite frontend renders them
-(see `web/README.md` for details).
+- `profiles`: synthetic population, home/work assignment, coherence and vehicle
+  ownership alignment
+- `schedule`: diary selection, semantic alignment, and exploration parameters
+- `activities`: MTUS-grounded micro-schedules and activity alignment
+- `transport`: walking, cycling, road, rail, and fallback travel behavior
+- `social`: initial friendship formation and co-location-based tie updates
+- `embedding`: optional embedding backend and cache behavior
 
-Run the two dev servers from the repository root. Use the venv's interpreter
-directly for the backend — `uv run` would try to rebuild the Rust extension:
+## Data Notes
+
+The paper evaluates CityBehavEx with Greater Paris, Shanghai, and YJMOB mobility
+datasets. Greater Paris and Shanghai are non-public datasets and cannot be
+redistributed in this repository. YJMOB is public and is the recommended dataset
+for artifact reviewers who need to reproduce an end-to-end run without private
+data access.
+
+Large simulation outputs are intentionally not committed. The repository expects
+input and generated files under `data/`, with exact paths controlled by each YAML
+configuration.
+
+## Reproducing Paper-Style Experiments
+
+Run a configured experiment:
 
 ```bash
-# backend (http://localhost:8000)
-.venv/bin/python -m uvicorn app.main:app --app-dir web/backend --reload --port 8000
+uv run citybehavex simulate --config configs/yjmob_simulation.yaml
 ```
+
+Run module ablations:
 
 ```bash
-# frontend (http://localhost:5173, proxies /api to the backend)
-cd web/frontend
-npm install
-npm run dev
+./scripts/run_ablation.sh configs/ablations/yjmob/yjmob_no_profile.yaml
+./scripts/run_ablation.sh configs/ablations/yjmob/yjmob_no_micro_sched.yaml
+./scripts/run_ablation.sh configs/ablations/yjmob/yjmob_no_social.yaml
+./scripts/run_ablation.sh configs/ablations/yjmob/yjmob_no_transport.yaml
 ```
 
-Then open http://localhost:5173. The Experiments page is populated from
-`configs/*.yaml`; opening a run's charts builds the payload on first request
-(large cities take a while) and caches it under `data/.web_cache/`.
-
-Node.js is provided via nvm; source it first if `node` is not on your PATH:
+Aggregate ablation logs:
 
 ```bash
-export NVM_DIR="$HOME/.nvm" && . "$NVM_DIR/nvm.sh"
+uv run python scripts/aggregate_ablation_results.py
 ```
 
-## Updating local skmob2
+Then start the web demo and open the corresponding experiment to inspect charts,
+timeline replay, metrics, and cached comparison payloads.
 
-Rebuild the sibling `../skmob2` Rust extension into this project's `.venv`:
+## Troubleshooting
 
-```bash
-./scripts/update_local_skmob.sh
-```
+- **Rust extension not found:** rerun `./scripts/update_local_citybehavex.sh`.
+- **Editable `skmob2` or `skmob-vis` not found:** make sure the artifact includes
+  those dependencies or update `pyproject.toml` to point to installed versions.
+- **Frontend cannot reach the API:** confirm the backend is running on
+  `http://localhost:8000` and the frontend on `http://localhost:5173`.
+- **Timeline map is blank:** set `VITE_MAPBOX_TOKEN` in
+  `web/frontend/.env.local` and restart Vite.
+- **Alignment endpoint errors:** either start the configured reranker/LLM service
+  or disable that backend in the YAML config.
+- **Large chart load is slow:** the first request builds and caches payloads; the
+  next request should reuse `data/.web_cache/`.
+
+## Citation
+
+In the future...
+
+<!-- ```bibtex
+@inproceedings{santos2026citybehavex,
+  title     = {CityBehavEx: A Scalable and Empirically Validated LLM-Assisted Urban Simulation Platform},
+  author    = {Santos, Gustavo H. and Viana, Aline Carneiro and Silva, Thiago H.},
+  booktitle = {Proceedings of the EMNLP Demo Track},
+  year      = {2026}
+}
+``` -->

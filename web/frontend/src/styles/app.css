@@ -78,6 +78,11 @@ body {
   max-width: 60ch;
   margin: 0 0 var(--space-lg);
 }
+.hero-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
 .hero-figure {
   display: block;
   width: 100%;
