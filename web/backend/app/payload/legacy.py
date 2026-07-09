@@ -622,7 +622,7 @@ def _truncated_powerlaw_series(
     joined_y = np.concatenate([np.asarray(row[2], float) for row in datasets])
     shape = np.power(joined_x + r0, -beta) * np.exp(-joined_x / kappa)
     c = _geometric_scale(joined_y, shape)
-    series.append({"name": "Gonzalez reference", "role": "reference", "type": "line",
+    series.append({"name": "González reference", "role": "reference", "type": "line",
                    "points": _xy(curve_x, c * np.power(curve_x + r0, -beta) * np.exp(-curve_x / kappa))})
 
     return {
@@ -1419,7 +1419,12 @@ def _build_comparison_payload(
         block["radius_of_gyration"] = guard(
             f"mobility_laws.{meta['key']}.radius_of_gyration",
             lambda: {"title": "Radius-of-gyration mobility law", "x_label": "radius of gyration", "x_unit": "km",
-                     **_truncated_powerlaw_series(real_rog, synth_rog, observed_label if real_rog is not None else None)})
+                     **_truncated_powerlaw_series(
+                         real_rog,
+                         synth_rog,
+                         observed_label if real_rog is not None else None,
+                         reference=(5.8, 1.65, 350.0),
+                     )})
         block["daily_locations"] = guard(
             f"mobility_laws.{meta['key']}.daily_locations",
             lambda: {"title": "Daily visited locations", "x_label": "number of locations (N)", "x_unit": "",
