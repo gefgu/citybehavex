@@ -10,6 +10,8 @@ This repository accompanies an EMNLP Demo Track submission:
 > **CityBehavEx: A Scalable and Empirically Validated LLM-Assisted Urban
 > Simulation Platform**
 
+![Map Timeline View with Sprites](web/frontend/public/map_timeline_view.jpg)
+
 The demo focuses on the complete workflow: configure a city scenario, run a
 simulation, replay agent trajectories, inspect profiles and activity traces, and
 compare synthetic behavior with empirical validation metrics through the web
