@@ -596,7 +596,6 @@ export function Charts() {
   const metricsLoading = isSectionLoading("metrics", metricSectionFilter);
   const distributionFilterLoading = isSectionLoading("distributions", distributionFilter);
   const networkValidationBlock = networkValidation?.network_validation;
-  const hasObservedSocialNetwork = Boolean(networkValidationBlock?.observed_vs_random);
   const titleLabel =
     payload.mode === "comparison" && payload.labels.observed
       ? `${payload.labels.observed} vs synthetic`
@@ -939,13 +938,11 @@ export function Charts() {
             block={networkValidationBlock.synthetic_vs_random}
             sourceLabel="synthetic"
             sourceTitle="Synthetic social + encounters"
-            showWasserstein={!hasObservedSocialNetwork}
           />
           <NetworkValidationSection
             block={networkValidationBlock.observed_vs_random}
             sourceLabel="observed"
             sourceTitle="Observed daily co-presence"
-            showWasserstein={!hasObservedSocialNetwork}
           />
         </>
       ) : payload.social_network ? (
