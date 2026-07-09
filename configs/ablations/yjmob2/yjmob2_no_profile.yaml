@@ -38,7 +38,7 @@ rail_network:
   snap_output: data/yjmob2/yjmob2_rail_graph_snap.parquet
 llm:
   concurrency: 8
-  base_url: http://localhost:8081
+  base_url: http://200.134.10.65:8081
   api_key: none
   model: Qwen/Qwen2.5-32B-Instruct-AWQ
   diary_count: 30
@@ -162,8 +162,11 @@ profiles:
   ownership_alignment_cache_path: data/llm_diaries_yjmob2/vehicle_ownership_alignment_cache.npz
   ownership_alignment_concurrency: 4
 comparison:
-  path: data/yjmob2/yjmob_wgs84_half_a.parquet
+  path: data/yjmob2/yjmob2_wgs84_half_a.parquet
   label: yjmob2_disaster
+  evaluation_adaptation:
+    mode: force
+    h3_resolution: 7
   network_validation:
     enabled: true
     observed_enabled: true

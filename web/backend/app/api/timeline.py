@@ -155,7 +155,7 @@ def get_timeline_legs(
     run: Optional[str] = Query(None),
     max_agents: int = Query(2000, ge=1, le=5000),
 ) -> ApiResponseWrapper[dict[str, Any]]:
-    _experiment, selected = _resolve_run(exp_id, run)
+    experiment, selected = _resolve_run(exp_id, run)
     if until <= since:
         raise HTTPException(status_code=422, detail="until must be after since")
     if (until - since) > _MAX_WINDOW:
@@ -164,7 +164,13 @@ def get_timeline_legs(
     legs_path = legs_index_path(exp_id, selected)
     moving_path = moving_index_path(exp_id, selected)
     segments, truncated = query_active_legs(
-        legs_path, since, until, (min_lat, min_lng, max_lat, max_lng), max_agents, moving_path
+        legs_path,
+        since,
+        until,
+        (min_lat, min_lng, max_lat, max_lng),
+        max_agents,
+        moving_path,
+        experiment.profiles_path,
     )
     payload = {
         "run_id": selected.run_id,

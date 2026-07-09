@@ -11,7 +11,7 @@ echo "=== sweep started $(date) ===" >> "$LOG"
 run() {
   local dataset="$1" variant="$2" idx="$3"
   echo "--- $(date) $dataset/$variant/run$idx ---" >> "$LOG"
-  if timeout 10800 bash scripts/run_ablation.sh "$dataset" "$variant" "$idx" >> "$LOG" 2>&1; then
+  if timeout 1800 bash scripts/run_ablation.sh "$dataset" "$variant" "$idx" >> "$LOG" 2>&1; then
     echo "OK $dataset/$variant/run$idx" >> "$LOG"
   else
     echo "FAILED $dataset/$variant/run$idx (see log above)" >> "$LOG"
@@ -20,15 +20,8 @@ run() {
 
 VARIANTS="no_profile no_micro_sched no_social no_transport no_feedback"
 
-# Shanghai comparison-table config: redo official 3 runs (no profile caching)
-for i in 1 2 3; do
-  echo "--- $(date) shanghai_500sample run$i ---" >> "$LOG"
-  if timeout 10800 bash scripts/run_ablation.sh shanghai 500sample "$i" configs/shanghai_simulation_500sample.yaml >> "$LOG" 2>&1; then
-    echo "OK shanghai_500sample run$i" >> "$LOG"
-  else
-    echo "FAILED shanghai_500sample run$i" >> "$LOG"
-  fi
-done
+# Shanghai comparison-table runs already completed and applied to
+# paper/comparision_table.tex -- not repeated here.
 
 # Ablation matrix: 3 datasets x (full + 5 variants) x 3 rounds.
 for round in 1 2 3; do
