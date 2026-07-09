@@ -98,7 +98,7 @@ const FILTERED_SECTIONS = [
   "stvd",
 ];
 const STATIC_SECTIONS = ["profiles", "social-network"];
-const SECTION_REQUEST_TIMEOUT_MS = 20_000;
+const SECTION_REQUEST_TIMEOUT_MS = 10 * 60_000;
 
 function sectionKey(section: string, filter = "all") {
   return `${section}:${filter}`;
@@ -110,8 +110,15 @@ function defaultSectionRequests(
   fastOnly = false,
 ): [string, string][] {
   if (fastOnly) {
+    const metricFilter = distributionFilter === "all" ? dayFilter : distributionFilter;
     return [
       ["time-use", dayFilter],
+      ["metrics", metricFilter],
+      ["distributions", distributionFilter],
+      ["activity", dayFilter],
+      ["motifs", dayFilter],
+      ["stvd", dayFilter],
+      ["profiles", "all"],
       ["social-network", "all"],
     ];
   }
@@ -414,7 +421,7 @@ export function Charts() {
           if (requestScopeRef.current === requestScope) {
             const message =
               e instanceof DOMException && e.name === "AbortError"
-                ? "Timed out while building this section; reload to retry."
+                ? "Timed out after 10 minutes while building this section; reload to retry."
                 : String(e);
             setSectionErrors((current) => ({ ...current, [key]: message }));
           }
@@ -567,6 +574,7 @@ export function Charts() {
     time_use: (metrics.time_use ?? []).filter((m) => m.filter_key === dayFilter),
     stvd: (metrics.stvd ?? []).filter((m) => m.filter_key === metricFilter),
   };
+  const hasMetricRows = Object.values(metricRows).some((rows) => rows.length > 0);
   const ecdfGroup =
     payload.ecdf.groups.find((group) => group.filter_key === distributionFilter) ??
     (distributionFilter === "all" ? payload.ecdf.groups[0] : undefined);
@@ -594,7 +602,16 @@ export function Charts() {
     sectionErrors[sectionKey(section, filter)];
   const metricSectionFilter = distributionFilter === "all" ? dayFilter : distributionFilter;
   const metricsLoading = isSectionLoading("metrics", metricSectionFilter);
+  const metricsError = sectionError("metrics", metricSectionFilter);
   const distributionFilterLoading = isSectionLoading("distributions", distributionFilter);
+  const mobilityLawsLoading = isSectionLoading("mobility-laws", dayFilter);
+  const activityLoading = isSectionLoading("activity", dayFilter);
+  const microActivityLoading = isSectionLoading("micro-activity", dayFilter);
+  const timeUseLoading = isSectionLoading("time-use", dayFilter);
+  const motifsLoading = isSectionLoading("motifs", dayFilter);
+  const stvdLoading = isSectionLoading("stvd", dayFilter);
+  const profilesLoading = isSectionLoading("profiles");
+  const socialNetworkLoading = isSectionLoading("social-network");
   const networkValidationBlock = networkValidation?.network_validation;
   const titleLabel =
     payload.mode === "comparison" && payload.labels.observed
@@ -661,6 +678,10 @@ export function Charts() {
         </div>
       ) : metricsLoading ? (
         <div className="state">Building selected metrics…</div>
+      ) : metricsError ? (
+        <div className="state">Failed to load metrics: {metricsError}</div>
+      ) : !hasMetricRows ? (
+        <div className="state">No metrics returned for {metricSectionFilter}.</div>
       ) : (
         <div className="metric-tables">
           <FilteredMetricTable title="Wasserstein distances" rows={metricRows.wasserstein} />
@@ -687,6 +708,9 @@ export function Charts() {
       )}
       {sectionError("distributions", distributionFilter) && (
         <div className="state">Failed to load distribution: {sectionError("distributions", distributionFilter)}</div>
+      )}
+      {!distributionFilterLoading && !sectionError("distributions", distributionFilter) && !ecdfGroup && (
+        <div className="state">No distribution comparison returned for {distributionFilter}.</div>
       )}
       {!distributionFilterLoading && ecdfGroup && (
         <div className="chart-grid">
@@ -743,20 +767,22 @@ export function Charts() {
         <div className="state">Failed to load transport mobility: {sectionError("transport-spatial")}</div>
       )}
 
-      {isSectionLoading("mobility-laws", dayFilter) && <div className="state">Building mobility laws…</div>}
-      {!isSectionLoading("mobility-laws", dayFilter) && mobilityGroup && (
-        <>
-          <SectionHeading
-            controls={
-              <SegmentedControl
-                label="Mobility laws day type filter"
-                onChange={setSyncedDayFilter}
-                options={dayFilters}
-                value={dayFilter}
-              />
-            }
-            title="Mobility laws"
+      <SectionHeading
+        controls={
+          <SegmentedControl
+            label="Mobility laws day type filter"
+            onChange={setSyncedDayFilter}
+            options={dayFilters}
+            value={dayFilter}
           />
+        }
+        title="Mobility laws"
+      />
+      {mobilityLawsLoading ? (
+        <div className="state">Building mobility laws…</div>
+      ) : sectionError("mobility-laws", dayFilter) ? (
+        <div className="state">Failed to load mobility laws: {sectionError("mobility-laws", dayFilter)}</div>
+      ) : mobilityGroup ? (
           <div className="chart-grid">
             {Object.entries(mobilityGroup.blocks).map(([key, block]) => (
               <ChartCard
@@ -767,23 +793,26 @@ export function Charts() {
               />
             ))}
           </div>
-        </>
+      ) : (
+        <div className="state">No mobility laws returned for {dayFilter}.</div>
       )}
 
-      {isSectionLoading("activity", dayFilter) && <div className="state">Building activity comparison…</div>}
-      {!isSectionLoading("activity", dayFilter) && activityGroup && (
-        <>
-          <SectionHeading
-            controls={
-              <SegmentedControl
-                label="Activity day type filter"
-                onChange={setSyncedDayFilter}
-                options={dayFilters}
-                value={dayFilter}
-              />
-            }
-            title="Activity comparison"
+      <SectionHeading
+        controls={
+          <SegmentedControl
+            label="Activity day type filter"
+            onChange={setSyncedDayFilter}
+            options={dayFilters}
+            value={dayFilter}
           />
+        }
+        title="Activity comparison"
+      />
+      {activityLoading ? (
+        <div className="state">Building activity comparison…</div>
+      ) : sectionError("activity", dayFilter) ? (
+        <div className="state">Failed to load activity comparison: {sectionError("activity", dayFilter)}</div>
+      ) : activityGroup ? (
           <div className="chart-grid">
             <ChartCard title="Visit purpose comparison" option={purposeOption(activityGroup.purpose)} wide />
             <ChartCard
@@ -797,45 +826,51 @@ export function Charts() {
               />
             )}
           </div>
-        </>
+      ) : (
+        <div className="state">No activity comparison returned for {dayFilter}.</div>
       )}
 
-      {isSectionLoading("micro-activity", dayFilter) && <div className="state">Building micro-activity usage…</div>}
-      {!isSectionLoading("micro-activity", dayFilter) && microActivityGroup && (
-        <>
-          <SectionHeading
-            controls={
-              <SegmentedControl
-                label="Micro-activity day type filter"
-                onChange={setSyncedDayFilter}
-                options={dayFilters}
-                value={dayFilter}
-              />
-            }
-            title="Synthetic micro-activity usage"
+      <SectionHeading
+        controls={
+          <SegmentedControl
+            label="Micro-activity day type filter"
+            onChange={setSyncedDayFilter}
+            options={dayFilters}
+            value={dayFilter}
           />
+        }
+        title="Synthetic micro-activity usage"
+      />
+      {microActivityLoading ? (
+        <div className="state">Building micro-activity usage…</div>
+      ) : sectionError("micro-activity", dayFilter) ? (
+        <div className="state">Failed to load micro-activity usage: {sectionError("micro-activity", dayFilter)}</div>
+      ) : microActivityGroup ? (
           <ChartCard
             title="Mean daily usage over the day"
             option={microActivityUsageOption(microActivityGroup.block)}
             wide
           />
-        </>
+      ) : (
+        <div className="state">No micro-activity usage returned for {dayFilter}.</div>
       )}
 
-      {isSectionLoading("time-use", dayFilter) && <div className="state">Building time-use comparison…</div>}
-      {!isSectionLoading("time-use", dayFilter) && timeUseGroup && (
-        <>
-          <SectionHeading
-            controls={
-              <SegmentedControl
-                label="Time-use day type filter"
-                onChange={setSyncedDayFilter}
-                options={dayFilters}
-                value={dayFilter}
-              />
-            }
-            title="Time-use comparison"
+      <SectionHeading
+        controls={
+          <SegmentedControl
+            label="Time-use day type filter"
+            onChange={setSyncedDayFilter}
+            options={dayFilters}
+            value={dayFilter}
           />
+        }
+        title="Time-use comparison"
+      />
+      {timeUseLoading ? (
+        <div className="state">Building time-use comparison…</div>
+      ) : sectionError("time-use", dayFilter) ? (
+        <div className="state">Failed to load time-use comparison: {sectionError("time-use", dayFilter)}</div>
+      ) : timeUseGroup ? (
           <div className="chart-grid">
             <ChartCard
               title="Mean daily minutes"
@@ -848,45 +883,52 @@ export function Charts() {
               wide
             />
           </div>
-        </>
+      ) : (
+        <div className="state">No time-use comparison returned for {dayFilter}. Configure a time-use survey to enable this section.</div>
       )}
 
-      {isSectionLoading("motifs", dayFilter) && <div className="state">Building motifs…</div>}
-      {!isSectionLoading("motifs", dayFilter) && motifGroup && (
-        <>
-          <SectionHeading
-            controls={
-              <SegmentedControl
-                label="Motifs day type filter"
-                onChange={setSyncedDayFilter}
-                options={dayFilters}
-                value={dayFilter}
-              />
-            }
-            title="Daily motifs"
+      <SectionHeading
+        controls={
+          <SegmentedControl
+            label="Motifs day type filter"
+            onChange={setSyncedDayFilter}
+            options={dayFilters}
+            value={dayFilter}
           />
+        }
+        title="Daily motifs"
+      />
+      {motifsLoading ? (
+        <div className="state">Building motifs…</div>
+      ) : sectionError("motifs", dayFilter) ? (
+        <div className="state">Failed to load motifs: {sectionError("motifs", dayFilter)}</div>
+      ) : motifGroup ? (
           <div className="chart-grid">
             <ChartCard title="Motif literature comparison" option={motifOption(motifGroup.block)} wide />
           </div>
-        </>
+      ) : (
+        <div className="state">No motifs returned for {dayFilter}.</div>
       )}
 
-      {isSectionLoading("stvd", dayFilter) && <div className="state">Building STVD map…</div>}
-      {!isSectionLoading("stvd", dayFilter) && stvdGroup && (
-        <>
-          <SectionHeading
-            controls={
-              <SegmentedControl
-                label="STVD day type filter"
-                onChange={setSyncedDayFilter}
-                options={dayFilters}
-                value={dayFilter}
-              />
-            }
-            title="Spatial-temporal volume difference"
+      <SectionHeading
+        controls={
+          <SegmentedControl
+            label="STVD day type filter"
+            onChange={setSyncedDayFilter}
+            options={dayFilters}
+            value={dayFilter}
           />
+        }
+        title="Spatial-temporal volume difference"
+      />
+      {stvdLoading ? (
+        <div className="state">Building STVD map…</div>
+      ) : sectionError("stvd", dayFilter) ? (
+        <div className="state">Failed to load STVD map: {sectionError("stvd", dayFilter)}</div>
+      ) : stvdGroup ? (
           <StvdMap block={stvdGroup.block} />
-        </>
+      ) : (
+        <div className="state">No STVD map returned for {dayFilter}.</div>
       )}
 
       {homeWork && (
@@ -949,6 +991,10 @@ export function Charts() {
         <SocialNetworkGraph block={payload.social_network} title="Initial social graph" />
       ) : networkValidationError ? (
         <div className="state">Failed to load network validation: {networkValidationError}</div>
+      ) : sectionError("social-network") ? (
+        <div className="state">Failed to load social network: {sectionError("social-network")}</div>
+      ) : socialNetworkLoading ? (
+        <div className="state">Building social network…</div>
       ) : networkValidation === null && !demoSafeMode ? (
         <div className="state">Building social network validation… (fetched separately from the rest of the charts)</div>
       ) : (
@@ -958,9 +1004,12 @@ export function Charts() {
         </div>
       )}
 
-      {payload.profiles && (
-        <>
-          <SectionHeading title="Mobility profiles" />
+      <SectionHeading title="Mobility profiles" />
+      {profilesLoading ? (
+        <div className="state">Building mobility profiles…</div>
+      ) : sectionError("profiles") ? (
+        <div className="state">Failed to load mobility profiles: {sectionError("profiles")}</div>
+      ) : payload.profiles ? (
           <div className="chart-grid">
             <ChartCard
               title="Intermittency vs degree of return"
@@ -975,7 +1024,8 @@ export function Charts() {
               />
             ))}
           </div>
-        </>
+      ) : (
+        <div className="state">No mobility profiles returned for this run.</div>
       )}
 
       <div style={{ height: 96 }} />

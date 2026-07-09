@@ -14,9 +14,12 @@ const REFETCH_MARGIN_MS = 5 * 60 * 1000;
 const RETENTION_MS = 10 * 60 * 1000;
 const DEFAULT_MAX_AGENTS = 2000;
 const SPEED_OPTIONS = [1, 10, 60, 300];
-const CAR_ICON_SIZE = 0.6;
-const RAIL_ICON_SIZE = 0.6;
-const MODE_ICON_SIZE = 0.55;
+const CAR_ICON_SIZE = 0.7;
+const BIKE_ICON_SIZE = 0.7;
+const RAIL_ICON_SIZE = 0.7;
+const MODE_ICON_SIZE = 0.7;
+const CHARACTER_ICON_SIZE = 0.8;
+const CHARACTER_MIN_ZOOM = 13;
 const TRANSPORT_DIRECTIONS = [
   "north",
   "north-east",
@@ -50,13 +53,22 @@ interface Seg {
   d_lng: number;
   purpose: string;
   mode: "stay" | "car" | "walk" | "bike" | "rail";
+  gender?: "female" | "man" | "unknown" | null;
   waypoints?: Waypoint[];
 }
 
 type TransportDirection = (typeof TRANSPORT_DIRECTIONS)[number];
+type CharacterGender = "female" | "man";
 type AgentFeatureCollection = FeatureCollection<
   Point,
-  { uid: number; purpose: string; mode: string; iconImage: string }
+  {
+    uid: number;
+    purpose: string;
+    mode: string;
+    iconImage: string;
+    characterImage: string;
+    hasCharacter: boolean;
+  }
 >;
 
 const EMPTY_FC: AgentFeatureCollection = { type: "FeatureCollection", features: [] };
@@ -120,12 +132,20 @@ function directionFromBearing(deg: number | null): TransportDirection {
   return TRANSPORT_DIRECTIONS[Math.round(normalized / 45) % TRANSPORT_DIRECTIONS.length];
 }
 
-function transportImageId(mode: "car" | "rail", direction: TransportDirection): string {
+function transportImageId(mode: "car" | "bike" | "rail", direction: TransportDirection): string {
   return `${mode}-${direction}`;
 }
 
 function modeImageId(mode: string): string {
   return `mode-${mode}`;
+}
+
+function characterImageId(gender: CharacterGender, direction: TransportDirection): string {
+  return `character-${gender}-${direction}`;
+}
+
+function characterGender(gender: string | null | undefined): CharacterGender | null {
+  return gender === "female" || gender === "man" ? gender : null;
 }
 
 function transportDirectionForSegment(seg: Seg, t: number): TransportDirection {
@@ -136,6 +156,10 @@ function transportDirectionForSegment(seg: Seg, t: number): TransportDirection {
   return directionFromBearing(
     bearingDegrees({ lat: seg.o_lat, lng: seg.o_lng }, { lat: seg.d_lat, lng: seg.d_lng }),
   );
+}
+
+function canShowCharacter(mode: string): boolean {
+  return mode !== "car" && mode !== "bike" && mode !== "rail";
 }
 
 function loadMapImage(map: mapboxgl.Map, id: string, url: string): Promise<void> {
@@ -212,6 +236,7 @@ function mergeSegments(target: Map<number, Seg[]>, raw: TimelineSegment[]) {
       d_lng: s.d_lng,
       purpose: s.purpose,
       mode: s.mode ?? (s.kind === "dwell" ? "stay" : "car"),
+      gender: s.gender,
       waypoints: s.waypoints?.map((w) => ({ t: parseSimTime(w.t), lat: w.lat, lng: w.lng })),
     };
     const list = byUid.get(s.uid) ?? [];
@@ -353,7 +378,7 @@ export function TimelineMap({
 
     const onLoad = async () => {
       for (const mode of Object.keys(MODE_LABEL)) {
-        if (mode === "car" || mode === "rail") continue;
+        if (mode === "car" || mode === "bike" || mode === "rail") continue;
         if (!map.hasImage(`mode-${mode}`)) {
           map.addImage(`mode-${mode}`, makeModeIcon(mode), { sdf: true, pixelRatio: 2 });
         }
@@ -362,7 +387,14 @@ export function TimelineMap({
         await Promise.all(
           TRANSPORT_DIRECTIONS.flatMap((direction) => [
             loadMapImage(map, transportImageId("car", direction), `/transport/red_car/${direction}.png`),
+            loadMapImage(map, transportImageId("bike", direction), `/transport/bike/${direction}.png`),
             loadMapImage(map, transportImageId("rail", direction), `/transport/rail/${direction}.png`),
+            loadMapImage(
+              map,
+              characterImageId("female", direction),
+              `/characters/female/${direction}.png`,
+            ),
+            loadMapImage(map, characterImageId("man", direction), `/characters/man/${direction}.png`),
           ]),
         );
       } catch {
@@ -374,7 +406,13 @@ export function TimelineMap({
         id: "agents-mode-symbols",
         type: "symbol",
         source: "agents",
-        filter: ["all", ["!=", ["get", "mode"], "car"], ["!=", ["get", "mode"], "rail"]],
+        maxzoom: CHARACTER_MIN_ZOOM,
+        filter: [
+          "all",
+          ["!=", ["get", "mode"], "car"],
+          ["!=", ["get", "mode"], "bike"],
+          ["!=", ["get", "mode"], "rail"],
+        ],
         layout: {
           "icon-image": ["get", "iconImage"],
           "icon-size": MODE_ICON_SIZE,
@@ -396,6 +434,7 @@ export function TimelineMap({
         id: "agents-car-symbols",
         type: "symbol",
         source: "agents",
+        maxzoom: CHARACTER_MIN_ZOOM,
         filter: ["==", ["get", "mode"], "car"],
         layout: {
           "icon-image": ["get", "iconImage"],
@@ -405,13 +444,94 @@ export function TimelineMap({
         },
       });
       map.addLayer({
+        id: "agents-bike-symbols",
+        type: "symbol",
+        source: "agents",
+        maxzoom: CHARACTER_MIN_ZOOM,
+        filter: ["==", ["get", "mode"], "bike"],
+        layout: {
+          "icon-image": ["get", "iconImage"],
+          "icon-size": BIKE_ICON_SIZE,
+          "icon-allow-overlap": true,
+          "icon-ignore-placement": true,
+        },
+      });
+      map.addLayer({
         id: "agents-rail-symbols",
         type: "symbol",
         source: "agents",
+        maxzoom: CHARACTER_MIN_ZOOM,
         filter: ["==", ["get", "mode"], "rail"],
         layout: {
           "icon-image": ["get", "iconImage"],
           "icon-size": RAIL_ICON_SIZE,
+          "icon-allow-overlap": true,
+          "icon-ignore-placement": true,
+        },
+      });
+      map.addLayer({
+        id: "agents-character-symbols",
+        type: "symbol",
+        source: "agents",
+        minzoom: CHARACTER_MIN_ZOOM,
+        filter: ["==", ["get", "hasCharacter"], true],
+        layout: {
+          "icon-image": ["get", "characterImage"],
+          "icon-size": CHARACTER_ICON_SIZE,
+          "icon-allow-overlap": true,
+          "icon-ignore-placement": true,
+        },
+      });
+      map.addLayer({
+        id: "agents-close-mode-symbols",
+        type: "symbol",
+        source: "agents",
+        minzoom: CHARACTER_MIN_ZOOM,
+        filter: [
+          "all",
+          ["!=", ["get", "hasCharacter"], true],
+          ["!=", ["get", "mode"], "car"],
+          ["!=", ["get", "mode"], "bike"],
+          ["!=", ["get", "mode"], "rail"],
+        ],
+        layout: {
+          "icon-image": ["get", "iconImage"],
+          "icon-size": MODE_ICON_SIZE,
+          "icon-allow-overlap": true,
+          "icon-ignore-placement": true,
+        },
+        paint: {
+          "icon-halo-color": "#ffffff",
+          "icon-halo-width": 1,
+          "icon-color": [
+            "match",
+            ["get", "purpose"],
+            ...Object.entries(PURPOSE_COLOR).flatMap(([k, v]) => [k, v]),
+            DEFAULT_PURPOSE_COLOR,
+          ] as unknown as string,
+        },
+      });
+      map.addLayer({
+        id: "agents-close-transport-symbols",
+        type: "symbol",
+        source: "agents",
+        minzoom: CHARACTER_MIN_ZOOM,
+        filter: [
+          "all",
+          ["!=", ["get", "hasCharacter"], true],
+          ["in", ["get", "mode"], ["literal", ["car", "bike", "rail"]]],
+        ],
+        layout: {
+          "icon-image": ["get", "iconImage"],
+          "icon-size": [
+            "match",
+            ["get", "mode"],
+            "bike",
+            BIKE_ICON_SIZE,
+            "rail",
+            RAIL_ICON_SIZE,
+            CAR_ICON_SIZE,
+          ],
           "icon-allow-overlap": true,
           "icon-ignore-placement": true,
         },
@@ -421,27 +541,24 @@ export function TimelineMap({
         const uid = f?.properties?.uid;
         if (uid !== undefined && uid !== null) onSelectAgent(Number(uid));
       };
-      map.on("click", "agents-mode-symbols", onAgentClick);
-      map.on("click", "agents-car-symbols", onAgentClick);
-      map.on("click", "agents-rail-symbols", onAgentClick);
-      map.on("mouseenter", "agents-mode-symbols", () => {
-        map.getCanvas().style.cursor = "pointer";
-      });
-      map.on("mouseenter", "agents-car-symbols", () => {
-        map.getCanvas().style.cursor = "pointer";
-      });
-      map.on("mouseenter", "agents-rail-symbols", () => {
-        map.getCanvas().style.cursor = "pointer";
-      });
-      map.on("mouseleave", "agents-mode-symbols", () => {
-        map.getCanvas().style.cursor = "";
-      });
-      map.on("mouseleave", "agents-car-symbols", () => {
-        map.getCanvas().style.cursor = "";
-      });
-      map.on("mouseleave", "agents-rail-symbols", () => {
-        map.getCanvas().style.cursor = "";
-      });
+      const interactiveLayers = [
+        "agents-mode-symbols",
+        "agents-car-symbols",
+        "agents-bike-symbols",
+        "agents-rail-symbols",
+        "agents-character-symbols",
+        "agents-close-mode-symbols",
+        "agents-close-transport-symbols",
+      ];
+      for (const layerId of interactiveLayers) {
+        map.on("click", layerId, onAgentClick);
+        map.on("mouseenter", layerId, () => {
+          map.getCanvas().style.cursor = "pointer";
+        });
+        map.on("mouseleave", layerId, () => {
+          map.getCanvas().style.cursor = "";
+        });
+      }
       map.on("moveend", onMoveEnd);
 
       fetchWindow(clockRef.current.simTimeMs, clockRef.current.simTimeMs + LOOKAHEAD_MS);
@@ -496,14 +613,26 @@ export function TimelineMap({
             lng = seg.o_lng + (seg.d_lng - seg.o_lng) * frac;
           }
           const displayMode = seg.kind === "dwell" ? "stay" : seg.mode;
+          const direction = transportDirectionForSegment(seg, c.simTimeMs);
+          const gender = characterGender(seg.gender);
+          const showCharacter = gender !== null && canShowCharacter(displayMode);
           const iconImage =
-            displayMode === "car" || displayMode === "rail"
-              ? transportImageId(displayMode, transportDirectionForSegment(seg, c.simTimeMs))
+            displayMode === "car" || displayMode === "bike" || displayMode === "rail"
+              ? transportImageId(displayMode, direction)
               : modeImageId(displayMode);
+          const characterDirection = displayMode === "stay" ? "south" : direction;
+          const characterImage = showCharacter ? characterImageId(gender, characterDirection) : "";
           features.push({
             type: "Feature",
             geometry: { type: "Point", coordinates: [lng, lat] },
-            properties: { uid, purpose: seg.purpose, mode: displayMode, iconImage },
+            properties: {
+              uid,
+              purpose: seg.purpose,
+              mode: displayMode,
+              iconImage,
+              characterImage,
+              hasCharacter: showCharacter,
+            },
           });
         }
         const source = mapRef.current?.getSource("agents") as mapboxgl.GeoJSONSource | undefined;

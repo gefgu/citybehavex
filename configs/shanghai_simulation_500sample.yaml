@@ -47,7 +47,7 @@ rail_network:
   snap_output: data/shanghai/shanghai_rail_graph_snap.parquet
 
 llm:
-  base_url: "http://localhost:8081"
+  base_url: "http://200.134.10.65:8081"
   api_key: "none"
   model: "Qwen/Qwen2.5-32B-Instruct-AWQ"
   diary_count: 30

@@ -2,14 +2,10 @@
   "representative_day": "2019-09-15",
   "location_count_distribution": {
     "mu": 1.5,
-    "sigma": 0.65,
+    "sigma": 0.5,
     "max_locations": 9
   },
   "target_location_counts": [
-    1,
-    1,
-    2,
-    2,
     2,
     2,
     2,
@@ -24,6 +20,8 @@
     4,
     4,
     4,
+    4,
+    5,
     5,
     5,
     5,
@@ -31,19 +29,36 @@
     6,
     6,
     6,
+    6,
+    7,
     7,
     7,
     8,
     8,
     9
   ],
-  "motif_exploration_rate": 0.25,
+  "motif_exploration_rate": 1.0,
   "diaries": [
     {
       "diary_id": "routine-001",
       "episodes": [
         {
           "start": "00:00",
+          "end": "07:00",
+          "purpose": "HOME"
+        },
+        {
+          "start": "07:00",
+          "end": "15:00",
+          "purpose": "WORK"
+        },
+        {
+          "start": "15:00",
+          "end": "16:00",
+          "purpose": "OTHER"
+        },
+        {
+          "start": "16:00",
           "end": "24:00",
           "purpose": "HOME"
         }
@@ -54,6 +69,21 @@
       "episodes": [
         {
           "start": "00:00",
+          "end": "07:00",
+          "purpose": "HOME"
+        },
+        {
+          "start": "07:00",
+          "end": "15:00",
+          "purpose": "WORK"
+        },
+        {
+          "start": "15:00",
+          "end": "16:00",
+          "purpose": "OTHER"
+        },
+        {
+          "start": "16:00",
           "end": "24:00",
           "purpose": "HOME"
         }
@@ -64,16 +94,236 @@
       "episodes": [
         {
           "start": "00:00",
+          "end": "07:00",
+          "purpose": "HOME"
+        },
+        {
+          "start": "07:00",
+          "end": "08:30",
+          "purpose": "WORK"
+        },
+        {
+          "start": "08:30",
+          "end": "17:00",
+          "purpose": "WORK"
+        },
+        {
+          "start": "17:00",
+          "end": "18:30",
+          "purpose": "OTHER"
+        },
+        {
+          "start": "18:30",
+          "end": "24:00",
+          "purpose": "HOME"
+        }
+      ]
+    },
+    {
+      "diary_id": "routine-004",
+      "episodes": [
+        {
+          "start": "00:00",
+          "end": "07:00",
+          "purpose": "HOME"
+        },
+        {
+          "start": "07:00",
+          "end": "15:00",
+          "purpose": "WORK"
+        },
+        {
+          "start": "15:00",
+          "end": "16:00",
+          "purpose": "OTHER"
+        },
+        {
+          "start": "16:00",
+          "end": "24:00",
+          "purpose": "HOME"
+        }
+      ]
+    },
+    {
+      "diary_id": "routine-005",
+      "episodes": [
+        {
+          "start": "00:00",
+          "end": "07:00",
+          "purpose": "HOME"
+        },
+        {
+          "start": "07:00",
+          "end": "15:00",
+          "purpose": "WORK"
+        },
+        {
+          "start": "15:00",
+          "end": "16:00",
+          "purpose": "OTHER"
+        },
+        {
+          "start": "16:00",
+          "end": "24:00",
+          "purpose": "HOME"
+        }
+      ]
+    },
+    {
+      "diary_id": "routine-006",
+      "episodes": [
+        {
+          "start": "00:00",
+          "end": "07:00",
+          "purpose": "HOME"
+        },
+        {
+          "start": "07:00",
+          "end": "15:00",
+          "purpose": "WORK"
+        },
+        {
+          "start": "15:00",
+          "end": "16:00",
+          "purpose": "OTHER"
+        },
+        {
+          "start": "16:00",
+          "end": "24:00",
+          "purpose": "HOME"
+        }
+      ]
+    },
+    {
+      "diary_id": "routine-007",
+      "episodes": [
+        {
+          "start": "00:00",
+          "end": "07:00",
+          "purpose": "HOME"
+        },
+        {
+          "start": "07:00",
+          "end": "15:00",
+          "purpose": "WORK"
+        },
+        {
+          "start": "15:00",
+          "end": "16:00",
+          "purpose": "OTHER"
+        },
+        {
+          "start": "16:00",
+          "end": "24:00",
+          "purpose": "HOME"
+        }
+      ]
+    },
+    {
+      "diary_id": "routine-008",
+      "episodes": [
+        {
+          "start": "00:00",
+          "end": "07:00",
+          "purpose": "HOME"
+        },
+        {
+          "start": "07:00",
+          "end": "15:00",
+          "purpose": "WORK"
+        },
+        {
+          "start": "15:00",
+          "end": "16:00",
+          "purpose": "OTHER"
+        },
+        {
+          "start": "16:00",
+          "end": "24:00",
+          "purpose": "HOME"
+        }
+      ]
+    },
+    {
+      "diary_id": "routine-009",
+      "episodes": [
+        {
+          "start": "00:00",
           "end": "06:30",
           "purpose": "HOME"
         },
         {
           "start": "06:30",
-          "end": "07:30",
+          "end": "14:00",
           "purpose": "WORK"
         },
         {
-          "start": "07:30",
+          "start": "14:00",
+          "end": "15:30",
+          "purpose": "OTHER"
+        },
+        {
+          "start": "15:30",
+          "end": "24:00",
+          "purpose": "HOME"
+        }
+      ]
+    },
+    {
+      "diary_id": "routine-010",
+      "episodes": [
+        {
+          "start": "00:00",
+          "end": "07:00",
+          "purpose": "HOME"
+        },
+        {
+          "start": "07:00",
+          "end": "08:30",
+          "purpose": "WORK"
+        },
+        {
+          "start": "08:30",
+          "end": "12:00",
+          "purpose": "WORK"
+        },
+        {
+          "start": "12:00",
+          "end": "13:00",
+          "purpose": "OTHER"
+        },
+        {
+          "start": "13:00",
+          "end": "17:30",
+          "purpose": "WORK"
+        },
+        {
+          "start": "17:30",
+          "end": "18:30",
+          "purpose": "OTHER"
+        },
+        {
+          "start": "18:30",
+          "end": "24:00",
+          "purpose": "HOME"
+        }
+      ]
+    },
+    {
+      "diary_id": "routine-011",
+      "episodes": [
+        {
+          "start": "00:00",
+          "end": "07:00",
+          "purpose": "HOME"
+        },
+        {
+          "start": "07:00",
+          "end": "09:00",
+          "purpose": "WORK"
+        },
+        {
+          "start": "09:00",
           "end": "18:00",
           "purpose": "WORK"
         },
@@ -90,7 +340,7 @@
       ]
     },
     {
-      "diary_id": "routine-004",
+      "diary_id": "routine-012",
       "episodes": [
         {
           "start": "00:00",
@@ -99,91 +349,11 @@
         },
         {
           "start": "07:00",
-          "end": "17:00",
+          "end": "09:00",
           "purpose": "WORK"
         },
         {
-          "start": "17:00",
-          "end": "24:00",
-          "purpose": "HOME"
-        }
-      ]
-    },
-    {
-      "diary_id": "routine-005",
-      "episodes": [
-        {
-          "start": "00:00",
-          "end": "07:00",
-          "purpose": "HOME"
-        },
-        {
-          "start": "07:00",
-          "end": "14:00",
-          "purpose": "WORK"
-        },
-        {
-          "start": "14:00",
-          "end": "15:00",
-          "purpose": "OTHER"
-        },
-        {
-          "start": "15:00",
-          "end": "24:00",
-          "purpose": "HOME"
-        }
-      ]
-    },
-    {
-      "diary_id": "routine-006",
-      "episodes": [
-        {
-          "start": "00:00",
-          "end": "07:00",
-          "purpose": "HOME"
-        },
-        {
-          "start": "07:00",
-          "end": "18:00",
-          "purpose": "WORK"
-        },
-        {
-          "start": "18:00",
-          "end": "24:00",
-          "purpose": "HOME"
-        }
-      ]
-    },
-    {
-      "diary_id": "routine-007",
-      "episodes": [
-        {
-          "start": "00:00",
-          "end": "07:00",
-          "purpose": "HOME"
-        },
-        {
-          "start": "07:00",
-          "end": "18:00",
-          "purpose": "WORK"
-        },
-        {
-          "start": "18:00",
-          "end": "24:00",
-          "purpose": "HOME"
-        }
-      ]
-    },
-    {
-      "diary_id": "routine-008",
-      "episodes": [
-        {
-          "start": "00:00",
-          "end": "07:00",
-          "purpose": "HOME"
-        },
-        {
-          "start": "07:00",
+          "start": "09:00",
           "end": "12:00",
           "purpose": "WORK"
         },
@@ -194,116 +364,16 @@
         },
         {
           "start": "13:00",
-          "end": "24:00",
-          "purpose": "HOME"
-        }
-      ]
-    },
-    {
-      "diary_id": "routine-009",
-      "episodes": [
-        {
-          "start": "00:00",
-          "end": "07:30",
-          "purpose": "HOME"
-        },
-        {
-          "start": "07:30",
-          "end": "10:00",
-          "purpose": "WORK"
-        },
-        {
-          "start": "10:00",
-          "end": "11:30",
-          "purpose": "OTHER"
-        },
-        {
-          "start": "11:30",
-          "end": "24:00",
-          "purpose": "HOME"
-        }
-      ]
-    },
-    {
-      "diary_id": "routine-010",
-      "episodes": [
-        {
-          "start": "00:00",
-          "end": "07:30",
-          "purpose": "HOME"
-        },
-        {
-          "start": "07:30",
-          "end": "10:00",
-          "purpose": "WORK"
-        },
-        {
-          "start": "10:00",
-          "end": "11:30",
-          "purpose": "OTHER"
-        },
-        {
-          "start": "11:30",
-          "end": "24:00",
-          "purpose": "HOME"
-        }
-      ]
-    },
-    {
-      "diary_id": "routine-011",
-      "episodes": [
-        {
-          "start": "00:00",
-          "end": "06:30",
-          "purpose": "HOME"
-        },
-        {
-          "start": "06:30",
-          "end": "09:00",
-          "purpose": "WORK"
-        },
-        {
-          "start": "09:00",
-          "end": "10:00",
-          "purpose": "OTHER"
-        },
-        {
-          "start": "10:00",
           "end": "18:00",
           "purpose": "WORK"
         },
         {
           "start": "18:00",
-          "end": "24:00",
-          "purpose": "HOME"
-        }
-      ]
-    },
-    {
-      "diary_id": "routine-012",
-      "episodes": [
-        {
-          "start": "00:00",
-          "end": "06:30",
-          "purpose": "HOME"
-        },
-        {
-          "start": "06:30",
-          "end": "09:00",
-          "purpose": "WORK"
-        },
-        {
-          "start": "09:00",
-          "end": "09:30",
-          "purpose": "HOME"
-        },
-        {
-          "start": "09:30",
-          "end": "11:00",
+          "end": "19:00",
           "purpose": "OTHER"
         },
         {
-          "start": "11:00",
+          "start": "19:00",
           "end": "24:00",
           "purpose": "HOME"
         }
@@ -314,26 +384,26 @@
       "episodes": [
         {
           "start": "00:00",
-          "end": "06:30",
+          "end": "07:00",
           "purpose": "HOME"
         },
         {
-          "start": "06:30",
+          "start": "07:00",
           "end": "09:00",
           "purpose": "WORK"
         },
         {
           "start": "09:00",
-          "end": "10:00",
-          "purpose": "OTHER"
-        },
-        {
-          "start": "10:00",
           "end": "18:00",
           "purpose": "WORK"
         },
         {
           "start": "18:00",
+          "end": "19:30",
+          "purpose": "OTHER"
+        },
+        {
+          "start": "19:30",
           "end": "24:00",
           "purpose": "HOME"
         }
@@ -354,16 +424,26 @@
         },
         {
           "start": "09:00",
-          "end": "11:00",
-          "purpose": "OTHER"
-        },
-        {
-          "start": "11:00",
-          "end": "13:00",
+          "end": "12:00",
           "purpose": "WORK"
         },
         {
+          "start": "12:00",
+          "end": "13:00",
+          "purpose": "OTHER"
+        },
+        {
           "start": "13:00",
+          "end": "18:00",
+          "purpose": "WORK"
+        },
+        {
+          "start": "18:00",
+          "end": "19:00",
+          "purpose": "OTHER"
+        },
+        {
+          "start": "19:00",
           "end": "24:00",
           "purpose": "HOME"
         }
@@ -384,21 +464,16 @@
         },
         {
           "start": "08:30",
-          "end": "09:00",
-          "purpose": "OTHER"
-        },
-        {
-          "start": "09:00",
           "end": "17:00",
-          "purpose": "HOME"
-        },
-        {
-          "start": "17:00",
-          "end": "18:30",
           "purpose": "WORK"
         },
         {
-          "start": "18:30",
+          "start": "17:00",
+          "end": "18:00",
+          "purpose": "OTHER"
+        },
+        {
+          "start": "18:00",
           "end": "24:00",
           "purpose": "HOME"
         }
@@ -419,16 +494,11 @@
         },
         {
           "start": "08:30",
-          "end": "12:30",
-          "purpose": "WORK"
-        },
-        {
-          "start": "12:30",
-          "end": "13:30",
+          "end": "09:00",
           "purpose": "OTHER"
         },
         {
-          "start": "13:30",
+          "start": "09:00",
           "end": "18:00",
           "purpose": "WORK"
         },
@@ -449,26 +519,31 @@
       "episodes": [
         {
           "start": "00:00",
-          "end": "07:30",
+          "end": "06:30",
           "purpose": "HOME"
         },
         {
-          "start": "07:30",
-          "end": "09:00",
+          "start": "06:30",
+          "end": "08:00",
           "purpose": "WORK"
         },
         {
-          "start": "09:00",
-          "end": "10:00",
+          "start": "08:00",
+          "end": "09:30",
           "purpose": "OTHER"
         },
         {
-          "start": "10:00",
-          "end": "18:00",
+          "start": "09:30",
+          "end": "17:30",
           "purpose": "WORK"
         },
         {
-          "start": "18:00",
+          "start": "17:30",
+          "end": "18:30",
+          "purpose": "OTHER"
+        },
+        {
+          "start": "18:30",
           "end": "24:00",
           "purpose": "HOME"
         }
@@ -479,26 +554,31 @@
       "episodes": [
         {
           "start": "00:00",
-          "end": "07:00",
+          "end": "06:30",
           "purpose": "HOME"
         },
         {
-          "start": "07:00",
+          "start": "06:30",
           "end": "08:00",
           "purpose": "WORK"
         },
         {
           "start": "08:00",
-          "end": "12:00",
+          "end": "08:30",
           "purpose": "OTHER"
         },
         {
-          "start": "12:00",
-          "end": "13:30",
+          "start": "08:30",
+          "end": "17:00",
           "purpose": "WORK"
         },
         {
-          "start": "13:30",
+          "start": "17:00",
+          "end": "18:30",
+          "purpose": "OTHER"
+        },
+        {
+          "start": "18:30",
           "end": "24:00",
           "purpose": "HOME"
         }
@@ -509,36 +589,31 @@
       "episodes": [
         {
           "start": "00:00",
-          "end": "07:00",
+          "end": "06:30",
           "purpose": "HOME"
         },
         {
-          "start": "07:00",
-          "end": "08:30",
+          "start": "06:30",
+          "end": "07:30",
           "purpose": "WORK"
         },
         {
-          "start": "08:30",
-          "end": "09:00",
+          "start": "07:30",
+          "end": "08:00",
           "purpose": "OTHER"
         },
         {
-          "start": "09:00",
+          "start": "08:00",
           "end": "17:00",
-          "purpose": "HOME"
+          "purpose": "WORK"
         },
         {
           "start": "17:00",
-          "end": "18:30",
-          "purpose": "WORK"
-        },
-        {
-          "start": "18:30",
-          "end": "19:00",
+          "end": "18:00",
           "purpose": "OTHER"
         },
         {
-          "start": "19:00",
+          "start": "18:00",
           "end": "24:00",
           "purpose": "HOME"
         }
@@ -549,31 +624,31 @@
       "episodes": [
         {
           "start": "00:00",
-          "end": "07:00",
+          "end": "07:30",
           "purpose": "HOME"
         },
         {
-          "start": "07:00",
-          "end": "08:30",
+          "start": "07:30",
+          "end": "08:45",
           "purpose": "WORK"
         },
         {
-          "start": "08:30",
-          "end": "10:00",
+          "start": "08:45",
+          "end": "09:15",
           "purpose": "OTHER"
         },
         {
-          "start": "10:00",
-          "end": "12:00",
+          "start": "09:15",
+          "end": "17:45",
           "purpose": "WORK"
         },
         {
-          "start": "12:00",
-          "end": "13:30",
+          "start": "17:45",
+          "end": "18:30",
           "purpose": "OTHER"
         },
         {
-          "start": "13:30",
+          "start": "18:30",
           "end": "24:00",
           "purpose": "HOME"
         }
@@ -669,51 +744,91 @@
         },
         {
           "start": "09:00",
-          "end": "10:00",
-          "purpose": "WORK"
-        },
-        {
-          "start": "10:00",
-          "end": "10:30",
-          "purpose": "OTHER"
-        },
-        {
-          "start": "10:30",
-          "end": "11:00",
-          "purpose": "HOME"
-        },
-        {
-          "start": "11:00",
-          "end": "12:30",
-          "purpose": "WORK"
-        },
-        {
-          "start": "12:30",
-          "end": "13:00",
-          "purpose": "OTHER"
-        },
-        {
-          "start": "13:00",
-          "end": "14:00",
-          "purpose": "WORK"
-        },
-        {
-          "start": "14:00",
-          "end": "14:30",
-          "purpose": "OTHER"
-        },
-        {
-          "start": "14:30",
-          "end": "15:00",
-          "purpose": "HOME"
-        },
-        {
-          "start": "15:00",
           "end": "18:00",
           "purpose": "WORK"
         },
         {
           "start": "18:00",
+          "end": "19:00",
+          "purpose": "OTHER"
+        },
+        {
+          "start": "19:00",
+          "end": "24:00",
+          "purpose": "HOME"
+        }
+      ]
+    },
+    {
+      "diary_id": "routine-024",
+      "episodes": [
+        {
+          "start": "00:00",
+          "end": "06:30",
+          "purpose": "HOME"
+        },
+        {
+          "start": "06:30",
+          "end": "07:30",
+          "purpose": "WORK"
+        },
+        {
+          "start": "07:30",
+          "end": "12:00",
+          "purpose": "WORK"
+        },
+        {
+          "start": "12:00",
+          "end": "13:00",
+          "purpose": "OTHER"
+        },
+        {
+          "start": "13:00",
+          "end": "18:00",
+          "purpose": "WORK"
+        },
+        {
+          "start": "18:00",
+          "end": "19:30",
+          "purpose": "OTHER"
+        },
+        {
+          "start": "19:30",
+          "end": "24:00",
+          "purpose": "HOME"
+        }
+      ]
+    },
+    {
+      "diary_id": "routine-025",
+      "episodes": [
+        {
+          "start": "00:00",
+          "end": "06:30",
+          "purpose": "HOME"
+        },
+        {
+          "start": "06:30",
+          "end": "07:30",
+          "purpose": "WORK"
+        },
+        {
+          "start": "07:30",
+          "end": "11:30",
+          "purpose": "WORK"
+        },
+        {
+          "start": "11:30",
+          "end": "12:30",
+          "purpose": "OTHER"
+        },
+        {
+          "start": "12:30",
+          "end": "17:30",
+          "purpose": "WORK"
+        },
+        {
+          "start": "17:30",
           "end": "18:30",
           "purpose": "OTHER"
         },
@@ -725,185 +840,20 @@
       ]
     },
     {
-      "diary_id": "routine-024",
-      "episodes": [
-        {
-          "start": "00:00",
-          "end": "07:00",
-          "purpose": "HOME"
-        },
-        {
-          "start": "07:00",
-          "end": "08:00",
-          "purpose": "WORK"
-        },
-        {
-          "start": "08:00",
-          "end": "09:00",
-          "purpose": "OTHER"
-        },
-        {
-          "start": "09:00",
-          "end": "10:00",
-          "purpose": "WORK"
-        },
-        {
-          "start": "10:00",
-          "end": "10:30",
-          "purpose": "HOME"
-        },
-        {
-          "start": "10:30",
-          "end": "11:30",
-          "purpose": "WORK"
-        },
-        {
-          "start": "11:30",
-          "end": "12:30",
-          "purpose": "HOME"
-        },
-        {
-          "start": "12:30",
-          "end": "13:30",
-          "purpose": "OTHER"
-        },
-        {
-          "start": "13:30",
-          "end": "14:00",
-          "purpose": "HOME"
-        },
-        {
-          "start": "14:00",
-          "end": "15:00",
-          "purpose": "WORK"
-        },
-        {
-          "start": "15:00",
-          "end": "16:00",
-          "purpose": "HOME"
-        },
-        {
-          "start": "16:00",
-          "end": "17:00",
-          "purpose": "OTHER"
-        },
-        {
-          "start": "17:00",
-          "end": "18:00",
-          "purpose": "HOME"
-        },
-        {
-          "start": "18:00",
-          "end": "19:00",
-          "purpose": "WORK"
-        },
-        {
-          "start": "19:00",
-          "end": "20:00",
-          "purpose": "HOME"
-        },
-        {
-          "start": "20:00",
-          "end": "21:00",
-          "purpose": "OTHER"
-        },
-        {
-          "start": "21:00",
-          "end": "24:00",
-          "purpose": "HOME"
-        }
-      ]
-    },
-    {
-      "diary_id": "routine-025",
-      "episodes": [
-        {
-          "start": "00:00",
-          "end": "07:00",
-          "purpose": "HOME"
-        },
-        {
-          "start": "07:00",
-          "end": "08:30",
-          "purpose": "WORK"
-        },
-        {
-          "start": "08:30",
-          "end": "09:30",
-          "purpose": "OTHER"
-        },
-        {
-          "start": "09:30",
-          "end": "10:30",
-          "purpose": "WORK"
-        },
-        {
-          "start": "10:30",
-          "end": "11:00",
-          "purpose": "HOME"
-        },
-        {
-          "start": "11:00",
-          "end": "12:00",
-          "purpose": "WORK"
-        },
-        {
-          "start": "12:00",
-          "end": "13:00",
-          "purpose": "HOME"
-        },
-        {
-          "start": "13:00",
-          "end": "14:00",
-          "purpose": "OTHER"
-        },
-        {
-          "start": "14:00",
-          "end": "15:00",
-          "purpose": "HOME"
-        },
-        {
-          "start": "15:00",
-          "end": "16:00",
-          "purpose": "WORK"
-        },
-        {
-          "start": "16:00",
-          "end": "17:00",
-          "purpose": "HOME"
-        },
-        {
-          "start": "17:00",
-          "end": "18:00",
-          "purpose": "OTHER"
-        },
-        {
-          "start": "18:00",
-          "end": "24:00",
-          "purpose": "HOME"
-        }
-      ]
-    },
-    {
       "diary_id": "routine-026",
       "episodes": [
         {
           "start": "00:00",
-          "end": "07:00",
+          "end": "06:30",
           "purpose": "HOME"
         },
         {
-          "start": "07:00",
-          "end": "08:30",
+          "start": "06:30",
+          "end": "07:30",
           "purpose": "WORK"
         },
         {
-          "start": "08:30",
-          "end": "09:00",
-          "purpose": "OTHER"
-        },
-        {
-          "start": "09:00",
+          "start": "07:30",
           "end": "12:00",
           "purpose": "WORK"
         },
@@ -934,6 +884,96 @@
       "episodes": [
         {
           "start": "00:00",
+          "end": "06:30",
+          "purpose": "HOME"
+        },
+        {
+          "start": "06:30",
+          "end": "07:15",
+          "purpose": "WORK"
+        },
+        {
+          "start": "07:15",
+          "end": "07:45",
+          "purpose": "OTHER"
+        },
+        {
+          "start": "07:45",
+          "end": "12:00",
+          "purpose": "WORK"
+        },
+        {
+          "start": "12:00",
+          "end": "12:45",
+          "purpose": "OTHER"
+        },
+        {
+          "start": "12:45",
+          "end": "18:00",
+          "purpose": "WORK"
+        },
+        {
+          "start": "18:00",
+          "end": "18:30",
+          "purpose": "OTHER"
+        },
+        {
+          "start": "18:30",
+          "end": "24:00",
+          "purpose": "HOME"
+        }
+      ]
+    },
+    {
+      "diary_id": "routine-028",
+      "episodes": [
+        {
+          "start": "00:00",
+          "end": "07:00",
+          "purpose": "HOME"
+        },
+        {
+          "start": "07:00",
+          "end": "08:30",
+          "purpose": "WORK"
+        },
+        {
+          "start": "08:30",
+          "end": "09:00",
+          "purpose": "OTHER"
+        },
+        {
+          "start": "09:00",
+          "end": "17:00",
+          "purpose": "WORK"
+        },
+        {
+          "start": "17:00",
+          "end": "17:30",
+          "purpose": "OTHER"
+        },
+        {
+          "start": "17:30",
+          "end": "18:00",
+          "purpose": "WORK"
+        },
+        {
+          "start": "18:00",
+          "end": "19:00",
+          "purpose": "OTHER"
+        },
+        {
+          "start": "19:00",
+          "end": "24:00",
+          "purpose": "HOME"
+        }
+      ]
+    },
+    {
+      "diary_id": "routine-029",
+      "episodes": [
+        {
+          "start": "00:00",
           "end": "07:00",
           "purpose": "HOME"
         },
@@ -959,96 +999,6 @@
         },
         {
           "start": "13:00",
-          "end": "18:00",
-          "purpose": "WORK"
-        },
-        {
-          "start": "18:00",
-          "end": "19:00",
-          "purpose": "OTHER"
-        },
-        {
-          "start": "19:00",
-          "end": "24:00",
-          "purpose": "HOME"
-        }
-      ]
-    },
-    {
-      "diary_id": "routine-028",
-      "episodes": [
-        {
-          "start": "00:00",
-          "end": "06:30",
-          "purpose": "HOME"
-        },
-        {
-          "start": "06:30",
-          "end": "07:30",
-          "purpose": "WORK"
-        },
-        {
-          "start": "07:30",
-          "end": "08:00",
-          "purpose": "OTHER"
-        },
-        {
-          "start": "08:00",
-          "end": "17:00",
-          "purpose": "WORK"
-        },
-        {
-          "start": "17:00",
-          "end": "17:30",
-          "purpose": "OTHER"
-        },
-        {
-          "start": "17:30",
-          "end": "18:30",
-          "purpose": "WORK"
-        },
-        {
-          "start": "18:30",
-          "end": "19:00",
-          "purpose": "OTHER"
-        },
-        {
-          "start": "19:00",
-          "end": "24:00",
-          "purpose": "HOME"
-        }
-      ]
-    },
-    {
-      "diary_id": "routine-029",
-      "episodes": [
-        {
-          "start": "00:00",
-          "end": "06:30",
-          "purpose": "HOME"
-        },
-        {
-          "start": "06:30",
-          "end": "07:30",
-          "purpose": "WORK"
-        },
-        {
-          "start": "07:30",
-          "end": "08:00",
-          "purpose": "OTHER"
-        },
-        {
-          "start": "08:00",
-          "end": "17:00",
-          "purpose": "WORK"
-        },
-        {
-          "start": "17:00",
-          "end": "17:30",
-          "purpose": "OTHER"
-        },
-        {
-          "start": "17:30",
           "end": "18:00",
           "purpose": "WORK"
         },

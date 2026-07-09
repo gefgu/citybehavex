@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import json
+import logging
 from concurrent.futures import ThreadPoolExecutor
 from types import SimpleNamespace
 from typing import Any, Optional
@@ -24,6 +25,7 @@ from ..payload import (
 )
 
 router = APIRouter(tags=["charts"])
+logger = logging.getLogger(__name__)
 _chart_executor = ThreadPoolExecutor(
     max_workers=max(1, int(os.environ.get("CBX_WEB_REQUEST_THREADS", "8")))
 )
@@ -210,7 +212,27 @@ async def get_chart_section(
             },
         )
     except ValueError as exc:
+        logger.warning(
+            "Chart section not found: exp_id=%s run=%s section=%s filter=%s error=%s",
+            exp_id,
+            selected.run_id,
+            section,
+            filter,
+            exc,
+        )
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception(
+            "Chart section build failed: exp_id=%s run=%s section=%s filter=%s",
+            exp_id,
+            selected.run_id,
+            section,
+            filter,
+        )
+        raise HTTPException(
+            status_code=500,
+            detail=f"failed to build chart section {section!r} for filter {filter!r}: {exc}",
+        ) from exc
     payload = {**payload, "run_id": selected.run_id}
     return ApiResponseWrapper(data=payload)
 

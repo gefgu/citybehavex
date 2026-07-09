@@ -665,7 +665,10 @@ table.metrics td.unit { color: var(--muted); }
   border-bottom: 11px solid var(--ink);
 }
 .timeline-legend-item .timeline-mode-bike {
-  clip-path: polygon(50% 0%, 100% 38%, 82% 100%, 18% 100%, 0% 38%);
+  width: 18px;
+  height: 18px;
+  background: url("/transport/bike/east.png") center / contain no-repeat;
+  border-radius: 0;
 }
 .timeline-legend-item .timeline-mode-rail {
   width: 18px;

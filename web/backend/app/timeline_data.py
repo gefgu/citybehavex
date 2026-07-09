@@ -172,6 +172,7 @@ def query_active_legs(
     bbox: tuple[float, float, float, float],
     max_agents: int,
     moving_path: Path | None = None,
+    profiles_path: Path | None = None,
 ) -> tuple[list[dict[str, Any]], bool]:
     """Return (segments, truncated) for agents active in [since, until) and bbox.
 
@@ -231,6 +232,8 @@ def query_active_legs(
 
     if moving_path is not None:
         _attach_waypoints(segments, moving_path)
+    if profiles_path is not None:
+        _attach_profile_genders(segments, profiles_path)
     for s in segments:
         if s["kind"] == "dwell":
             s["mode"] = "stay"
@@ -239,6 +242,42 @@ def query_active_legs(
         s.pop("stop_id", None)
 
     return segments, truncated
+
+
+def _normalize_character_gender(value: Any) -> str:
+    raw = str(value or "").strip().lower()
+    if raw in {"female", "f", "woman", "women"}:
+        return "female"
+    if raw in {"male", "m", "man", "men"}:
+        return "man"
+    return "unknown"
+
+
+def _attach_profile_genders(segments: list[dict[str, Any]], profiles_path: Path) -> None:
+    if not profiles_path.exists():
+        return
+    uids = sorted({int(s["uid"]) for s in segments})
+    if not uids:
+        return
+    values = ", ".join(f"({uid})" for uid in uids)
+    con = duckdb.connect()
+    try:
+        columns = _parquet_columns(con, profiles_path)
+        if "uid" not in columns or "gender" not in columns:
+            return
+        rows = con.execute(
+            f"""
+            SELECT p.uid, p.gender
+            FROM read_parquet('{quote_path(profiles_path)}') p
+            JOIN (VALUES {values}) AS requested(uid) USING (uid)
+            """
+        ).fetchall()
+    finally:
+        con.close()
+
+    gender_by_uid = {int(uid): _normalize_character_gender(gender) for uid, gender in rows}
+    for segment in segments:
+        segment["gender"] = gender_by_uid.get(int(segment["uid"]), "unknown")
 
 
 def _attach_waypoints(segments: list[dict[str, Any]], moving_path: Path) -> None:

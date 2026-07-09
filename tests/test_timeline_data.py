@@ -257,6 +257,7 @@ def test_query_active_legs_attaches_moving_waypoints(tmp_path):
             "t": pd.to_datetime(
                 ["2026-01-01 08:50", "2026-01-01 08:55", "2026-01-01 09:00"]
             ),
+            "mode": ["bike", "bike", "bike"],
         }
     ).to_parquet(moving_raw_path, index=False)
 
@@ -274,4 +275,26 @@ def test_query_active_legs_attaches_moving_waypoints(tmp_path):
 
     leg = next(s for s in segments if s["kind"] == "leg")
     assert truncated is False
+    assert leg["mode"] == "bike"
     assert [w["lng"] for w in leg["waypoints"]] == [2.3522, 2.3531, 2.3540]
+
+
+def test_query_active_legs_attaches_normalized_profile_gender(tmp_path):
+    trajectory_path = tmp_path / "trajectory.parquet"
+    profiles_path = tmp_path / "profiles.parquet"
+    legs_path = tmp_path / "legs.parquet"
+    _trajectory(category=True).to_parquet(trajectory_path, index=False)
+    pd.DataFrame({"uid": [1], "gender": ["Male"]}).to_parquet(profiles_path, index=False)
+
+    _build_legs_index(trajectory_path, legs_path)
+
+    segments, _truncated = query_active_legs(
+        legs_path,
+        pd.Timestamp("2026-01-01 08:45").to_pydatetime(),
+        pd.Timestamp("2026-01-01 09:05").to_pydatetime(),
+        (48.85, 2.35, 48.86, 2.36),
+        10,
+        profiles_path=profiles_path,
+    )
+
+    assert {segment["gender"] for segment in segments} == {"man"}
