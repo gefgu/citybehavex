@@ -27,9 +27,9 @@ use std::cmp::Ordering;
 /// combinatorially exploding), then collapses `(u, v, day)` instances into
 /// one edge per unique pair with `persistence = distinct_day_count / time_steps`.
 ///
-/// Inputs are one row per `(day, location, node)` presence (the Python side
-/// already deduplicates repeated presences before calling this).
-pub(crate) fn build_co_presence_edges(
+/// Inputs are one row per `(day, location, node)` presence (the caller is
+/// expected to already deduplicate repeated presences before calling this).
+pub fn build_co_presence_edges(
     day_codes: &[i64],
     location_codes: &[i64],
     nodes: &[i64],
@@ -163,7 +163,7 @@ fn count_common(sorted_a: &[u32], sorted_b: &[u32]) -> u64 {
     count
 }
 
-pub(crate) struct GraphMetrics {
+pub struct GraphMetrics {
     pub clustering_coefficient: Vec<f64>,
     pub topological_overlap: Vec<f64>,
 }
@@ -175,11 +175,7 @@ pub(crate) struct GraphMetrics {
 /// complexity as the naive approach for a graph this dense, but with a
 /// vastly better constant factor (no per-check Python/hash overhead) and
 /// rayon parallelism across cores.
-pub(crate) fn compute_graph_metrics(
-    node_count: usize,
-    edge_from: &[u32],
-    edge_to: &[u32],
-) -> GraphMetrics {
+pub fn compute_graph_metrics(node_count: usize, edge_from: &[u32], edge_to: &[u32]) -> GraphMetrics {
     let adjacency = build_adjacency(node_count, edge_from, edge_to);
 
     let clustering_coefficient: Vec<f64> = (0..node_count)

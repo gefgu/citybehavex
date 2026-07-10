@@ -1,0 +1,51 @@
+[package]
+name = "citybehavex-web"
+version = "0.1.0"
+edition = "2024"
+
+[[bin]]
+name = "citybehavex-web"
+path = "src/main.rs"
+
+[dependencies]
+citybehavex-core = { path = "../citybehavex-core" }
+fkmob-core = { path = "../../fkmob/fkmob-core" }
+# skmob-vis is NOT yet a dependency here: its `[lib] crate-type = ["cdylib",
+# "rlib"]` means any consumer needing the rlib output also forces a build of
+# the cdylib target in the same rustc invocation, which unconditionally links
+# pyo3 in non-extension-module mode (no `pyo3 = { features = ["extension-module"] }`
+# gate in its Cargo.toml) and fails outside a Python-embedding context -- the
+# same `-lpython3.14` link error `citybehavex-py` needs `PYO3_PYTHON` +
+# `pyo3/extension-module` to avoid, except here there's no clean equivalent
+# fix from the consumer side since crate-type is fixed by the producer, not
+# selectable per-dependency. Revisit when Phase 6 needs `ecdf_points`: either
+# a small upstream change to skmob-vis (split a pure-rlib core out, mirroring
+# the fkmob-core/fkmob-py split) or just reimplement the ~30-line function
+# directly here.
+
+axum = "0.8"
+tokio = { version = "1", features = ["full"] }
+tower = "0.5"
+tower-http = { version = "0.6", features = ["cors", "compression-gzip", "fs", "trace"] }
+
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml = "0.9"
+# `double_option` distinguishes "field absent" from "field present but null"
+# in PATCH request bodies, matching Pydantic's `model_dump(exclude_unset=True)`.
+serde_with = "3"
+
+chrono = { version = "0.4", features = ["serde"] }
+regex = "1"
+sha2 = "0.10"
+hex = "0.4"
+lru = "0.12"
+h3o = "0.10"
+rayon = "1"
+duckdb = { version = "1", features = ["bundled"] }
+polars = { version = "0.51", features = ["lazy", "new_streaming", "parquet", "temporal", "dtype-full"] }
+
+tracing = "0.1"
+tracing-subscriber = "0.3"
+anyhow = "1"
+thiserror = "1"
