@@ -10,7 +10,7 @@ crate-type = ["cdylib"]
 [dependencies]
 # default-features = false drops the C/SIMD-backed crates (numkong, wass); the
 # trip-DITRAS only needs the pure-Rust models/utils (od, shared, haversine).
-skmob2-core = { path = "../../skmob2/skmob2-core", default-features = false }
+fkmob-core = { path = "../../fkmob/fkmob-core", default-features = false }
 pyo3 = "0.28.2"
 numpy = "0.28.0"
 rand = "0.8"

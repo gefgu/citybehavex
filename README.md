@@ -90,7 +90,7 @@ Optional requirements:
   semantic aligners
 
 The Python package uses `maturin` to build the Rust extension. When installing
-from source, make sure the mobility dependencies `skmob2` and `skmob-vis` are
+from source, make sure the mobility dependencies `fkmob` and `skmob-vis` are
 available in the locations declared in `pyproject.toml`, or update those entries
 to point to installed/vendored copies included with the artifact.
 
@@ -287,7 +287,7 @@ timeline replay, metrics, and cached comparison payloads.
 ## Troubleshooting
 
 - **Rust extension not found:** rerun `./scripts/update_local_citybehavex.sh`.
-- **Editable `skmob2` or `skmob-vis` not found:** make sure the artifact includes
+- **Editable `fkmob` or `skmob-vis` not found:** make sure the artifact includes
   those dependencies or update `pyproject.toml` to point to installed versions.
 - **Frontend cannot reach the API:** confirm the backend is running on
   `http://localhost:8000` and the frontend on `http://localhost:5173`.

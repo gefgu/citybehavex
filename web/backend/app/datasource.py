@@ -1,6 +1,6 @@
 """DuckDB helpers for cheap parquet metadata.
 
-The heavy scientific metrics still go through skmob2/pandas (see ``payload.py``);
+The heavy scientific metrics still go through fkmob/pandas (see ``payload.py``);
 DuckDB is used here only for the fast, tabular work the Experiments page needs:
 row counts, distinct users and the datetime span of a run's parquet, plus
 efficient column-projected loading.

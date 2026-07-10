@@ -2,9 +2,9 @@ use rand::{Rng, SeedableRng};
 use rand_xoshiro::Xoshiro256PlusPlus;
 use rayon::prelude::*;
 use rustc_hash::{FxHashMap, FxHashSet};
-use skmob2_core::models::od::{CachedGravityOdRows, validate_equal_lengths};
-use skmob2_core::models::shared::derive_agent_seed;
-use skmob2_core::utils::haversine::haversine_km;
+use fkmob_core::models::od::{CachedGravityOdRows, validate_equal_lengths};
+use fkmob_core::models::shared::derive_agent_seed;
+use fkmob_core::utils::haversine::haversine_km;
 use std::collections::VecDeque;
 
 use crate::simulation_core::activity::{

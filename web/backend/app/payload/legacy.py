@@ -23,10 +23,10 @@ from typing import Any, Optional
 import numpy as np
 import pandas as pd
 import polars as pl
-import skmob2
+import fkmob
 import h3
 from pyproj import Transformer
-from skmob2 import (
+from fkmob import (
     activity_distribution_jensen_shannon_divergence,
     activity_transition_matrix,
     activity_transition_matrix_jensen_shannon_divergence,
@@ -37,7 +37,7 @@ from skmob2 import (
     visits_per_user_wasserstein_distance,
     wasserstein_distance,
 )
-from skmob2.measures.evaluation import stvd_emd
+from fkmob.measures.evaluation import stvd_emd
 from skmob_vis._core import compute_ecdf
 from skmob_vis.motifs import (
     _literature_distribution_rows,
@@ -537,8 +537,8 @@ def _time_use_metric_rows(
     return rows
 
 
-def _traj_like(source: skmob2.TrajDataFrame, df: pl.DataFrame) -> skmob2.TrajDataFrame:
-    return skmob2.TrajDataFrame(
+def _traj_like(source: fkmob.TrajDataFrame, df: pl.DataFrame) -> fkmob.TrajDataFrame:
+    return fkmob.TrajDataFrame(
         df,
         datetime_col=source.datetime_col,
         lat_col=source.lat_col,
@@ -773,8 +773,8 @@ def _stvd_emd_distribution(hourly: pl.DataFrame) -> pl.DataFrame:
 
 def _stvd_metric_rows(
     *,
-    traj: skmob2.TrajDataFrame,
-    real_traj: skmob2.TrajDataFrame,
+    traj: fkmob.TrajDataFrame,
+    real_traj: fkmob.TrajDataFrame,
     filters: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
@@ -1019,7 +1019,7 @@ def _build_comparison_payload(
         real_dt_col = detect_column(real_df, _DATETIME_CANDIDATES)
         if real_dt_col and not isinstance(real_df.schema[real_dt_col], pl.Datetime):
             real_df = real_df.with_columns(_to_datetime(real_df[real_dt_col]).alias(real_dt_col))
-        real_traj = skmob2.TrajDataFrame(
+        real_traj = fkmob.TrajDataFrame(
             real_df,
             datetime_col=real_dt_col,
             lat_col=detect_column(real_df, ["lat", "latitude"]),
@@ -1274,7 +1274,7 @@ def _build_comparison_payload(
             real_transition = real_daily_tuple = None
             if obs_v is not None and not obs_v.is_empty():
                 real_transition = activity_transition_matrix(obs_v)
-                # skmob2's transition matrix embeds activity labels in an
+                # fkmob's transition matrix embeds activity labels in an
                 # "activity" column for non-pandas backends -- split them
                 # out before the JSD call, which wants a pure numeric matrix
                 # (see _matrix_to_categories).
@@ -1647,7 +1647,7 @@ def _purpose_distribution(visits: pl.DataFrame) -> dict[str, float]:
 
 
 def _matrix_to_categories(matrix: Any) -> tuple[list[str], np.ndarray]:
-    # skmob2's activity_transition_matrix embeds activity labels in an
+    # fkmob's activity_transition_matrix embeds activity labels in an
     # explicit "activity" column for non-pandas backends (pandas gets them
     # in the index instead, handled by the branch below).
     if isinstance(matrix, pl.DataFrame) and "activity" in matrix.columns:

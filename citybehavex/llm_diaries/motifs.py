@@ -6,8 +6,8 @@ from skmob_vis.motifs import LITERATURE_MOTIF_PERCENTAGES
 from citybehavex.math import sample_multinomial_index
 
 # Literature ordinal (1-17, Schneider et al. 2013) -> distinct location count,
-# including HOME. Derived from the packed skmob2 motif IDs in
-# ``skmob_vis.motifs.LITERATURE_TO_SKMOB2_MOTIF_ID`` (node count is
+# including HOME. Derived from the packed fkmob motif IDs in
+# ``skmob_vis.motifs.LITERATURE_TO_FKMOB_MOTIF_ID`` (node count is
 # permutation-invariant, unlike node identity).
 MOTIF_LOCATION_COUNTS: dict[int, int] = {
     1: 1,

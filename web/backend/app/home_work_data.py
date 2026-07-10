@@ -8,7 +8,7 @@ which has too many combinations to precompute — so this module computes
 density on demand with DuckDB (which already has the ``h3`` community
 extension loaded elsewhere in this repo, see
 ``citybehavex.tessellation.builder``) instead of going through the
-pandas/skmob2 ``citybehavex.reports.comparison`` pipeline.
+pandas/fkmob ``citybehavex.reports.comparison`` pipeline.
 
 For each agent we take the *modal* fine-grained H3 cell (resolution 12)
 among their HOME- or WORK-tagged rows — collapsing "nights slept at home" or

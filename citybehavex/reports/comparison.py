@@ -9,9 +9,9 @@ import h3
 import numpy as np
 import polars as pl
 from citybehavex import _core as _cbx_core
-import skmob2
+import fkmob
 import typer
-from skmob2 import (
+from fkmob import (
     activity_distribution_jensen_shannon_divergence,
     activity_transition_matrix,
     activity_transition_matrix_jensen_shannon_divergence,
@@ -90,7 +90,7 @@ def detect_column(df: pl.DataFrame, candidates: list[str]) -> Optional[str]:
     return None
 
 
-def waiting_times_minutes(traj: skmob2.TrajDataFrame) -> list:
+def waiting_times_minutes(traj: fkmob.TrajDataFrame) -> list:
     secs = waiting_times(
         traj.df,
         merge=True,
@@ -424,8 +424,8 @@ def _trajectory_od_matrix(
 
 
 def _common_part_of_commuters(
-    traj: skmob2.TrajDataFrame,
-    real_traj: skmob2.TrajDataFrame,
+    traj: fkmob.TrajDataFrame,
+    real_traj: fkmob.TrajDataFrame,
     resolutions: tuple[int, ...] = CPC_H3_RESOLUTIONS,
 ) -> list[tuple[int, float]]:
     return trajectory_common_part_of_commuters_multi(traj, real_traj, resolutions=resolutions)
@@ -868,8 +868,8 @@ def _diff_stvd_layers(
 
 
 def _compute_stvd_layers(
-    traj: skmob2.TrajDataFrame,
-    real_traj: skmob2.TrajDataFrame,
+    traj: fkmob.TrajDataFrame,
+    real_traj: fkmob.TrajDataFrame,
     resolutions: list[int],
 ) -> dict[int, dict]:
     """Compute per-H3-zone volume diff and peak shift for the STVD
@@ -895,7 +895,7 @@ def _compute_stvd_layers(
 
 
 def _split_transition_matrix_categories(matrix: Any) -> tuple[Any, list[Any] | None]:
-    """``skmob2.activity_transition_matrix`` returns activity labels in the
+    """``fkmob.activity_transition_matrix`` returns activity labels in the
     index for a pandas result, but embeds them in an explicit ``activity``
     column for other backends (its own documented behavior) -- split that
     column out here so ``activity_transition_matrix_jensen_shannon_divergence``
@@ -1125,7 +1125,7 @@ def _distance_frequency_dataset(
     return rf_points, rho_points, eta, mu, label
 
 
-def load_trajectory(path: str) -> skmob2.TrajDataFrame:
+def load_trajectory(path: str) -> fkmob.TrajDataFrame:
     df = pl.read_parquet(path)
     datetime_col = detect_column(df, _DATETIME_CANDIDATES)
     lat_col = detect_column(df, _LAT_CANDIDATES)
@@ -1145,7 +1145,7 @@ def load_trajectory(path: str) -> skmob2.TrajDataFrame:
         raise ValueError(
             f"{path} is missing recognizable columns for: {', '.join(missing)}"
         )
-    return skmob2.TrajDataFrame(
+    return fkmob.TrajDataFrame(
         df,
         datetime_col=datetime_col,
         lat_col=lat_col,
@@ -1179,7 +1179,7 @@ def generate_comparison_report_from_paths(
 
 
 def generate_comparison_report(
-    traj: skmob2.TrajDataFrame,
+    traj: fkmob.TrajDataFrame,
     real_path: str,
     observed_label: str,
     synthetic_path: Optional[str] = None,
@@ -1209,7 +1209,7 @@ def generate_comparison_report(
     _dt_col = detect_column(real_df, _DATETIME_CANDIDATES)
     if _dt_col and not isinstance(real_df.schema[_dt_col], pl.Datetime):
         real_df = real_df.with_columns(_to_datetime(real_df[_dt_col]).alias(_dt_col))
-    real_traj = skmob2.TrajDataFrame(
+    real_traj = fkmob.TrajDataFrame(
         real_df,
         datetime_col=_dt_col,
         lat_col=detect_column(real_df, _LAT_CANDIDATES),
@@ -1228,7 +1228,7 @@ def generate_comparison_report(
     if real_eval.warning:
         typer.echo(f"Warning: {real_eval.warning}", err=True)
     real_metric_df = real_eval.df
-    real_metric_traj = skmob2.TrajDataFrame(
+    real_metric_traj = fkmob.TrajDataFrame(
         real_metric_df,
         datetime_col=real_traj.datetime_col,
         lat_col=real_traj.lat_col,
@@ -1240,9 +1240,9 @@ def generate_comparison_report(
     labels = ("synthetic", observed_label)
 
     # When a cached road graph is supplied, recompute jump lengths / radius of
-    # gyration as road-network distance (instead of skmob2's straight-line
+    # gyration as road-network distance (instead of fkmob's straight-line
     # Haversine) for both synthetic and real trajectories -- otherwise fall
-    # back to the plain skmob2 calls unchanged.
+    # back to the plain fkmob calls unchanged.
     road_handle = (
         build_road_network_handle(road_edges_df)
         if road_nodes_df is not None and road_edges_df is not None and len(road_nodes_df) and len(road_edges_df)
@@ -1271,7 +1271,7 @@ def generate_comparison_report(
         )
     else:
         # jump_lengths(merge=True) returns "a backend-appropriate array
-        # object" per skmob2's own docs -- for a polars-backed TrajDataFrame
+        # object" per fkmob's own docs -- for a polars-backed TrajDataFrame
         # that's an Arrow-backed array whose elements are pyarrow scalars,
         # not plain floats, so normalize to a numpy array before any
         # downstream arithmetic/comparisons.

@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-SKMOB2_DIR="${ROOT_DIR}/../skmob2"
+FKMOB_DIR="${ROOT_DIR}/../fkmob"
 VENV_DIR="${ROOT_DIR}/.venv"
 
 require_path() {
@@ -17,63 +17,63 @@ require_path() {
 
 require_path "${ROOT_DIR}/pyproject.toml" "project pyproject.toml"
 require_path "${VENV_DIR}/bin/python" "project virtual environment Python"
-require_path "${SKMOB2_DIR}/pyproject.toml" "skmob2 package"
-require_path "${SKMOB2_DIR}/Cargo.toml" "skmob2 Rust manifest"
-require_path "${SKMOB2_DIR}/skmob2-py/Cargo.toml" "skmob2 Python Rust manifest"
+require_path "${FKMOB_DIR}/pyproject.toml" "fkmob package"
+require_path "${FKMOB_DIR}/Cargo.toml" "fkmob Rust manifest"
+require_path "${FKMOB_DIR}/fkmob-py/Cargo.toml" "fkmob Python Rust manifest"
 
 MATURIN_CMD=()
 if [[ -x "${VENV_DIR}/bin/maturin" ]]; then
     MATURIN_CMD=("${VENV_DIR}/bin/maturin")
-elif [[ -x "${SKMOB2_DIR}/.venv/bin/maturin" ]]; then
-    MATURIN_CMD=("${SKMOB2_DIR}/.venv/bin/maturin")
+elif [[ -x "${FKMOB_DIR}/.venv/bin/maturin" ]]; then
+    MATURIN_CMD=("${FKMOB_DIR}/.venv/bin/maturin")
 elif command -v maturin >/dev/null 2>&1; then
     MATURIN_CMD=(maturin)
 elif command -v uv >/dev/null 2>&1; then
     MATURIN_CMD=(uv tool run --from "maturin>=1.13,<2.0" maturin)
 else
     echo "Unable to find maturin." >&2
-    echo "Install maturin in ${VENV_DIR}, ${SKMOB2_DIR}/.venv, or on PATH." >&2
+    echo "Install maturin in ${VENV_DIR}, ${FKMOB_DIR}/.venv, or on PATH." >&2
     exit 1
 fi
 
-echo "Building skmob2 into ${VENV_DIR} with maturin develop --release"
-echo "  source: ${SKMOB2_DIR}"
+echo "Building fkmob into ${VENV_DIR} with maturin develop --release"
+echo "  source: ${FKMOB_DIR}"
 echo "  maturin: ${MATURIN_CMD[*]}"
 
 (
-    cd "${SKMOB2_DIR}"
+    cd "${FKMOB_DIR}"
     env -u CONDA_PREFIX \
         VIRTUAL_ENV="${VENV_DIR}" \
         PATH="${VENV_DIR}/bin:${PATH}" \
         "${MATURIN_CMD[@]}" develop --release
 )
 
-echo "Verifying the local skmob2 build"
-SKMOB2_DIR="${SKMOB2_DIR}" "${VENV_DIR}/bin/python" - <<'PY'
+echo "Verifying the local fkmob build"
+FKMOB_DIR="${FKMOB_DIR}" "${VENV_DIR}/bin/python" - <<'PY'
 import os
 from pathlib import Path
 
-import skmob2
-import skmob2._core as core
-from skmob2 import discover_daily_motifs_from_agents, waiting_times
+import fkmob
+import fkmob._core as core
+from fkmob import discover_daily_motifs_from_agents, waiting_times
 
-expected = Path(os.environ["SKMOB2_DIR"]).resolve()
-package_path = Path(skmob2.__file__).resolve()
+expected = Path(os.environ["FKMOB_DIR"]).resolve()
+package_path = Path(fkmob.__file__).resolve()
 core_path = Path(core.__file__).resolve()
 
 if not package_path.is_relative_to(expected):
     raise SystemExit(
-        f"skmob2 imported from {package_path}, expected a path under {expected}"
+        f"fkmob imported from {package_path}, expected a path under {expected}"
     )
 if not core_path.is_relative_to(expected):
     raise SystemExit(
-        f"skmob2._core imported from {core_path}, expected a path under {expected}"
+        f"fkmob._core imported from {core_path}, expected a path under {expected}"
     )
 if not callable(waiting_times) or not callable(discover_daily_motifs_from_agents):
-    raise SystemExit("Current skmob2 public measure APIs are unavailable")
+    raise SystemExit("Current fkmob public measure APIs are unavailable")
 
-print(f"skmob2: {package_path}")
-print(f"skmob2._core: {core_path}")
+print(f"fkmob: {package_path}")
+print(f"fkmob._core: {core_path}")
 print("Public measure APIs: OK")
 PY
 
