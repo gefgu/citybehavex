@@ -1,7 +1,7 @@
 use rand::Rng;
 use rustc_hash::FxHashMap;
-use skmob2_core::models::od::CachedGravityOdRows;
-use skmob2_core::models::shared::cdf_choice;
+use fkmob_core::models::od::CachedGravityOdRows;
+use fkmob_core::models::shared::cdf_choice;
 
 use crate::simulation_core::inputs::{ActivityInputs, LocationInputs, SimulationParams};
 use crate::simulation_core::types::{

@@ -8,7 +8,7 @@ import h3
 import pandas as pd
 import polars as pl
 import pytest
-import skmob2
+import fkmob
 
 from citybehavex.reports import (
     ALL_REPORT_SECTIONS,
@@ -30,7 +30,7 @@ from citybehavex.reports.network_validation import encounters_sidecar_path
 from citybehavex.simulation.core import social_network_sidecar_path
 
 
-def test_waiting_times_minutes_converts_skmob2_seconds():
+def test_waiting_times_minutes_converts_fkmob_seconds():
     traj = SimpleNamespace(
         df=pd.DataFrame(
             {
@@ -390,7 +390,7 @@ def _build_report_fixture(tmp_path):
                 }
             )
     synth_df = pl.DataFrame(synth_rows)
-    traj = skmob2.TrajDataFrame(
+    traj = fkmob.TrajDataFrame(
         synth_df, datetime_col="datetime", lat_col="lat", lng_col="lng", uid_col="uid"
     )
 
@@ -626,7 +626,7 @@ def test_generate_comparison_report_transport_spatial_missing_sidecar_warns(tmp_
 
 def test_generate_comparison_report_uses_road_network_distance_when_provided(tmp_path):
     """When a cached road graph is supplied, jump_lengths_km must come from
-    road-network routing, not skmob2's straight-line Haversine. Build a tiny
+    road-network routing, not fkmob's straight-line Haversine. Build a tiny
     complete graph over every unique fixture coordinate, with each direct
     edge's length set to exactly 2x its Haversine distance (and travel-time
     weight derived consistently from that same length, so the direct edge is

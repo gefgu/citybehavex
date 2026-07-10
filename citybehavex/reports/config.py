@@ -67,7 +67,7 @@ class ComparisonConfig(BaseModel):
     # section), jump_lengths/radius_of_gyration are recomputed as
     # road-network distance instead of straight-line Haversine, for both
     # synthetic and real trajectories. Road-network routing is far more
-    # expensive per pair than skmob2's vectorized Haversine, so very large
+    # expensive per pair than fkmob's vectorized Haversine, so very large
     # real datasets (tens/hundreds of millions of rows) may want this off to
     # keep the live web comparison responsive.
     road_network_distance: bool = True

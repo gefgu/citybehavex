@@ -29,7 +29,7 @@ from typing import Any, Optional
 
 import numpy as np
 import polars as pl
-import skmob2
+import fkmob
 
 from citybehavex.metrics import (
     build_road_network_handle,
@@ -212,7 +212,7 @@ def get_jumps_rog(
                     snap_max_distance_m=road_snap_max_distance_m,
                 )["radius_of_gyration"].to_numpy()
             else:
-                tr = skmob2.TrajDataFrame(
+                tr = fkmob.TrajDataFrame(
                     filtered,
                     datetime_col=datetime_col,
                     lat_col=lat_col,
@@ -220,7 +220,7 @@ def get_jumps_rog(
                     uid_col=uid_col,
                 )
                 # jump_lengths(merge=True) returns "a backend-appropriate
-                # array object" per skmob2's own docs -- for a polars-backed
+                # array object" per fkmob's own docs -- for a polars-backed
                 # TrajDataFrame that's an Arrow-backed array whose elements
                 # are pyarrow scalars, not plain floats.
                 jumps = np.asarray(tr.jump_lengths(merge=True), dtype=float)
