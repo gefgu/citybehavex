@@ -30,6 +30,19 @@ const TRANSPORT_DIRECTIONS = [
   "west",
   "north-west",
 ] as const;
+const CHARACTER_SPRITES = [
+  "female",
+  "man",
+  "men_2",
+  "men_3",
+  "men_4",
+  "men_5",
+  "men_6",
+  "woman_2",
+  "woman_3",
+  "woman_4",
+  "woman_5",
+] as const;
 // Cap how often we recompute positions and re-upload the GeoJSON source to
 // Mapbox. Agents move at city scale — 60fps buffer re-uploads are wasted GPU
 // work a human can't perceive, and repeatedly hammering the GPU like that is
@@ -54,11 +67,12 @@ interface Seg {
   purpose: string;
   mode: "stay" | "car" | "walk" | "bike" | "rail";
   gender?: "female" | "man" | "unknown" | null;
+  character_sprite?: CharacterSprite | "unknown" | null;
   waypoints?: Waypoint[];
 }
 
 type TransportDirection = (typeof TRANSPORT_DIRECTIONS)[number];
-type CharacterGender = "female" | "man";
+type CharacterSprite = (typeof CHARACTER_SPRITES)[number];
 type AgentFeatureCollection = FeatureCollection<
   Point,
   {
@@ -140,12 +154,12 @@ function modeImageId(mode: string): string {
   return `mode-${mode}`;
 }
 
-function characterImageId(gender: CharacterGender, direction: TransportDirection): string {
-  return `character-${gender}-${direction}`;
+function characterImageId(sprite: CharacterSprite, direction: TransportDirection): string {
+  return `character-${sprite}-${direction}`;
 }
 
-function characterGender(gender: string | null | undefined): CharacterGender | null {
-  return gender === "female" || gender === "man" ? gender : null;
+function characterSprite(sprite: string | null | undefined): CharacterSprite | null {
+  return CHARACTER_SPRITES.includes(sprite as CharacterSprite) ? (sprite as CharacterSprite) : null;
 }
 
 function transportDirectionForSegment(seg: Seg, t: number): TransportDirection {
@@ -237,6 +251,7 @@ function mergeSegments(target: Map<number, Seg[]>, raw: TimelineSegment[]) {
       purpose: s.purpose,
       mode: s.mode ?? (s.kind === "dwell" ? "stay" : "car"),
       gender: s.gender,
+      character_sprite: s.character_sprite,
       waypoints: s.waypoints?.map((w) => ({ t: parseSimTime(w.t), lat: w.lat, lng: w.lng })),
     };
     const list = byUid.get(s.uid) ?? [];
@@ -389,12 +404,9 @@ export function TimelineMap({
             loadMapImage(map, transportImageId("car", direction), `/transport/red_car/${direction}.png`),
             loadMapImage(map, transportImageId("bike", direction), `/transport/bike/${direction}.png`),
             loadMapImage(map, transportImageId("rail", direction), `/transport/rail/${direction}.png`),
-            loadMapImage(
-              map,
-              characterImageId("female", direction),
-              `/characters/female/${direction}.png`,
+            ...CHARACTER_SPRITES.map((sprite) =>
+              loadMapImage(map, characterImageId(sprite, direction), `/characters/${sprite}/${direction}.png`),
             ),
-            loadMapImage(map, characterImageId("man", direction), `/characters/man/${direction}.png`),
           ]),
         );
       } catch {
@@ -614,14 +626,14 @@ export function TimelineMap({
           }
           const displayMode = seg.kind === "dwell" ? "stay" : seg.mode;
           const direction = transportDirectionForSegment(seg, c.simTimeMs);
-          const gender = characterGender(seg.gender);
-          const showCharacter = gender !== null && canShowCharacter(displayMode);
+          const sprite = characterSprite(seg.character_sprite);
+          const showCharacter = sprite !== null && canShowCharacter(displayMode);
           const iconImage =
             displayMode === "car" || displayMode === "bike" || displayMode === "rail"
               ? transportImageId(displayMode, direction)
               : modeImageId(displayMode);
           const characterDirection = displayMode === "stay" ? "south" : direction;
-          const characterImage = showCharacter ? characterImageId(gender, characterDirection) : "";
+          const characterImage = showCharacter ? characterImageId(sprite, characterDirection) : "";
           features.push({
             type: "Feature",
             geometry: { type: "Point", coordinates: [lng, lat] },

@@ -233,7 +233,7 @@ def query_active_legs(
     if moving_path is not None:
         _attach_waypoints(segments, moving_path)
     if profiles_path is not None:
-        _attach_profile_genders(segments, profiles_path)
+        _attach_profile_character_fields(segments, profiles_path)
     for s in segments:
         if s["kind"] == "dwell":
             s["mode"] = "stay"
@@ -253,7 +253,63 @@ def _normalize_character_gender(value: Any) -> str:
     return "unknown"
 
 
-def _attach_profile_genders(segments: list[dict[str, Any]], profiles_path: Path) -> None:
+_MANUAL_JOB_KEYWORDS = (
+    "construction",
+    "machine",
+    "operator",
+    "craft",
+    "repair",
+    "transport",
+    "agricultural",
+)
+_PROFESSIONAL_JOB_KEYWORDS = (
+    "manager",
+    "professional",
+    "technician",
+    "associate",
+    "clerical",
+)
+_SERVICE_JOB_KEYWORDS = (
+    "service",
+    "sales",
+    "care",
+    "health",
+    "education",
+)
+_MALE_FALLBACK_SPRITES = ("man", "men_2", "men_6")
+_FEMALE_FALLBACK_SPRITES = ("female", "woman_4", "woman_5")
+
+
+def _job_matches(job: Any, keywords: tuple[str, ...]) -> bool:
+    raw = str(job or "").strip().lower()
+    return any(keyword in raw for keyword in keywords)
+
+
+def _profile_character_sprite(uid: int, gender: str, age: Any, job: Any) -> str:
+    if gender == "unknown":
+        return "unknown"
+
+    try:
+        age_value = int(age) if age is not None else None
+    except (TypeError, ValueError):
+        age_value = None
+
+    if age_value is not None and age_value >= 65:
+        return "woman_3" if gender == "female" else "men_4"
+    if _job_matches(job, _MANUAL_JOB_KEYWORDS):
+        return "woman_4" if gender == "female" else "men_5"
+    if _job_matches(job, _PROFESSIONAL_JOB_KEYWORDS):
+        return "woman_2" if gender == "female" else "men_3"
+    if _job_matches(job, _SERVICE_JOB_KEYWORDS):
+        return "woman_5" if gender == "female" else "men_2"
+    if age_value is not None and age_value <= 25:
+        return "female" if gender == "female" else "man"
+
+    fallbacks = _FEMALE_FALLBACK_SPRITES if gender == "female" else _MALE_FALLBACK_SPRITES
+    return fallbacks[uid % len(fallbacks)]
+
+
+def _attach_profile_character_fields(segments: list[dict[str, Any]], profiles_path: Path) -> None:
     if not profiles_path.exists():
         return
     uids = sorted({int(s["uid"]) for s in segments})
@@ -265,9 +321,11 @@ def _attach_profile_genders(segments: list[dict[str, Any]], profiles_path: Path)
         columns = _parquet_columns(con, profiles_path)
         if "uid" not in columns or "gender" not in columns:
             return
+        age_expr = "p.age" if "age" in columns else "NULL AS age"
+        job_expr = "p.job" if "job" in columns else "NULL AS job"
         rows = con.execute(
             f"""
-            SELECT p.uid, p.gender
+            SELECT p.uid, p.gender, {age_expr}, {job_expr}
             FROM read_parquet('{quote_path(profiles_path)}') p
             JOIN (VALUES {values}) AS requested(uid) USING (uid)
             """
@@ -275,9 +333,17 @@ def _attach_profile_genders(segments: list[dict[str, Any]], profiles_path: Path)
     finally:
         con.close()
 
-    gender_by_uid = {int(uid): _normalize_character_gender(gender) for uid, gender in rows}
+    profile_by_uid = {
+        int(uid): (
+            _normalize_character_gender(gender),
+            _profile_character_sprite(int(uid), _normalize_character_gender(gender), age, job),
+        )
+        for uid, gender, age, job in rows
+    }
     for segment in segments:
-        segment["gender"] = gender_by_uid.get(int(segment["uid"]), "unknown")
+        gender, sprite = profile_by_uid.get(int(segment["uid"]), ("unknown", "unknown"))
+        segment["gender"] = gender
+        segment["character_sprite"] = sprite
 
 
 def _attach_waypoints(segments: list[dict[str, Any]], moving_path: Path) -> None:
