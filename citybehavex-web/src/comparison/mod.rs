@@ -12,7 +12,10 @@
 //! binning (mirrors `_h3_cells`'s use of `citybehavex._core.batch_latlng_to_cells`).
 
 pub mod activity;
+pub mod ecdf;
+pub mod filters;
 pub mod h3;
+pub mod metric_row;
 pub mod metrics;
 pub mod micro_activity;
 pub mod mobility_laws;
