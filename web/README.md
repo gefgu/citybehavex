@@ -43,6 +43,31 @@ npm run dev
 
 Open http://localhost:5173.
 
+## Static GitHub Pages demo
+
+The public demo can run without FastAPI by exporting endpoint-shaped JSON into
+the Vite public directory:
+
+```bash
+uv run python scripts/export_static_web_demo.py --manifest web/demo_export.yaml
+cd web/frontend
+VITE_STATIC_DEMO=true VITE_BASE_PATH=/citybehavex/ npm run build
+```
+
+The exporter writes `web/frontend/public/demo-data/`. In static mode the
+frontend reads those files instead of `/api/...`, uses hash routing for GitHub
+Pages deep links, and keeps the regular local API behavior unchanged when
+`VITE_STATIC_DEMO` is unset.
+
+`web/demo_export.yaml` pins the public runs and marks which experiments may
+include observed data. Keep `allow_observed: false` for the private Greater
+Paris and Shanghai comparisons; YJMOB can use `allow_observed: true` because the
+comparison source is public. The manifest also supports `expected_agents`; leave
+it at `500` for the public demo so the exporter fails early if a large run is
+accidentally pinned. If `web/frontend/public/demo-data/` is not committed or
+otherwise supplied to CI, the Pages workflow will still build the app but the
+deployed static demo will have no data to load.
+
 ## Timeline view setup
 
 The timeline view (`/experiments/:id/timeline`) uses Mapbox GL JS instead of the

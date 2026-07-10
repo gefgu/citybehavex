@@ -64,16 +64,16 @@
       "episodes": [
         {
           "start": "00:00",
-          "end": "08:00",
+          "end": "07:00",
           "purpose": "HOME"
         },
         {
-          "start": "08:00",
-          "end": "09:00",
+          "start": "07:00",
+          "end": "08:00",
           "purpose": "WORK"
         },
         {
-          "start": "09:00",
+          "start": "08:00",
           "end": "24:00",
           "purpose": "HOME"
         }
@@ -89,16 +89,16 @@
         },
         {
           "start": "08:00",
-          "end": "10:00",
+          "end": "12:00",
           "purpose": "WORK"
         },
         {
-          "start": "10:00",
-          "end": "12:00",
+          "start": "12:00",
+          "end": "13:00",
           "purpose": "OTHER"
         },
         {
-          "start": "12:00",
+          "start": "13:00",
           "end": "24:00",
           "purpose": "HOME"
         }
@@ -109,16 +109,16 @@
       "episodes": [
         {
           "start": "00:00",
-          "end": "08:00",
+          "end": "07:00",
           "purpose": "HOME"
         },
         {
-          "start": "08:00",
-          "end": "09:00",
+          "start": "07:00",
+          "end": "08:00",
           "purpose": "WORK"
         },
         {
-          "start": "09:00",
+          "start": "08:00",
           "end": "24:00",
           "purpose": "HOME"
         }
@@ -129,16 +129,16 @@
       "episodes": [
         {
           "start": "00:00",
-          "end": "08:00",
+          "end": "07:00",
           "purpose": "HOME"
         },
         {
-          "start": "08:00",
-          "end": "10:00",
+          "start": "07:00",
+          "end": "11:00",
           "purpose": "WORK"
         },
         {
-          "start": "10:00",
+          "start": "11:00",
           "end": "12:00",
           "purpose": "OTHER"
         },
@@ -154,16 +154,16 @@
       "episodes": [
         {
           "start": "00:00",
-          "end": "08:00",
+          "end": "07:00",
           "purpose": "HOME"
         },
         {
-          "start": "08:00",
-          "end": "12:00",
+          "start": "07:00",
+          "end": "11:00",
           "purpose": "WORK"
         },
         {
-          "start": "12:00",
+          "start": "11:00",
           "end": "24:00",
           "purpose": "HOME"
         }
@@ -199,11 +199,11 @@
       "episodes": [
         {
           "start": "00:00",
-          "end": "08:30",
+          "end": "08:00",
           "purpose": "HOME"
         },
         {
-          "start": "08:30",
+          "start": "08:00",
           "end": "10:00",
           "purpose": "WORK"
         },
@@ -224,21 +224,21 @@
       "episodes": [
         {
           "start": "00:00",
-          "end": "08:00",
+          "end": "08:30",
           "purpose": "HOME"
         },
         {
-          "start": "08:00",
+          "start": "08:30",
           "end": "10:00",
           "purpose": "WORK"
         },
         {
           "start": "10:00",
-          "end": "12:00",
+          "end": "11:30",
           "purpose": "OTHER"
         },
         {
-          "start": "12:00",
+          "start": "11:30",
           "end": "24:00",
           "purpose": "HOME"
         }
@@ -254,16 +254,16 @@
         },
         {
           "start": "08:00",
-          "end": "09:30",
+          "end": "10:00",
           "purpose": "WORK"
         },
         {
-          "start": "09:30",
-          "end": "10:00",
+          "start": "10:00",
+          "end": "11:00",
           "purpose": "OTHER"
         },
         {
-          "start": "10:00",
+          "start": "11:00",
           "end": "24:00",
           "purpose": "HOME"
         }
@@ -334,18 +334,18 @@
         },
         {
           "start": "07:00",
-          "end": "08:30",
+          "end": "08:00",
           "purpose": "WORK"
         },
         {
-          "start": "08:30",
-          "end": "09:30",
+          "start": "08:00",
+          "end": "09:00",
           "purpose": "OTHER"
         },
         {
-          "start": "09:30",
+          "start": "09:00",
           "end": "10:00",
-          "purpose": "WORK"
+          "purpose": "OTHER"
         },
         {
           "start": "10:00",
@@ -370,35 +370,20 @@
         {
           "start": "08:30",
           "end": "09:00",
-          "purpose": "HOME"
+          "purpose": "OTHER"
         },
         {
           "start": "09:00",
-          "end": "10:00",
-          "purpose": "OTHER"
-        },
-        {
-          "start": "10:00",
-          "end": "11:00",
-          "purpose": "HOME"
-        },
-        {
-          "start": "11:00",
           "end": "12:00",
-          "purpose": "WORK"
+          "purpose": "HOME"
         },
         {
           "start": "12:00",
-          "end": "13:00",
-          "purpose": "HOME"
-        },
-        {
-          "start": "13:00",
-          "end": "14:00",
+          "end": "13:30",
           "purpose": "OTHER"
         },
         {
-          "start": "14:00",
+          "start": "13:30",
           "end": "24:00",
           "purpose": "HOME"
         }
@@ -419,16 +404,26 @@
         },
         {
           "start": "07:30",
-          "end": "08:00",
+          "end": "10:00",
           "purpose": "HOME"
         },
         {
-          "start": "08:00",
-          "end": "09:00",
+          "start": "10:00",
+          "end": "10:30",
           "purpose": "OTHER"
         },
         {
-          "start": "09:00",
+          "start": "10:30",
+          "end": "12:00",
+          "purpose": "HOME"
+        },
+        {
+          "start": "12:00",
+          "end": "13:00",
+          "purpose": "OTHER"
+        },
+        {
+          "start": "13:00",
           "end": "24:00",
           "purpose": "HOME"
         }
@@ -469,11 +464,11 @@
         },
         {
           "start": "08:00",
-          "end": "09:30",
+          "end": "09:00",
           "purpose": "WORK"
         },
         {
-          "start": "09:30",
+          "start": "09:00",
           "end": "10:30",
           "purpose": "OTHER"
         },
@@ -569,31 +564,26 @@
         },
         {
           "start": "07:00",
-          "end": "07:30",
+          "end": "08:00",
           "purpose": "WORK"
         },
         {
-          "start": "07:30",
-          "end": "08:00",
-          "purpose": "HOME"
-        },
-        {
           "start": "08:00",
-          "end": "08:30",
-          "purpose": "OTHER"
-        },
-        {
-          "start": "08:30",
           "end": "12:00",
-          "purpose": "HOME"
+          "purpose": "OTHER"
         },
         {
           "start": "12:00",
-          "end": "12:30",
-          "purpose": "OTHER"
+          "end": "13:00",
+          "purpose": "HOME"
         },
         {
-          "start": "12:30",
+          "start": "13:00",
+          "end": "14:00",
+          "purpose": "WORK"
+        },
+        {
+          "start": "14:00",
           "end": "24:00",
           "purpose": "HOME"
         }
@@ -609,31 +599,31 @@
         },
         {
           "start": "07:00",
-          "end": "08:00",
+          "end": "07:30",
           "purpose": "WORK"
+        },
+        {
+          "start": "07:30",
+          "end": "08:00",
+          "purpose": "HOME"
         },
         {
           "start": "08:00",
-          "end": "12:00",
-          "purpose": "HOME"
-        },
-        {
-          "start": "12:00",
-          "end": "13:00",
+          "end": "09:00",
           "purpose": "OTHER"
         },
         {
-          "start": "13:00",
-          "end": "14:00",
+          "start": "09:00",
+          "end": "10:00",
           "purpose": "HOME"
         },
         {
-          "start": "14:00",
-          "end": "15:00",
-          "purpose": "WORK"
+          "start": "10:00",
+          "end": "11:00",
+          "purpose": "OTHER"
         },
         {
-          "start": "15:00",
+          "start": "11:00",
           "end": "24:00",
           "purpose": "HOME"
         }
@@ -649,41 +639,41 @@
         },
         {
           "start": "07:00",
-          "end": "07:30",
+          "end": "08:00",
           "purpose": "WORK"
         },
         {
-          "start": "07:30",
-          "end": "08:00",
-          "purpose": "OTHER"
-        },
-        {
           "start": "08:00",
-          "end": "08:30",
-          "purpose": "OTHER"
-        },
-        {
-          "start": "08:30",
           "end": "09:00",
           "purpose": "OTHER"
         },
         {
           "start": "09:00",
+          "end": "10:00",
+          "purpose": "OTHER"
+        },
+        {
+          "start": "10:00",
+          "end": "11:00",
+          "purpose": "OTHER"
+        },
+        {
+          "start": "11:00",
           "end": "12:00",
           "purpose": "HOME"
         },
         {
           "start": "12:00",
-          "end": "12:30",
+          "end": "13:00",
           "purpose": "OTHER"
         },
         {
-          "start": "12:30",
-          "end": "13:00",
+          "start": "13:00",
+          "end": "14:00",
           "purpose": "HOME"
         },
         {
-          "start": "13:00",
+          "start": "14:00",
           "end": "24:00",
           "purpose": "HOME"
         }
@@ -730,7 +720,7 @@
         {
           "start": "10:00",
           "end": "10:30",
-          "purpose": "OTHER"
+          "purpose": "WORK"
         },
         {
           "start": "10:30",
@@ -754,46 +744,41 @@
         },
         {
           "start": "08:00",
-          "end": "08:30",
+          "end": "09:00",
           "purpose": "WORK"
         },
         {
-          "start": "08:30",
-          "end": "09:00",
-          "purpose": "OTHER"
-        },
-        {
           "start": "09:00",
-          "end": "09:30",
-          "purpose": "OTHER"
-        },
-        {
-          "start": "09:30",
           "end": "10:00",
-          "purpose": "HOME"
+          "purpose": "OTHER"
         },
         {
           "start": "10:00",
-          "end": "10:30",
-          "purpose": "OTHER"
-        },
-        {
-          "start": "10:30",
           "end": "11:00",
-          "purpose": "HOME"
+          "purpose": "OTHER"
         },
         {
           "start": "11:00",
-          "end": "11:30",
-          "purpose": "OTHER"
-        },
-        {
-          "start": "11:30",
           "end": "12:00",
           "purpose": "HOME"
         },
         {
           "start": "12:00",
+          "end": "13:00",
+          "purpose": "OTHER"
+        },
+        {
+          "start": "13:00",
+          "end": "14:00",
+          "purpose": "HOME"
+        },
+        {
+          "start": "14:00",
+          "end": "15:00",
+          "purpose": "WORK"
+        },
+        {
+          "start": "15:00",
           "end": "24:00",
           "purpose": "HOME"
         }
@@ -801,6 +786,56 @@
     },
     {
       "diary_id": "routine-026",
+      "episodes": [
+        {
+          "start": "00:00",
+          "end": "07:00",
+          "purpose": "HOME"
+        },
+        {
+          "start": "07:00",
+          "end": "07:30",
+          "purpose": "OTHER"
+        },
+        {
+          "start": "07:30",
+          "end": "08:00",
+          "purpose": "WORK"
+        },
+        {
+          "start": "08:00",
+          "end": "12:00",
+          "purpose": "WORK"
+        },
+        {
+          "start": "12:00",
+          "end": "12:30",
+          "purpose": "OTHER"
+        },
+        {
+          "start": "12:30",
+          "end": "13:00",
+          "purpose": "WORK"
+        },
+        {
+          "start": "13:00",
+          "end": "17:00",
+          "purpose": "WORK"
+        },
+        {
+          "start": "17:00",
+          "end": "17:30",
+          "purpose": "OTHER"
+        },
+        {
+          "start": "17:30",
+          "end": "24:00",
+          "purpose": "HOME"
+        }
+      ]
+    },
+    {
+      "diary_id": "routine-027",
       "episodes": [
         {
           "start": "00:00",
@@ -854,53 +889,13 @@
         },
         {
           "start": "15:00",
-          "end": "16:00",
-          "purpose": "HOME"
-        },
-        {
-          "start": "16:00",
-          "end": "17:00",
-          "purpose": "OTHER"
-        },
-        {
-          "start": "17:00",
-          "end": "18:00",
-          "purpose": "HOME"
-        },
-        {
-          "start": "18:00",
-          "end": "19:00",
-          "purpose": "OTHER"
-        },
-        {
-          "start": "19:00",
-          "end": "20:00",
-          "purpose": "HOME"
-        },
-        {
-          "start": "20:00",
-          "end": "21:00",
-          "purpose": "OTHER"
-        },
-        {
-          "start": "21:00",
-          "end": "22:00",
-          "purpose": "HOME"
-        },
-        {
-          "start": "22:00",
-          "end": "23:00",
-          "purpose": "OTHER"
-        },
-        {
-          "start": "23:00",
           "end": "24:00",
           "purpose": "HOME"
         }
       ]
     },
     {
-      "diary_id": "routine-027",
+      "diary_id": "routine-028",
       "episodes": [
         {
           "start": "00:00",
@@ -949,21 +944,11 @@
         },
         {
           "start": "12:00",
-          "end": "12:30",
-          "purpose": "OTHER"
-        },
-        {
-          "start": "12:30",
           "end": "13:00",
-          "purpose": "HOME"
-        },
-        {
-          "start": "13:00",
-          "end": "13:30",
           "purpose": "WORK"
         },
         {
-          "start": "13:30",
+          "start": "13:00",
           "end": "14:00",
           "purpose": "HOME"
         },
@@ -974,56 +959,46 @@
         },
         {
           "start": "14:30",
-          "end": "24:00",
-          "purpose": "HOME"
-        }
-      ]
-    },
-    {
-      "diary_id": "routine-028",
-      "episodes": [
-        {
-          "start": "00:00",
-          "end": "07:00",
+          "end": "15:00",
           "purpose": "HOME"
         },
         {
-          "start": "07:00",
-          "end": "07:30",
+          "start": "15:00",
+          "end": "16:00",
           "purpose": "WORK"
         },
         {
-          "start": "07:30",
-          "end": "08:00",
+          "start": "16:00",
+          "end": "17:00",
           "purpose": "HOME"
         },
         {
-          "start": "08:00",
-          "end": "09:00",
+          "start": "17:00",
+          "end": "17:30",
           "purpose": "OTHER"
         },
         {
-          "start": "09:00",
-          "end": "10:00",
+          "start": "17:30",
+          "end": "18:00",
           "purpose": "HOME"
         },
         {
-          "start": "10:00",
-          "end": "11:00",
-          "purpose": "OTHER"
+          "start": "18:00",
+          "end": "19:00",
+          "purpose": "WORK"
         },
         {
-          "start": "11:00",
-          "end": "12:00",
+          "start": "19:00",
+          "end": "20:00",
           "purpose": "HOME"
         },
         {
-          "start": "12:00",
-          "end": "13:00",
+          "start": "20:00",
+          "end": "20:30",
           "purpose": "OTHER"
         },
         {
-          "start": "13:00",
+          "start": "20:30",
           "end": "24:00",
           "purpose": "HOME"
         }
@@ -1090,7 +1065,7 @@
         {
           "start": "07:00",
           "end": "07:30",
-          "purpose": "OTHER"
+          "purpose": "WORK"
         },
         {
           "start": "07:30",
@@ -1100,25 +1075,20 @@
         {
           "start": "08:00",
           "end": "09:00",
-          "purpose": "WORK"
+          "purpose": "OTHER"
         },
         {
           "start": "09:00",
           "end": "10:00",
-          "purpose": "OTHER"
+          "purpose": "HOME"
         },
         {
           "start": "10:00",
           "end": "11:00",
-          "purpose": "WORK"
-        },
-        {
-          "start": "11:00",
-          "end": "11:30",
           "purpose": "OTHER"
         },
         {
-          "start": "11:30",
+          "start": "11:00",
           "end": "12:00",
           "purpose": "HOME"
         },
@@ -1129,51 +1099,6 @@
         },
         {
           "start": "13:00",
-          "end": "14:00",
-          "purpose": "HOME"
-        },
-        {
-          "start": "14:00",
-          "end": "15:00",
-          "purpose": "WORK"
-        },
-        {
-          "start": "15:00",
-          "end": "16:00",
-          "purpose": "OTHER"
-        },
-        {
-          "start": "16:00",
-          "end": "17:00",
-          "purpose": "WORK"
-        },
-        {
-          "start": "17:00",
-          "end": "18:00",
-          "purpose": "OTHER"
-        },
-        {
-          "start": "18:00",
-          "end": "19:00",
-          "purpose": "HOME"
-        },
-        {
-          "start": "19:00",
-          "end": "20:00",
-          "purpose": "OTHER"
-        },
-        {
-          "start": "20:00",
-          "end": "21:00",
-          "purpose": "HOME"
-        },
-        {
-          "start": "21:00",
-          "end": "22:00",
-          "purpose": "OTHER"
-        },
-        {
-          "start": "22:00",
           "end": "24:00",
           "purpose": "HOME"
         }

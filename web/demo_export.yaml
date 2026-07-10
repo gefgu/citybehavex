@@ -1,0 +1,20 @@
+output_dir: web/frontend/public/demo-data
+timeline_chunk_hours: 6
+timeline_max_agents: 500
+export_agent_details: true
+experiments:
+  - id: gparis_simulation
+    run_id: 20260708T105757
+    label: Greater Paris 500-sample
+    expected_agents: 500
+    allow_observed: false
+  - id: shanghai_simulation_500sample
+    run_id: 20260708T211014
+    label: Shanghai 500-sample
+    expected_agents: 500
+    allow_observed: false
+  - id: yjmob_simulation
+    run_id: 20260709T102506
+    label: YJMOB 500-sample
+    expected_agents: 500
+    allow_observed: true

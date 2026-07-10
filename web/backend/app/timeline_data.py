@@ -478,7 +478,8 @@ def query_stop_activities(activities_path: Path, uid: int) -> dict[int, list[dic
     con = duckdb.connect()
     try:
         rows = con.execute(
-            f"""SELECT stop_id, seq, activity, arrival, departure
+            f"""SELECT stop_id, seq, activity, arrival, departure,
+                       date_diff('second', arrival, departure) / 60.0 AS dwell_minutes
                 FROM read_parquet('{quote_path(activities_path)}')
                 WHERE uid = $uid ORDER BY stop_id, seq""",
             {"uid": uid},
@@ -546,7 +547,8 @@ def query_activity_at_stop(activities_path: Path, uid: int, stop_id: int, ts: da
     con = duckdb.connect()
     try:
         row = con.execute(
-            f"""SELECT seq, activity, arrival, departure
+            f"""SELECT seq, activity, arrival, departure,
+                       date_diff('second', arrival, departure) / 60.0 AS dwell_minutes
                 FROM read_parquet('{quote_path(activities_path)}')
                 WHERE uid = $uid AND stop_id = $stop_id
                   AND arrival <= $ts AND departure >= $ts

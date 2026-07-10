@@ -1,0 +1,195 @@
+# AUTO-GENERATED half-population (N/2=1500) base for the ablation matrix.
+# Derived from configs/gparis_simulation.yaml. comparison.path is a placeholder
+# until the full gparis reference dataset is ready -- reports are skipped
+# (SKIP_REPORT=1) for these ablation runs until then.
+tessellation:
+  min_lon: 1.6
+  min_lat: 48.5
+  max_lon: 2.975
+  max_lat: 49.16
+  poi_tessellation: true
+  overture_release: 2026-05-20.0
+  min_poi_count: 1
+  relevance_column: relevance
+  output: data/gparis/results/gparis_poi_tessellation.parquet
+simulation:
+  agents: 1500
+  days: 7
+  output: data/gparis/results/gparis_simulation_core_trajectories.parquet
+  random_state: 42
+  relevance_column: relevance
+  granularity_minutes: 15
+  car_speed_kmh: 50.0
+  rho: 0.6
+  gamma: 0.21
+  alpha: 0.2
+  dt_update_mob_sim_hours: 168.0
+  indipendency_window_hours: 0.5
+  gravity_deterrence_exponent: -2.5
+  gravity_origin_exponent: 1.0
+  gravity_destination_exponent: 1.0
+road_network:
+  enabled: true
+  nodes_output: data/gparis/results/gparis_road_graph_nodes.parquet
+  edges_output: data/gparis/results/gparis_road_graph_edges.parquet
+  snap_output: data/gparis/results/gparis_road_graph_snap.parquet
+  max_leg_waypoints: 256
+rail_network:
+  enabled: true
+  nodes_output: data/gparis/results/gparis_rail_graph_nodes.parquet
+  edges_output: data/gparis/results/gparis_rail_graph_edges.parquet
+  snap_output: data/gparis/results/gparis_rail_graph_snap.parquet
+  max_leg_waypoints: 256
+llm:
+  base_url: http://200.134.10.65:8081
+  api_key: none
+  model: Qwen/Qwen2.5-32B-Instruct-AWQ
+  diary_count: 30
+  max_tokens: 768
+  cache_dir: data/llm_diaries_gparis
+  validated_diaries_path: data/llm_diaries_gparis/validated_diaries.json
+diaries:
+  city_profile: Greater Paris metropolitan region, urban mobility with commuting,
+    errands, leisure, healthcare, studies, and home routines.
+  city_profile_weekday: 'Greater Paris weekday routines: commuting to work or studies,
+    midday errands, evening leisure, and home.'
+  city_profile_weekend: 'Greater Paris weekend routines: later mornings at home, leisure,
+    shopping, social visits, fewer work/study trips.'
+  representative_day: '2026-01-01'
+  location_count_mu: 1
+  location_count_sigma: 0.75
+  max_locations: 6
+  max_one_location_diaries: 1
+  motif_exploration_rate: 0.5
+embedding:
+  enabled: true
+  model: nomic-ai/nomic-embed-text-v1.5
+  base_url: http://localhost:8001
+  task_prefix: 'clustering: '
+  dimensions: 768
+  auto_launch: true
+  vllm_executable: /home/gustavo/vllm/.venv/bin/vllm
+  vllm_port: 8001
+  vllm_extra_args:
+  - --gpu-memory-utilization
+  - '0.08'
+  - --enforce-eager
+  - --max-model-len
+  - '512'
+  cache_dir: data/llm_diaries_gparis
+  cache_path: data/llm_diaries_gparis/diary_embeddings.npz
+schedule:
+  similarity_backend: alignment_model
+  alignment_base_url: http://localhost:8082
+  alignment_model: models/modernbert-schedule-aligner
+  alignment_batch_size: 32
+  alignment_cache_path: data/llm_diaries_gparis/schedule_alignment_scores_cache.npz
+  temperature_beta_a: 3.0
+  temperature_beta_b: 4.0
+  alpha_beta_a: 1.0
+  alpha_beta_b: 6.0
+social:
+  home_h3_resolution: 7
+  work_h3_resolution: 7
+  degree_mu_ln: 2.1776
+  degree_sigma_ln: 0.5
+  max_degree: 200
+  similarity_temperature: 0.3
+  max_candidate_pool: 2000
+  max_ring_expansion: 2
+  social_graph_k: 20
+  profile_graph_exact_threshold: 10000
+  dynamic_friendships_enabled: true
+  friendship_update_interval_hours: 24.0
+  encounter_window_hours: 168.0
+  regularity_threshold: 0.3
+  topological_overlap_threshold: 0.05
+  recast_random_baseline_samples: 256
+  recast_random_chance_probability: 0.001
+  strength_initial: 0.1
+  strength_growth_mu_ln: -2.3
+  strength_growth_sigma_ln: 0.5
+  strength_decay_rate: 0.05
+  max_dynamic_degree: 200
+  max_colocation_group_size: 50
+activities:
+  enabled: true
+  materialize_travel: true
+  kappa: 0.3
+  temperature: 0.25
+  embed_activities: true
+  alignment_backend: rerank
+  alignment_base_url: http://localhost:8083
+  alignment_model: models/modernbert-activity-aligner
+  alignment_batch_size: 512
+  alignment_cache_path: data/llm_diaries_gparis/activity_alignment_cache.npz
+  alignment_concurrency: 4
+  alignment_retries: 2
+  alignment_checkpoint_every: 20
+  poi_type_choice_enabled: true
+  poi_type_choice_temperature: 0.5
+  poi_type_choice_alpha: 1.0
+  durations:
+    sleep:
+      scale: 2.4
+      sigma_scale: 0.8
+    eatdrink:
+      scale: 0.75
+    selfcare:
+      scale: 0.75
+    foodprep:
+      scale: 0.6
+    cleanetc:
+      scale: 0.6
+    maintain:
+      scale: 0.6
+    garden:
+      scale: 0.6
+    petcare:
+      scale: 0.6
+    eldcare:
+      scale: 0.6
+    pkidcare:
+      scale: 0.6
+    ikidcare:
+      scale: 0.6
+profiles:
+  enabled: true
+  llm_override: true
+  output: data/gparis/results/gparis_agent_profiles.parquet
+  home_building_weight: 1.0
+  home_poi_inverse_weight: 0.5
+  work_building_weight: 1.0
+  work_poi_weight: 0.75
+  work_distance_model: exponential
+  work_distance_exponential_lambda: 0.3
+  work_distance_max_km: 60.0
+  work_distance_min_km: 0.25
+  work_distance_fallback: expand
+  work_distance_density_correction_power: 1.0
+  work_from_home_probability: 0.02
+  coherence_alignment_backend: none
+  coherence_alignment_base_url: http://localhost:8085
+  coherence_alignment_model: models/modernbert-profile-coherence-aligner
+  coherence_alignment_batch_size: 256
+  coherence_alignment_cache_path: data/llm_diaries_gparis/profile_coherence_alignment_cache.npz
+  coherence_alignment_concurrency: 4
+  coherence_rerun_rounds: 3
+  coherence_rerun_threshold: 0.6
+  ownership_alignment_backend: rerank
+  ownership_alignment_base_url: http://localhost:8084
+  ownership_alignment_model: models/modernbert-vehicle-ownership-aligner
+  ownership_alignment_batch_size: 256
+  ownership_alignment_cache_path: data/llm_diaries_gparis/vehicle_ownership_alignment_cache.npz
+  ownership_alignment_concurrency: 4
+comparison:
+  path: data/gparis/gparis_visitation_full_data_half_a.parquet
+  label: gparis
+  time_use_path: data/mtus/MTUS_haf.dta
+  time_use_label: MTUS France 2009
+  time_use_country: France
+  time_use_survey: 2009
+  time_use_weight_col: propwt
+  road_network_distance: false
+  transport_spatial:
+    enabled: false

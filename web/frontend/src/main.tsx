@@ -1,6 +1,6 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
-import { createBrowserRouter, Navigate, RouterProvider } from "react-router-dom";
+import { createBrowserRouter, createHashRouter, Navigate, RouterProvider } from "react-router-dom";
 import "@picocss/pico/css/pico.min.css";
 import "./styles/tokens.css";
 import "./styles/app.css";
@@ -10,7 +10,7 @@ import { Experiments } from "./pages/Experiments";
 import { Charts } from "./pages/Charts";
 import { Timeline } from "./pages/Timeline";
 
-const router = createBrowserRouter([
+const routes = [
   {
     element: <Layout />,
     children: [
@@ -21,7 +21,12 @@ const router = createBrowserRouter([
       { path: "*", element: <Navigate to="/" replace /> },
     ],
   },
-]);
+];
+
+const router =
+  import.meta.env.VITE_STATIC_DEMO === "true"
+    ? createHashRouter(routes)
+    : createBrowserRouter(routes, { basename: import.meta.env.BASE_URL });
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
