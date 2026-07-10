@@ -1,39 +1,12 @@
 //! DuckDB helpers for cheap parquet metadata, mirroring
 //! `web/backend/app/datasource.py`. The heavy scientific metrics go through
-//! the comparison engine (Phase 5); DuckDB here is only for the fast,
-//! tabular work the Experiments page needs: row counts, distinct users, and
-//! the datetime span of a run's parquet.
+//! the comparison engine (`comparison::*`); DuckDB here is only for the
+//! fast, tabular work the Experiments page needs: row counts, distinct
+//! users, and the datetime span of a run's parquet.
 
+use crate::columns::{DATETIME_CANDIDATES, UID_CANDIDATES, detect_column};
 use serde::Serialize;
 use std::path::Path;
-
-/// Kept in sync with `citybehavex.reports.comparison`'s candidate lists
-/// (same duplication the Python side has across `datasource.py` /
-/// `reports_bridge.py` / `home_work_data.py` -- noted there as manually
-/// kept in sync; same here for `comparison.rs` in Phase 5).
-pub const UID_CANDIDATES: &[&str] = &["uid", "user_id", "user", "agent_id", "userid"];
-pub const DATETIME_CANDIDATES: &[&str] = &[
-    "datetime",
-    "start_timestamp",
-    "timestamp",
-    "check-in_time",
-    "start_time",
-    "_start_time",
-    "checkin_time",
-    "time",
-    "date",
-];
-
-/// Case-insensitive first-match column lookup, mirrors
-/// `citybehavex/reports/comparison.py::detect_column`.
-pub fn detect_column<'a>(columns: &'a [String], candidates: &[&str]) -> Option<&'a str> {
-    for candidate in candidates {
-        if let Some(found) = columns.iter().find(|c| c.eq_ignore_ascii_case(candidate)) {
-            return Some(found.as_str());
-        }
-    }
-    None
-}
 
 fn quote_path(path: &Path) -> String {
     path.display().to_string().replace('\'', "''")
@@ -104,25 +77,4 @@ pub fn run_summary(path: &Path) -> anyhow::Result<RunSummary> {
         Ok(())
     })?;
     Ok(summary)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn detect_column_matches_case_insensitively() {
-        let cols = vec!["UID".to_string(), "Datetime".to_string(), "lat".to_string()];
-        assert_eq!(detect_column(&cols, UID_CANDIDATES), Some("UID"));
-        assert_eq!(detect_column(&cols, DATETIME_CANDIDATES), Some("Datetime"));
-        assert_eq!(detect_column(&cols, &["missing"]), None);
-    }
-
-    #[test]
-    fn detect_column_prefers_earlier_candidates() {
-        let cols = vec!["user_id".to_string(), "uid".to_string()];
-        // "uid" is listed before "user_id" in UID_CANDIDATES, so it wins
-        // even though "user_id" appears first in the column list.
-        assert_eq!(detect_column(&cols, UID_CANDIDATES), Some("uid"));
-    }
 }
