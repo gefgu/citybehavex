@@ -126,6 +126,22 @@ def _haversine_km_np(lat1, lng1, lat2, lng2) -> np.ndarray:
     return 6371.0088 * 2.0 * np.arcsin(np.minimum(1.0, np.sqrt(a)))
 
 
+def _haversine_km_expr(lat1: pl.Expr, lng1: pl.Expr, lat2: pl.Expr, lng2: pl.Expr) -> pl.Expr:
+    """Polars-expression equivalent of ``_haversine_km_np`` -- stays inside
+    the lazy/streaming engine instead of forcing a ``.to_numpy()`` eager
+    materialization, which matters when the input is 100M+ rows (see
+    ``_synthetic_transport_leg_records``).
+    """
+    lat1_r = lat1.radians()
+    lng1_r = lng1.radians()
+    lat2_r = lat2.radians()
+    lng2_r = lng2.radians()
+    dlat = lat2_r - lat1_r
+    dlng = lng2_r - lng1_r
+    a = (dlat / 2.0).sin() ** 2 + lat1_r.cos() * lat2_r.cos() * (dlng / 2.0).sin() ** 2
+    return 6371.0088 * 2.0 * pl.min_horizontal(a.sqrt(), pl.lit(1.0)).arcsin()
+
+
 def _default_synthetic_moving_path(synthetic_path: Optional[str]) -> Optional[Path]:
     if not synthetic_path:
         return None
@@ -167,34 +183,43 @@ def _synthetic_transport_leg_records(
     mode_map: dict[str, str],
 ) -> pl.DataFrame:
     """One row per (uid, stop_id) transport leg: total path length and time
-    span. Fully columnar (group_by/window aggregations) instead of a Python
-    ``for`` loop per leg -- this sidecar is 100M+ rows at yjmob2 scale, so a
-    per-group Python loop dominates report runtime (measured: the single
-    biggest cost in the ablation sweep's report step after CPC).
+    span. Fully lazy/streaming (scan_parquet + polars-expression haversine)
+    instead of an eager ``pl.read_parquet`` -- this sidecar is 100M-700M+
+    rows at yjmob/yjmob2 scale (370M measured for a single yjmob2 ablation
+    run), so materializing it eagerly plus the follow-on ``.to_numpy()``
+    haversine call peaked at 40GB+ RSS and intermittently OOM-killed the
+    report step. The lazy engine streams the scan/filter/join/group_by
+    pipeline in chunks and only the small per-leg aggregate ever reaches
+    Python.
     """
-    moving = pl.read_parquet(moving_path)
+    lf = pl.scan_parquet(moving_path)
+    schema = lf.collect_schema()
     required = {"uid", "stop_id", "seq", "lat", "lng", "t", "mode"}
-    missing = required - set(moving.columns)
+    missing = required - set(schema.names())
     if missing:
         raise ValueError(f"synthetic moving sidecar missing columns: {sorted(missing)}")
-    if moving.is_empty():
-        return _empty_transport_records()
+
+    t_dtype = schema["t"]
+    if t_dtype == pl.Utf8:
+        t_expr = pl.col("t").str.to_datetime(strict=False)
+    elif isinstance(t_dtype, pl.Datetime):
+        t_expr = pl.col("t")
+    else:
+        t_expr = pl.col("t").cast(pl.Datetime, strict=False)
 
     work = (
-        moving.select(["uid", "stop_id", "seq", "lat", "lng", "t", "mode"])
+        lf.select(["uid", "stop_id", "seq", "lat", "lng", "t", "mode"])
         .with_columns(
-            _to_datetime(moving["t"]).alias("t"),
+            t_expr.alias("t"),
             pl.col("lat").cast(pl.Float64, strict=False),
             pl.col("lng").cast(pl.Float64, strict=False),
         )
         .drop_nulls(subset=["uid", "stop_id", "seq", "lat", "lng", "t", "mode"])
+        .sort(["uid", "stop_id", "seq"])
     )
-    if work.is_empty():
-        return _empty_transport_records()
-    work = work.sort(["uid", "stop_id", "seq"])
 
     # Per-leg raw row count, time span, and first-in-sequence mode.
-    legs = work.group_by(["uid", "stop_id"], maintain_order=True).agg(
+    legs = work.group_by(["uid", "stop_id"]).agg(
         pl.len().alias("_n"),
         pl.col("t").max().alias("_t_max"),
         pl.col("t").min().alias("_t_min"),
@@ -204,28 +229,30 @@ def _synthetic_transport_leg_records(
     # Consecutive-point distance within each leg, restricted to finite
     # coordinates (lat/lng are already non-null from the drop_nulls above;
     # this guards against stray inf values, same as the old np.isfinite mask).
+    # Computed as a polars expression (not numpy) so it stays inside the
+    # streaming engine instead of forcing eager materialization.
     finite = work.filter(pl.col("lat").is_finite() & pl.col("lng").is_finite())
     finite = finite.with_columns(
         pl.col("lat").shift(1).over(["uid", "stop_id"]).alias("_prev_lat"),
         pl.col("lng").shift(1).over(["uid", "stop_id"]).alias("_prev_lng"),
     )
-    step_km = _haversine_km_np(
-        finite["_prev_lat"].to_numpy(),
-        finite["_prev_lng"].to_numpy(),
-        finite["lat"].to_numpy(),
-        finite["lng"].to_numpy(),
+    # A leg's first point has no predecessor (shift produces null) -- the
+    # haversine expression on a null input yields null, which the group sum
+    # below already skips, matching the old code's np.nansum behavior.
+    finite = finite.with_columns(
+        _haversine_km_expr(
+            pl.col("_prev_lat"), pl.col("_prev_lng"), pl.col("lat"), pl.col("lng")
+        ).alias("_step_km")
     )
-    # A leg's first point has no predecessor (shift produces null -> NaN here)
-    # -- turn it back into a null so the group sum below skips it instead of
-    # propagating NaN, matching the old code's np.nansum.
-    finite = finite.with_columns(pl.Series("_step_km", step_km).fill_nan(None))
-    distances = finite.group_by(["uid", "stop_id"], maintain_order=True).agg(
+    distances = finite.group_by(["uid", "stop_id"]).agg(
         pl.col("_step_km").sum().alias("jump_km"),
         pl.len().alias("_valid_n"),
     )
 
-    legs = legs.join(distances, on=["uid", "stop_id"], how="left").filter(
-        (pl.col("_n") >= 2) & (pl.col("_valid_n").fill_null(0) >= 2)
+    legs = (
+        legs.join(distances, on=["uid", "stop_id"], how="left")
+        .filter((pl.col("_n") >= 2) & (pl.col("_valid_n").fill_null(0) >= 2))
+        .collect(engine="streaming")
     )
     if legs.is_empty():
         return _empty_transport_records()
@@ -1436,7 +1463,7 @@ def generate_comparison_report(
             location_resolution=location_resolution,
         )
         observed_visit_result = _prepare_activity_visits(
-            real_df,
+            real_metric_df,
             label=observed_label,
             uid_col=real_traj.uid_col,
             datetime_col=real_start_col,

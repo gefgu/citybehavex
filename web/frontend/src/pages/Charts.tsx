@@ -433,12 +433,13 @@ function FilteredMetricTable({
         <tbody>
           {rows.map((m, i) => {
             const label = m.resolution ? `H3 ${m.resolution}` : metricName(m);
-            const helpKey = m.resolution ? title : metricName(m);
             return (
               <tr key={`${m.filter_key ?? "all"}:${metricName(m)}:${m.resolution ?? i}`}>
-                <td>
+                <td className="metric-name-cell">
                   <span className="metric-filter">{m.filter_label ?? "All"}</span>
-                  <TitleWithHelp label={label} helpKey={helpKey} />
+                  <span className="metric-name-text">
+                    {label}
+                  </span>
                 </td>
                 <td className="value">{m.value.toFixed(4)}</td>
                 <td className="unit">{m.unit ?? unit ?? ""}</td>

@@ -262,7 +262,9 @@ function ExperimentCard({
           granularity <b>{paramString(experiment.params.granularity_minutes)}m</b>
         </span>
         <span>{experiment.runs.length.toLocaleString()} runs</span>
-        <span>observed: {experiment.observed_exists ? "yes" : "missing"}</span>
+        <span>
+          Real-Data comparision configured: {experiment.observed_exists ? "true" : "false"}
+        </span>
       </div>
       <button
         className="btn btn-secondary exp-toggle"
@@ -317,7 +319,9 @@ function ExperimentViewPanel({
           <span>
             car speed <b>{paramString(experiment.params.car_speed_kmh)} km/h</b>
           </span>
-          <span>observed: {experiment.observed_exists ? "yes" : "missing"}</span>
+          <span>
+            Real-Data comparision configured: {experiment.observed_exists ? "true" : "false"}
+          </span>
           <span>profiles: {experiment.profiles_enabled ? "enabled" : "disabled"}</span>
         </div>
       </div>

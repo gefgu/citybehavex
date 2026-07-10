@@ -140,12 +140,15 @@ profiles:
 comparison:
   path: data/yjmob2/yjmob2_wgs84_half_a.parquet
   label: yjmob2_disaster
+  transport_spatial:
+    enabled: false
+  sections: ["activity_jsd"]
   evaluation_adaptation:
     mode: force
     h3_resolution: 7
   network_validation:
     enabled: true
-    observed_enabled: true
+    observed_enabled: false
     synthetic_enabled: true
     location_mode: h3
     h3_resolution: 9
