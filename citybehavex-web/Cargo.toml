@@ -43,7 +43,7 @@ lru = "0.12"
 h3o = "0.10"
 rayon = "1"
 duckdb = { version = "1", features = ["bundled"] }
-polars = { version = "0.51", features = ["lazy", "new_streaming", "parquet", "temporal", "dtype-full"] }
+polars = { version = "0.51", features = ["lazy", "new_streaming", "parquet", "temporal", "dtype-full", "strings", "trigonometry", "round_series", "is_between", "cum_agg"] }
 
 tracing = "0.1"
 tracing-subscriber = "0.3"
