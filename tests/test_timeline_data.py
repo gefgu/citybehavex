@@ -298,3 +298,76 @@ def test_query_active_legs_attaches_normalized_profile_gender(tmp_path):
     )
 
     assert {segment["gender"] for segment in segments} == {"man"}
+    assert {segment["character_sprite"] for segment in segments} == {"men_2"}
+
+
+def test_query_active_legs_maps_profiles_to_character_sprites(tmp_path):
+    trajectory_path = tmp_path / "trajectory.parquet"
+    profiles_path = tmp_path / "profiles.parquet"
+    legs_path = tmp_path / "legs.parquet"
+    rows = []
+    for uid in range(1, 7):
+        rows.extend(
+            [
+                {
+                    "uid": uid,
+                    "stop_id": 0,
+                    "datetime": pd.Timestamp("2026-01-01 08:00"),
+                    "lat": 48.8566 + uid * 0.001,
+                    "lng": 2.3522,
+                    "arrival": pd.Timestamp("2026-01-01 08:00"),
+                    "departure": pd.Timestamp("2026-01-01 08:30"),
+                    "trip_duration_minutes": 0.0,
+                    "dwell_minutes": 30.0,
+                    "purpose": "HOME",
+                    "category": None,
+                },
+                {
+                    "uid": uid,
+                    "stop_id": 1,
+                    "datetime": pd.Timestamp("2026-01-01 09:00"),
+                    "lat": 48.8580 + uid * 0.001,
+                    "lng": 2.3540,
+                    "arrival": pd.Timestamp("2026-01-01 09:00"),
+                    "departure": pd.Timestamp("2026-01-01 10:00"),
+                    "trip_duration_minutes": 10.0,
+                    "dwell_minutes": 60.0,
+                    "purpose": "OTHER",
+                    "category": "cafe",
+                },
+            ]
+        )
+    pd.DataFrame(rows).to_parquet(trajectory_path, index=False)
+    pd.DataFrame(
+        {
+            "uid": [1, 2, 3, 4, 5],
+            "gender": ["male", "female", "male", "female", "unknown"],
+            "age": [70, 72, 45, 41, 33],
+            "job": [
+                "retired",
+                "retired",
+                "machine operator or assembler",
+                "professional",
+                "service or sales worker",
+            ],
+        }
+    ).to_parquet(profiles_path, index=False)
+
+    _build_legs_index(trajectory_path, legs_path)
+
+    segments, _truncated = query_active_legs(
+        legs_path,
+        pd.Timestamp("2026-01-01 08:45").to_pydatetime(),
+        pd.Timestamp("2026-01-01 09:05").to_pydatetime(),
+        (48.85, 2.35, 48.87, 2.36),
+        10,
+        profiles_path=profiles_path,
+    )
+
+    sprite_by_uid = {int(segment["uid"]): segment["character_sprite"] for segment in segments}
+    assert sprite_by_uid[1] == "men_4"
+    assert sprite_by_uid[2] == "woman_3"
+    assert sprite_by_uid[3] == "men_5"
+    assert sprite_by_uid[4] == "woman_2"
+    assert sprite_by_uid[5] == "unknown"
+    assert sprite_by_uid[6] == "unknown"

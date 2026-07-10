@@ -331,6 +331,20 @@ export interface TimelineSegment {
   purpose: string;
   category?: string | null;
   gender?: "female" | "man" | "unknown" | null;
+  character_sprite?:
+    | "female"
+    | "man"
+    | "men_2"
+    | "men_3"
+    | "men_4"
+    | "men_5"
+    | "men_6"
+    | "woman_2"
+    | "woman_3"
+    | "woman_4"
+    | "woman_5"
+    | "unknown"
+    | null;
   mode?: "stay" | "car" | "walk" | "bike" | "rail";
   // Present on "leg" segments from runs with road routing enabled — the
   // road-following path to animate along instead of a straight-line lerp.
