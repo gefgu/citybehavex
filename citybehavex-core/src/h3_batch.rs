@@ -12,19 +12,15 @@ use rayon::prelude::*;
 
 /// `u64::MAX` is not a valid H3 cell index (the top reserved bits are never
 /// all-1 for a valid cell), so it doubles as the "invalid input" sentinel for
-/// non-finite or out-of-range lat/lng -- the Python caller is expected to
-/// treat it the same way it already treats a missing/NaN location.
+/// non-finite or out-of-range lat/lng -- callers are expected to treat it the
+/// same way they already treat a missing/NaN location.
 pub const INVALID_CELL: u64 = u64::MAX;
 
 /// Converts `(lat, lng)` pairs (degrees) to H3 cell indices at `resolution`,
 /// in parallel. Invalid coordinates map to [`INVALID_CELL`] rather than
 /// failing the whole batch, since real-world check-in data routinely has a
 /// few bad rows mixed into an otherwise valid column.
-pub(crate) fn batch_latlng_to_cells(
-    lats: &[f64],
-    lngs: &[f64],
-    resolution: Resolution,
-) -> Vec<u64> {
+pub fn batch_latlng_to_cells(lats: &[f64], lngs: &[f64], resolution: Resolution) -> Vec<u64> {
     lats.par_iter()
         .zip(lngs.par_iter())
         .map(|(&lat, &lng)| {

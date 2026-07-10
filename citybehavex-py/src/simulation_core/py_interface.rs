@@ -5,16 +5,16 @@ use pyo3::prelude::*;
 use pyo3::types::PyAny;
 
 use crate::simulation_core::engine::simulate;
-use crate::simulation_core::h3_batch::batch_latlng_to_cells;
 use crate::simulation_core::inputs::{
     ActivityInputs, CoreInputs, DiaryInputs, InitialLocationInputs, LocationInputs,
     RoadNetworkInputs, SimulationParams, SocialGraphInputs, TransportInputs,
 };
-use crate::simulation_core::network_graph::{build_co_presence_edges, compute_graph_metrics};
 use crate::simulation_core::outputs::{
     ActivityOutputBuffers, RoadPathOutputBuffers, TripOutputBuffers,
 };
-use crate::simulation_core::roads::{RoadGraph, batch_road_distances};
+use citybehavex_core::h3_batch::batch_latlng_to_cells;
+use citybehavex_core::network_graph::{build_co_presence_edges, compute_graph_metrics};
+use citybehavex_core::roads::{RoadGraph, batch_road_distances};
 
 /// Batch lat/lng (degrees) -> H3 cell index conversion at a fixed resolution,
 /// in parallel. Returns `u64` cell indices (`INVALID_CELL` == `u64::MAX` for

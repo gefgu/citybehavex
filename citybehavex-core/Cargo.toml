@@ -1,0 +1,14 @@
+[package]
+name = "citybehavex-core"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+name = "citybehavex_core"
+crate-type = ["lib"]
+
+[dependencies]
+h3o = "0.10.0"
+rayon = "1"
+rustc-hash = "2"
+fast_paths = "1"

@@ -11,6 +11,9 @@ crate-type = ["cdylib"]
 # default-features = false drops the C/SIMD-backed crates (numkong, wass); the
 # trip-DITRAS only needs the pure-Rust models/utils (od, shared, haversine).
 fkmob-core = { path = "../../fkmob/fkmob-core", default-features = false }
+# H3 batch conversion, contraction-hierarchy road routing, and co-presence/
+# graph-metrics -- shared with citybehavex-web, see citybehavex-core/src/lib.rs.
+citybehavex-core = { path = "../citybehavex-core" }
 pyo3 = "0.28.2"
 numpy = "0.28.0"
 rand = "0.8"
