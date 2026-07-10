@@ -36,6 +36,7 @@ data/**/*.npz
 # web app
 node_modules/
 data/.web_cache/
+web/frontend/public/demo-data/
 
 data/mtus/
 

@@ -1,4 +1,20 @@
 // Thin fetch wrapper. Every backend response is `{ data: ... }`; we return `data`.
+// In static-demo builds, selected API calls are resolved from JSON files emitted
+// by scripts/export_static_web_demo.py instead of a live FastAPI backend.
+
+const STATIC_DEMO = import.meta.env.VITE_STATIC_DEMO === "true";
+const STATIC_ROOT = `${import.meta.env.BASE_URL.replace(/\/?$/, "/")}demo-data`;
+
+async function getStaticJson<T>(path: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(`${STATIC_ROOT}/${path.replace(/^\/+/, "")}`, init);
+  return readJson<T>(res);
+}
+
+async function getStaticRawJson<T>(path: string): Promise<T> {
+  const res = await fetch(`${STATIC_ROOT}/${path.replace(/^\/+/, "")}`);
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return (await res.json()) as T;
+}
 
 async function getJson<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(url, init);
@@ -59,6 +75,23 @@ export interface Experiment {
   runs: Run[];
 }
 
+let staticExperimentsCache: Promise<Experiment[]> | null = null;
+
+async function staticExperiments(): Promise<Experiment[]> {
+  if (!staticExperimentsCache) {
+    staticExperimentsCache = getStaticJson<Experiment[]>("experiments.json");
+  }
+  return staticExperimentsCache;
+}
+
+async function staticRunPath(id: string): Promise<string> {
+  const experiments = await staticExperiments();
+  const experiment = experiments.find((item) => item.id === id);
+  const run = experiment?.runs?.[0]?.run_id;
+  if (!run) throw new Error(`Static demo run not found for ${id}`);
+  return `${id}/${run}`;
+}
+
 export interface ExperimentUpdate {
   label?: string;
   agents?: number;
@@ -78,14 +111,26 @@ export interface ExperimentUpdate {
 }
 
 export function fetchExperiments(withSummary = false): Promise<Experiment[]> {
+  if (STATIC_DEMO) {
+    void withSummary;
+    return getStaticJson<Experiment[]>("experiments.json");
+  }
   return getJson<Experiment[]>(`/api/experiments?with_summary=${withSummary}`);
 }
 
 export function fetchExperiment(id: string): Promise<Experiment> {
+  if (STATIC_DEMO) {
+    return getStaticJson<Experiment>(`experiments/${encodeURIComponent(id)}.json`);
+  }
   return getJson<Experiment>(`/api/experiments/${encodeURIComponent(id)}`);
 }
 
 export function updateExperiment(id: string, payload: ExperimentUpdate): Promise<Experiment> {
+  if (STATIC_DEMO) {
+    void id;
+    void payload;
+    return Promise.reject(new Error("Static demo experiments cannot be edited."));
+  }
   return sendJson<Experiment>(`/api/experiments/${encodeURIComponent(id)}`, {
     method: "PATCH",
     body: JSON.stringify(payload),
@@ -93,6 +138,10 @@ export function updateExperiment(id: string, payload: ExperimentUpdate): Promise
 }
 
 export function archiveExperiment(id: string): Promise<{ archived_config: string }> {
+  if (STATIC_DEMO) {
+    void id;
+    return Promise.reject(new Error("Static demo experiments cannot be archived."));
+  }
   return sendJson<{ archived_config: string }>(
     `/api/experiments/${encodeURIComponent(id)}/archive`,
     { method: "POST", body: "{}" },
@@ -100,6 +149,11 @@ export function archiveExperiment(id: string): Promise<{ archived_config: string
 }
 
 export function deleteExperimentRun(id: string, runId: string): Promise<{ deleted: string[] }> {
+  if (STATIC_DEMO) {
+    void id;
+    void runId;
+    return Promise.reject(new Error("Static demo runs cannot be deleted."));
+  }
   return sendJson<{ deleted: string[] }>(
     `/api/experiments/${encodeURIComponent(id)}/runs/${encodeURIComponent(runId)}`,
     { method: "DELETE", body: "{}" },
@@ -107,6 +161,10 @@ export function deleteExperimentRun(id: string, runId: string): Promise<{ delete
 }
 
 export function fetchCharts(id: string, run?: string): Promise<ChartPayload> {
+  if (STATIC_DEMO) {
+    if (!run) return staticRunPath(id).then((path) => getStaticJson<ChartPayload>(`${path}/charts/base.json`));
+    return getStaticJson<ChartPayload>(`${id}/${run}/charts/base.json`);
+  }
   const q = run ? `?run=${encodeURIComponent(run)}` : "";
   return getJson<ChartPayload>(`/api/experiments/${encodeURIComponent(id)}/charts${q}`);
 }
@@ -118,6 +176,18 @@ export function fetchChartSection(
   run?: string,
   signal?: AbortSignal,
 ): Promise<ChartPayload> {
+  if (STATIC_DEMO) {
+    const file = `${encodeURIComponent(section)}/${encodeURIComponent(filter)}.json`;
+    if (!run) {
+      return staticRunPath(id).then((path) =>
+        getStaticJson<ChartPayload>(`${path}/charts/sections/${file}`, { signal }),
+      );
+    }
+    return getStaticJson<ChartPayload>(
+      `${id}/${run}/charts/sections/${file}`,
+      { signal },
+    );
+  }
   const q = new URLSearchParams();
   q.set("filter", filter);
   if (run) q.set("run", run);
@@ -128,6 +198,11 @@ export function fetchChartSection(
 }
 
 export async function downloadMetricsExport(id: string, run?: string): Promise<Blob> {
+  if (STATIC_DEMO) {
+    const path = run ? `${id}/${run}` : await staticRunPath(id);
+    const payload = await getStaticRawJson<unknown>(`${path}/metrics-export.json`);
+    return new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+  }
   const q = new URLSearchParams({ format: "json" });
   if (run) q.set("run", run);
   const res = await fetch(
@@ -189,11 +264,32 @@ export interface HomeWorkResponse {
   warnings: string[];
 }
 
+function staticHomeWorkFilterKey(filter?: DemographicFilter): string {
+  if (!filter?.gender && !filter?.age_bracket && !filter?.job) return "all";
+  return [
+    filter.gender ? `gender-${filter.gender}` : "gender-all",
+    filter.age_bracket ? `age-${filter.age_bracket}` : "age-all",
+    filter.job ? `job-${filter.job}` : "job-all",
+  ]
+    .map((part) => encodeURIComponent(part))
+    .join("__");
+}
+
 export function fetchHomeWork(
   id: string,
   run?: string,
   filter?: DemographicFilter,
 ): Promise<HomeWorkResponse> {
+  if (STATIC_DEMO) {
+    const filterKey = staticHomeWorkFilterKey(filter);
+    const fetchStatic = (path: string) =>
+      getStaticJson<HomeWorkResponse>(`${path}/home-work/${filterKey}.json`).catch((error) => {
+        if (filterKey === "all") throw error;
+        return getStaticJson<HomeWorkResponse>(`${path}/home-work/all.json`);
+      });
+    if (!run) return staticRunPath(id).then(fetchStatic);
+    return fetchStatic(`${id}/${run}`);
+  }
   const q = new URLSearchParams();
   if (run) q.set("run", run);
   if (filter?.gender) q.set("gender", filter.gender);
@@ -248,6 +344,74 @@ export interface TimelineLegsPayload {
   agent_count: number;
   truncated: boolean;
   segments: TimelineSegment[];
+}
+
+interface StaticTimelineChunkIndex {
+  chunks: { file: string; since: string; until: string }[];
+}
+
+function segmentIntersectsTime(segment: TimelineSegment, sinceMs: number, untilMs: number): boolean {
+  const start = Date.parse(segment.t_start);
+  const end = Date.parse(segment.t_end);
+  return end >= sinceMs && start <= untilMs;
+}
+
+function segmentIntersectsBbox(
+  segment: TimelineSegment,
+  [minLat, minLng, maxLat, maxLng]: [number, number, number, number],
+): boolean {
+  const segMinLat = Math.min(segment.o_lat, segment.d_lat);
+  const segMaxLat = Math.max(segment.o_lat, segment.d_lat);
+  const segMinLng = Math.min(segment.o_lng, segment.d_lng);
+  const segMaxLng = Math.max(segment.o_lng, segment.d_lng);
+  return segMaxLat >= minLat && segMinLat <= maxLat && segMaxLng >= minLng && segMinLng <= maxLng;
+}
+
+async function fetchStaticTimelineLegs(
+  id: string,
+  params: {
+    run?: string;
+    since: string;
+    until: string;
+    bbox: [number, number, number, number];
+    maxAgents?: number;
+  },
+): Promise<TimelineLegsPayload> {
+  const path = params.run ? `${id}/${params.run}` : await staticRunPath(id);
+  const index = await getStaticJson<StaticTimelineChunkIndex>(`${path}/timeline/chunks.json`);
+  const sinceMs = Date.parse(params.since);
+  const untilMs = Date.parse(params.until);
+  const chunkRefs = index.chunks.filter(
+    (chunk) => Date.parse(chunk.until) >= sinceMs && Date.parse(chunk.since) <= untilMs,
+  );
+  const chunks = await Promise.all(
+    chunkRefs.map((chunk) => getStaticJson<TimelineLegsPayload>(`${path}/timeline/legs/${chunk.file}`)),
+  );
+  const seenAgents = new Set<number>();
+  const maxAgents = params.maxAgents ?? 2000;
+  const segments: TimelineSegment[] = [];
+  let truncated = false;
+  for (const chunk of chunks) {
+    truncated = truncated || chunk.truncated;
+    for (const segment of chunk.segments) {
+      if (!segmentIntersectsTime(segment, sinceMs, untilMs)) continue;
+      if (!segmentIntersectsBbox(segment, params.bbox)) continue;
+      if (!seenAgents.has(segment.uid) && seenAgents.size >= maxAgents) {
+        truncated = true;
+        continue;
+      }
+      seenAgents.add(segment.uid);
+      segments.push(segment);
+    }
+  }
+  return {
+    run_id: params.run ?? path.split("/").slice(-1)[0] ?? "",
+    since: params.since,
+    until: params.until,
+    agent_count: seenAgents.size,
+    truncated,
+    segments,
+  };
 }
 
 export interface AgentProfileFields {
@@ -320,6 +484,10 @@ export interface AgentProfilePayload {
 }
 
 export function fetchTimelineMeta(id: string, run?: string): Promise<TimelineMeta> {
+  if (STATIC_DEMO) {
+    if (!run) return staticRunPath(id).then((path) => getStaticJson<TimelineMeta>(`${path}/timeline/meta.json`));
+    return getStaticJson<TimelineMeta>(`${id}/${run}/timeline/meta.json`);
+  }
   const q = run ? `?run=${encodeURIComponent(run)}` : "";
   return getJson<TimelineMeta>(`/api/experiments/${encodeURIComponent(id)}/timeline/meta${q}`);
 }
@@ -334,6 +502,9 @@ export function fetchTimelineLegs(
     maxAgents?: number;
   },
 ): Promise<TimelineLegsPayload> {
+  if (STATIC_DEMO) {
+    return fetchStaticTimelineLegs(id, params);
+  }
   const [minLat, minLng, maxLat, maxLng] = params.bbox;
   const q = new URLSearchParams({
     since: params.since,
@@ -351,6 +522,14 @@ export function fetchTimelineLegs(
 }
 
 export function fetchTimelineAgent(id: string, uid: number, run?: string): Promise<AgentProfilePayload> {
+  if (STATIC_DEMO) {
+    if (!run) {
+      return staticRunPath(id).then((path) =>
+        getStaticJson<AgentProfilePayload>(`${path}/timeline/agents/${uid}/profile.json`),
+      );
+    }
+    return getStaticJson<AgentProfilePayload>(`${id}/${run}/timeline/agents/${uid}/profile.json`);
+  }
   const q = run ? `?run=${encodeURIComponent(run)}` : "";
   return getJson<AgentProfilePayload>(
     `/api/experiments/${encodeURIComponent(id)}/timeline/agents/${uid}${q}`,
@@ -362,6 +541,8 @@ export interface AgentCrpDiary {
   day_type: string;
   sim: number;
   usage_count: number;
+  description?: string;
+  episodes?: { start: string; end: string; purpose: string }[];
 }
 
 export interface AgentCrpPayload {
@@ -374,6 +555,14 @@ export interface AgentCrpPayload {
 }
 
 export function fetchTimelineAgentCrp(id: string, uid: number, run?: string): Promise<AgentCrpPayload> {
+  if (STATIC_DEMO) {
+    if (!run) {
+      return staticRunPath(id).then((path) =>
+        getStaticJson<AgentCrpPayload>(`${path}/timeline/agents/${uid}/crp.json`),
+      );
+    }
+    return getStaticJson<AgentCrpPayload>(`${id}/${run}/timeline/agents/${uid}/crp.json`);
+  }
   const q = run ? `?run=${encodeURIComponent(run)}` : "";
   return getJson<AgentCrpPayload>(
     `/api/experiments/${encodeURIComponent(id)}/timeline/agents/${uid}/crp${q}`,
@@ -417,6 +606,14 @@ export function fetchTimelineAgentSocial(
   uid: number,
   run?: string,
 ): Promise<AgentSocialPayload> {
+  if (STATIC_DEMO) {
+    if (!run) {
+      return staticRunPath(id).then((path) =>
+        getStaticJson<AgentSocialPayload>(`${path}/timeline/agents/${uid}/social.json`),
+      );
+    }
+    return getStaticJson<AgentSocialPayload>(`${id}/${run}/timeline/agents/${uid}/social.json`);
+  }
   const q = run ? `?run=${encodeURIComponent(run)}` : "";
   return getJson<AgentSocialPayload>(
     `/api/experiments/${encodeURIComponent(id)}/timeline/agents/${uid}/social${q}`,

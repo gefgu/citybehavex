@@ -161,9 +161,11 @@ profiles:
 comparison:
   path: data/shanghai/shanghai_data_raw_half_a.parquet
   label: shanghai
+  transport_spatial:
+    enabled: false
   network_validation:
     enabled: true
-    observed_enabled: true
+    observed_enabled: false
     synthetic_enabled: true
     location_mode: location_col
     location_col: venueId

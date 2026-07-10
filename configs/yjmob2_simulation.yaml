@@ -157,6 +157,7 @@ profiles:
 comparison:
   path: data/yjmob2/yjmob2_wgs84_simple.parquet
   label: yjmob2_disaster
+  sections: ["activity_jsd"]
   evaluation_adaptation:
     mode: force
     h3_resolution: 7

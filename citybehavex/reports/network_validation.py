@@ -649,6 +649,62 @@ def _observed_validation_block(
     return block, [*warnings, *block_warnings], metrics
 
 
+def build_observed_pair_network_validation(
+    df_a: pl.DataFrame,
+    df_b: pl.DataFrame,
+    *,
+    label_a: str = "half_a",
+    label_b: str = "half_b",
+    uid_col: str | None = None,
+    datetime_col: str | None = None,
+    location_mode: str = "auto",
+    location_col: str | None = None,
+    h3_resolution: int = 9,
+    max_group_size: int = 200,
+) -> tuple[dict[str, Any] | None, list[str]]:
+    """Compare two real co-presence networks (e.g. a population-halved
+    Ref. split) directly against each other -- no random null graph. Reuses
+    the same Rust-backed edge-building/metric extraction as
+    ``_observed_validation_block``, just diffing two real graphs' metric
+    distributions instead of diffing one real graph against a synthetic
+    degree-preserving random baseline (``degree_preserving_random_graph``,
+    which is a slow pure-Python O(n^2) generator not needed here).
+    """
+    uid_name = uid_col or _detect_column(df_a, _UID_CANDIDATES)
+    datetime_name = datetime_col or _detect_column(df_a, _DATETIME_CANDIDATES)
+    if uid_name is None or datetime_name is None:
+        return None, ["observed-pair network validation requires user and datetime columns"]
+
+    graph_a, persistence_a, _, warnings_a = _observed_edges_and_persistence(
+        df_a,
+        uid_col=uid_name,
+        datetime_col=datetime_name,
+        location_mode=location_mode,
+        location_col=location_col,
+        h3_resolution=h3_resolution,
+        max_group_size=max_group_size,
+    )
+    graph_b, persistence_b, _, warnings_b = _observed_edges_and_persistence(
+        df_b,
+        uid_col=uid_name,
+        datetime_col=datetime_name,
+        location_mode=location_mode,
+        location_col=location_col,
+        h3_resolution=h3_resolution,
+        max_group_size=max_group_size,
+    )
+    metrics_a = _metric_bundle(graph_a, persistence_a)
+    metrics_b = _metric_bundle(graph_b, persistence_b)
+    block, block_warnings = _metric_wasserstein_block(
+        comparison="observed_vs_observed",
+        left_label=label_a,
+        left_metrics=metrics_a,
+        right_label=label_b,
+        right_metrics=metrics_b,
+    )
+    return block, [*warnings_a, *warnings_b, *block_warnings]
+
+
 def build_network_validation(
     synthetic_path: str | Path,
     *,

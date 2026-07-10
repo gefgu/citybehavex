@@ -8,10 +8,36 @@ LOG=data/ablation_logs/sweep_driver.log
 mkdir -p data/ablation_logs
 echo "=== sweep started $(date) ===" >> "$LOG"
 
+MANIFEST=data/ablation_logs/manifest.jsonl
+
+already_done() {
+  local dataset="$1" variant="$2" idx="$3"
+  [[ -f "$MANIFEST" ]] || return 1
+  python3 -c "
+import json, sys
+target = ('$dataset', '$variant', $idx)
+for line in open('$MANIFEST'):
+    r = json.loads(line)
+    if (r['dataset'], r['variant'], r['run_index']) == target:
+        sys.exit(0)
+sys.exit(1)
+"
+}
+
 run() {
   local dataset="$1" variant="$2" idx="$3"
+  if already_done "$dataset" "$variant" "$idx"; then
+    echo "--- $(date) $dataset/$variant/run$idx: already in manifest, skipping ---" >> "$LOG"
+    return
+  fi
+  # YJMOB/YJMOB2's real comparison dataset is tens of millions of rows;
+  # report computation over that needs more headroom than Shanghai's
+  # (irrelevant right now while SKIP_REPORT=1, but kept for when reports
+  # come back on).
+  local run_timeout=1800
+  [[ "$dataset" == "yjmob" || "$dataset" == "yjmob2" ]] && run_timeout=7200
   echo "--- $(date) $dataset/$variant/run$idx ---" >> "$LOG"
-  if timeout 1800 bash scripts/run_ablation.sh "$dataset" "$variant" "$idx" >> "$LOG" 2>&1; then
+  if timeout "$run_timeout" bash scripts/run_ablation.sh "$dataset" "$variant" "$idx" >> "$LOG" 2>&1; then
     echo "OK $dataset/$variant/run$idx" >> "$LOG"
   else
     echo "FAILED $dataset/$variant/run$idx (see log above)" >> "$LOG"

@@ -33,11 +33,13 @@ export function CrpSummaryPanel({
   const [error, setError] = useState<string | null>(null);
   const [dayType, setDayType] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
+  const [selectedDiaryId, setSelectedDiaryId] = useState<string | null>(null);
 
   useEffect(() => {
     setData(null);
     setError(null);
     setDayType(null);
+    setSelectedDiaryId(null);
     fetchTimelineAgentCrp(expId, uid, runId).then(setData).catch((e) => setError(String(e)));
   }, [expId, uid, runId]);
 
@@ -56,6 +58,8 @@ export function CrpSummaryPanel({
   const alpha_a = data?.alpha_a ?? null;
   const activeDayType = dayType && dayTypes.includes(dayType) ? dayType : dayTypes[0];
   const bank = data?.diaries.filter((d) => d.day_type === activeDayType) ?? [];
+  const selectedDiary =
+    bank.find((d) => d.diary_id === selectedDiaryId) ?? (selectedDiaryId ? data?.diaries.find((d) => d.diary_id === selectedDiaryId) : null);
 
   const topUsed = [...bank].sort((a, b) => b.usage_count - a.usage_count).slice(0, 5);
   const maxUsage = Math.max(1, ...topUsed.map((d) => d.usage_count));
@@ -143,7 +147,15 @@ export function CrpSummaryPanel({
                     <tbody>
                       {topUsed.map((d) => (
                         <tr key={d.diary_id}>
-                          <td>{d.diary_id}</td>
+                          <td>
+                            <button
+                              className="crp-diary-link"
+                              type="button"
+                              onClick={() => setSelectedDiaryId(d.diary_id)}
+                            >
+                              {d.diary_id}
+                            </button>
+                          </td>
                           <td>{d.usage_count}</td>
                           <td>{d.sim.toFixed(2)}</td>
                           <td className="crp-bar-cell">
@@ -163,7 +175,13 @@ export function CrpSummaryPanel({
                   <div>
                     {topProbs.map((d, i) => (
                       <div key={d.diary_id} className={`crp-prob-row${i === 0 ? " is-top" : ""}`}>
-                        <span className="crp-prob-label">{d.diary_id}</span>
+                        <button
+                          className="crp-prob-label crp-diary-link"
+                          type="button"
+                          onClick={() => setSelectedDiaryId(d.diary_id)}
+                        >
+                          {d.diary_id}
+                        </button>
                         <div className="crp-prob-track">
                           <div className="crp-prob-fill" style={{ width: `${d.prob * 100}%` }} />
                         </div>
@@ -171,6 +189,46 @@ export function CrpSummaryPanel({
                       </div>
                     ))}
                   </div>
+                  {selectedDiary && (
+                    <aside className="crp-routine-detail">
+                      <div className="timeline-detail-header">
+                        <div>
+                          <div className="section-header">Routine description</div>
+                          <h3>{selectedDiary.diary_id}</h3>
+                        </div>
+                        <button
+                          className="btn btn-secondary btn-compact"
+                          type="button"
+                          onClick={() => setSelectedDiaryId(null)}
+                        >
+                          Close
+                        </button>
+                      </div>
+                      <p className="agent-narrative">
+                        {selectedDiary.description ?? "No routine description available for this diary cache."}
+                      </p>
+                      {selectedDiary.episodes && selectedDiary.episodes.length > 0 && (
+                        <table className="agent-table timeline-detail-table">
+                          <thead>
+                            <tr>
+                              <th>start</th>
+                              <th>end</th>
+                              <th>purpose</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {selectedDiary.episodes.map((episode, index) => (
+                              <tr key={`${episode.start}:${episode.end}:${index}`}>
+                                <td>{episode.start}</td>
+                                <td>{episode.end}</td>
+                                <td>{episode.purpose}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      )}
+                    </aside>
+                  )}
                 </>
               )}
             </>

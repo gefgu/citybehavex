@@ -122,14 +122,20 @@ body {
 
 /* ---- buttons ---- */
 .btn {
-  display: inline-block;
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   border-radius: var(--radius-lg);
   padding: 12px 22px;
   font-size: 16px;
   font-weight: 500;
+  line-height: 1;
   text-decoration: none;
   cursor: pointer;
   border: 1px solid transparent;
+  margin: 0;
+  vertical-align: middle;
   transition:
     background-color 140ms ease,
     border-color 140ms ease,
@@ -149,8 +155,11 @@ body {
   box-shadow: none;
 }
 .btn-compact {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   border-radius: var(--radius-sm);
-  min-height: 38px;
+  min-height: 36px;
   padding: 9px 14px;
   font-size: 13px;
   line-height: 1;
@@ -402,13 +411,9 @@ body {
   margin-left: auto;
 }
 .run-actions .btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
   min-height: 34px;
   padding: 4px 12px;
   font-size: 13px;
-  line-height: 1;
 }
 
 /* ---- section headers ---- */
@@ -460,13 +465,27 @@ table.metrics th {
   font-size: 12px;
   font-weight: 600;
 }
+table.metrics td.metric-name-cell {
+  display: grid;
+  grid-template-columns: 74px minmax(0, 1fr);
+  align-items: center;
+  column-gap: var(--space-sm);
+}
 table.metrics td.value { font-family: ui-monospace, monospace; color: var(--ink); }
-table.metrics td.unit { color: var(--muted); }
+table.metrics td.unit {
+  color: var(--muted);
+  text-align: center;
+}
 .metric-filter {
   display: inline-block;
-  min-width: 74px;
   color: var(--muted);
   font-size: 12px;
+}
+.metric-name-text {
+  display: flex;
+  justify-content: center;
+  min-width: 0;
+  text-align: center;
 }
 .title-with-help {
   display: inline-flex;
@@ -1017,6 +1036,32 @@ table.agent-table td:first-child { color: var(--muted); }
 .crp-panel-toggle button.is-active {
   background: var(--ink);
   color: #fff;
+}
+.crp-diary-link {
+  border: 0;
+  background: transparent;
+  color: var(--link);
+  cursor: pointer;
+  font: inherit;
+  margin: 0;
+  padding: 0;
+  text-align: left;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.crp-diary-link:hover,
+.crp-diary-link:focus-visible {
+  color: var(--ink);
+  outline: none;
+}
+.crp-routine-detail {
+  border-top: 1px solid var(--hairline);
+  margin-top: var(--space-lg);
+  padding-top: var(--space-md);
+}
+.crp-routine-detail h3 {
+  margin: 2px 0 0;
+  font-size: 20px;
 }
 .crp-section-header {
   margin-top: var(--space-md);

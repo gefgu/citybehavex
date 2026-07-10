@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import re
 import statistics
 from collections import defaultdict
@@ -70,21 +71,42 @@ def _get_nested(d: dict, path: tuple[str, ...]) -> Any:
     return node
 
 
+def _finite_or_none(v: float | None) -> float | None:
+    """NaN/inf slip through as valid JSON floats but would silently poison a
+    mean/std (or print literal "nan" into the LaTeX table) -- treat them the
+    same as a missing value instead."""
+    if v is None:
+        return None
+    try:
+        return v if math.isfinite(v) else None
+    except TypeError:
+        return v
+
+
 def extract_metric(report: dict, metric_key: str) -> float | None:
     if metric_key in WASSERSTEIN_METRICS:
         path, transform = WASSERSTEIN_METRICS[metric_key]
         v = _get_nested(report, path)
-        return transform(v) if v is not None else None
+        return _finite_or_none(transform(v) if v is not None else None)
     if metric_key in JSD_METRICS:
         path, transform = JSD_METRICS[metric_key]
         v = _get_nested(report, path)
-        return transform(v) if v is not None else None
+        return _finite_or_none(transform(v) if v is not None else None)
     if metric_key in NETWORK_METRICS:
         (sub,) = NETWORK_METRICS[metric_key]
+        # Model columns (full, no_profile, ...) carry synthetic_vs_random;
+        # the Ref. column's real-vs-real half-A-vs-half-B comparison
+        # (built by build_observed_pair_network_validation) carries
+        # observed_vs_observed instead -- mutually exclusive per report,
+        # so trying both is safe.
         v = _get_nested(
             report, ("network_validation", "synthetic_vs_random", "wasserstein", sub)
         )
-        return v
+        if v is None:
+            v = _get_nested(
+                report, ("network_validation", "observed_vs_observed", "wasserstein", sub)
+            )
+        return _finite_or_none(v)
     raise ValueError(f"unknown metric key {metric_key!r}")
 
 
@@ -96,6 +118,8 @@ def aggregate(
         lambda: defaultdict(list)
     )
     for row in manifest_rows:
+        if row.get("report_json_path") is None:
+            continue
         report = load_report(row["report_json_path"])
         if report is None:
             print(f"WARNING: missing report {row['report_json_path']}, skipping")
@@ -124,14 +148,33 @@ def aggregate(
 # --- LaTeX cell formatting ---------------------------------------------------
 
 
-def format_cell(mean: float, std: float, n: int, decimals: int, bold: bool) -> str:
+def format_cell(
+    mean: float, std: float, n: int, decimals: int, bold: bool, flagged: bool = False
+) -> str:
     if n <= 1:
         body = f"{mean:.{decimals}f}"
     else:
         body = f"{mean:.{decimals}f} \\pm {std:.{decimals}f}"
     if bold:
         body = f"\\mathbf{{{body}}}"
+    if flagged:
+        # Value looks real but the underlying metric is under suspicion
+        # (e.g. a known data-adaptation issue not yet root-caused) -- mark
+        # for manual review rather than silently presenting it as trusted.
+        body = f"\\gustavo{{{body}}}"
     return f"${body}$"
+
+
+# (dataset, metric_key) pairs whose computed values are suspect and should
+# be flagged with \gustavo{} in the table rather than presented as trusted.
+# See EVALUATION_NOTES.md for why each entry is here.
+NEEDS_CHECKING: set[tuple[str, str]] = {
+    ("yjmob2", "vf"),  # visits_per_user implausibly high (310-371); likely
+                       # the same raw-row-vs-collapsed-stays mismatch fixed
+                       # for Shanghai, not yet applying cleanly for yjmob2.
+    ("yjmob", "vf"),   # same anomaly, plain yjmob (407-496 across many
+                       # independent runs) -- not yjmob2-specific.
+}
 
 
 _MATH_SPAN = re.compile(r"\$.*\$")
@@ -163,6 +206,7 @@ ABLATION_VARIANT_COLUMNS = [
 # 1-indexed position of each variant's value cell within the `&`-split row
 # (0=dataset, 1=metric, 2=full, 3=no_profile, ... 7=no_feedback, 8=ref)
 ABLATION_COLUMN_INDEX = {v: i + 2 for i, v in enumerate(ABLATION_VARIANT_COLUMNS)}
+REF_COLUMN_INDEX = 8
 
 ABLATION_METRIC_LABELS = {
     "delta_r": r"\$\\Delta r\$",
@@ -170,8 +214,11 @@ ABLATION_METRIC_LABELS = {
     "td": r"TD\.",
     "dt": r"DT\.",
     "vf": r"Vf\.",
-    "rt": r"RT\.",
-    "mem": r"Mem\.",
+    "rt_minutes": r"RT\.",
+    "mem_gb": r"Mem\.",
+    "vpd": r"\\textit\{VPD\}",
+    "atm": r"\\textit\{ATM\}",
+    "dard": r"\\textit\{DARD\}",
 }
 NEW_ROW_METRICS = [
     ("degree", "Degree"),
@@ -189,6 +236,21 @@ ABLATION_DATASET_LABELS = {
 # datasets whose new network-validation rows get real numbers (not "-")
 NETWORK_ROW_DATASETS = {"shanghai", "yjmob", "yjmob2"}
 
+# Sorted longest-label-first so a prefix collision (e.g. "YJMOB" is a prefix
+# of "YJMOB disaster") always resolves to the more specific match.
+_SORTED_ABLATION_DATASET_LABELS = sorted(
+    ABLATION_DATASET_LABELS.items(), key=lambda kv: len(kv[1]), reverse=True
+)
+
+
+def _detect_dataset(line: str) -> str | None:
+    stripped = line.strip()
+    for key, label in _SORTED_ABLATION_DATASET_LABELS:
+        plain_label = label.replace("\\", "").replace("{}", "")
+        if stripped.startswith(label) or stripped.startswith(plain_label):
+            return key
+    return None
+
 
 def patch_ablation_tex(
     text: str,
@@ -202,11 +264,9 @@ def patch_ablation_tex(
     current_dataset: str | None = None
     dataset_by_line: dict[int, str] = {}
     for i, line in enumerate(lines):
-        for key, label in ABLATION_DATASET_LABELS.items():
-            plain_label = label.replace("\\", "").replace("{}", "")
-            if line.strip().startswith(label) or line.strip().startswith(plain_label):
-                current_dataset = key
-                break
+        detected = _detect_dataset(line)
+        if detected is not None:
+            current_dataset = detected
         if current_dataset:
             dataset_by_line[i] = current_dataset
 
@@ -227,40 +287,83 @@ def patch_ablation_tex(
                 if cell_data is None:
                     continue
                 mean, std, n = cell_data
-                new_cell = format_cell(mean, std, n, decimals, bold=(variant == "full"))
+                new_cell = format_cell(
+                    mean, std, n, decimals, bold=(variant == "full"),
+                    flagged=(dataset, metric_key) in NEEDS_CHECKING,
+                )
                 cells[col_idx] = replace_cell_value(cells[col_idx], new_cell)
                 changes.append(
                     f"{dataset}/{variant}/{metric_key}: n={n} mean={mean:.3f} std={std:.3f}"
                 )
+            # Ref. column (index 8): real-vs-real half-A-vs-half-B comparison,
+            # a single point estimate (n=1); not applicable to RT./Mem. since
+            # no simulation runs for it.
+            if metric_key not in ("rt_minutes", "mem_gb") and REF_COLUMN_INDEX < len(cells):
+                ref_data = results.get((dataset, "ref"), {}).get(metric_key)
+                if ref_data is not None:
+                    ref_mean, ref_std, ref_n = ref_data
+                    ref_cell = format_cell(ref_mean, ref_std, ref_n, decimals, bold=False, flagged=False)
+                    cells[REF_COLUMN_INDEX] = replace_cell_value(cells[REF_COLUMN_INDEX], ref_cell)
+                    changes.append(f"{dataset}/ref/{metric_key}: n={ref_n} mean={ref_mean:.3f}")
             lines[i] = "&".join(cells)
             break
 
     return "\n".join(lines), changes
 
 
-def insert_network_rows(text: str) -> str:
-    """Insert 4 new metric rows after each dataset block's Mem. row."""
+def place_network_rows_at_block_end(text: str) -> str:
+    """Ensure each dataset block has exactly the 4 network-metric rows
+    (Degree, Clustering coeff., Edge persistence, Topological overlap) as
+    its LAST rows, before the block's closing \\midrule (or end of table
+    for the last block). Idempotent: if the rows don't exist yet, inserts
+    them (fresh placeholders); if they exist but are positioned elsewhere
+    (e.g. the original layout right after Mem.), moves them to the end
+    without touching their already-patched values.
+    """
     lines = text.split("\n")
     out_lines: list[str] = []
     current_dataset: str | None = None
-    for line in lines:
-        for key, label in ABLATION_DATASET_LABELS.items():
-            plain_label = label.replace("\\", "").replace("{}", "")
-            if line.strip().startswith(label) or line.strip().startswith(plain_label):
-                current_dataset = key
-                break
-        out_lines.append(line)
-        if current_dataset and re.search(r"\\textit\{Mem\.", line):
-            indent = re.match(r"\s*", line).group(0)
+    pending_network_lines: list[str] = []
+    block_indent: str | None = None
+
+    def flush_pending() -> None:
+        nonlocal pending_network_lines, block_indent
+        if not pending_network_lines and block_indent is None:
+            return
+        if not pending_network_lines and block_indent is not None:
             cells_placeholder = " & ".join(["$-$"] * (len(ABLATION_VARIANT_COLUMNS) + 1))
-            for _metric_key, row_label in NEW_ROW_METRICS:
-                new_line = f"{indent}& \\textit{{{row_label}}} & {cells_placeholder} \\\\"
-                out_lines.append(new_line)
+            pending_network_lines = [
+                f"{block_indent}& \\textit{{{row_label}}} & {cells_placeholder} \\\\"
+                for _metric_key, row_label in NEW_ROW_METRICS
+            ]
+        out_lines.extend(pending_network_lines)
+        pending_network_lines = []
+        block_indent = None
+
+    for line in lines:
+        detected = _detect_dataset(line)
+        if detected is not None:
+            if detected != current_dataset:
+                flush_pending()
+            current_dataset = detected
+
+        if current_dataset and any(label in line for _key, label in NEW_ROW_METRICS):
+            if block_indent is None:
+                block_indent = re.match(r"\s*", line).group(0)
+            pending_network_lines.append(line)
+            continue
+
+        if current_dataset and re.search(r"\\textit\{Mem\.", line) and block_indent is None:
+            block_indent = re.match(r"\s*", line).group(0)
+
+        if current_dataset and (line.strip() == r"\midrule" or r"\end{tabular}" in line):
+            flush_pending()
+            current_dataset = None
+
+        out_lines.append(line)
+
+    flush_pending()
     return "\n".join(out_lines)
-
-
-def has_network_rows(text: str) -> bool:
-    return any(label in text for _key, label in NEW_ROW_METRICS)
 
 
 def patch_network_rows(
@@ -273,11 +376,9 @@ def patch_network_rows(
     current_dataset: str | None = None
     dataset_by_line: dict[int, str] = {}
     for i, line in enumerate(lines):
-        for key, label in ABLATION_DATASET_LABELS.items():
-            plain_label = label.replace("\\", "").replace("{}", "")
-            if line.strip().startswith(label) or line.strip().startswith(plain_label):
-                current_dataset = key
-                break
+        detected = _detect_dataset(line)
+        if detected is not None:
+            current_dataset = detected
         if current_dataset:
             dataset_by_line[i] = current_dataset
 
@@ -294,15 +395,35 @@ def patch_network_rows(
             for variant, col_idx in ABLATION_COLUMN_INDEX.items():
                 if col_idx >= len(cells):
                     continue
+                # -Social removes the module that co-presence/network
+                # metrics are meant to characterize -- a graph can still be
+                # built from raw location/time co-occurrence, but the
+                # numbers wouldn't mean what they mean everywhere else in
+                # this row, so this column is dash-only by design.
+                if variant == "no_social":
+                    cells[col_idx] = replace_cell_value(cells[col_idx], "$-$")
+                    continue
                 cell_data = results.get((dataset, variant), {}).get(metric_key)
                 if cell_data is None:
                     continue
                 mean, std, n = cell_data
-                new_cell = format_cell(mean, std, n, decimals, bold=(variant == "full"))
+                new_cell = format_cell(
+                    mean, std, n, decimals, bold=(variant == "full"),
+                    flagged=(dataset, metric_key) in NEEDS_CHECKING,
+                )
                 cells[col_idx] = replace_cell_value(cells[col_idx], new_cell)
                 changes.append(
                     f"{dataset}/{variant}/{metric_key}: n={n} mean={mean:.3f} std={std:.3f}"
                 )
+            # Ref. column: real-vs-real half-A-vs-half-B network comparison
+            # (build_observed_pair_network_validation), single point estimate.
+            if REF_COLUMN_INDEX < len(cells):
+                ref_data = results.get((dataset, "ref"), {}).get(metric_key)
+                if ref_data is not None:
+                    ref_mean, ref_std, ref_n = ref_data
+                    ref_cell = format_cell(ref_mean, ref_std, ref_n, decimals, bold=False, flagged=False)
+                    cells[REF_COLUMN_INDEX] = replace_cell_value(cells[REF_COLUMN_INDEX], ref_cell)
+                    changes.append(f"{dataset}/ref/{metric_key}: n={ref_n} mean={ref_mean:.3f}")
             lines[i] = "&".join(cells)
             break
 
@@ -343,7 +464,10 @@ def patch_comparison_row(
             if col_idx >= len(cells) or metric_key not in values:
                 continue
             mean, std, n = values[metric_key]
-            new_cell = format_cell(mean, std, n, decimals, bold=True)
+            new_cell = format_cell(
+                mean, std, n, decimals, bold=True,
+                flagged=(dataset, metric_key) in NEEDS_CHECKING,
+            )
             cells[col_idx] = replace_cell_value(cells[col_idx], new_cell)
             changes.append(f"{dataset}/{metric_key}: n={n} mean={mean:.3f} std={std:.3f}")
         lines[i] = "&".join(cells)
@@ -375,10 +499,7 @@ def main(argv: Iterable[str] | None = None) -> None:
     if "ablation" in args.targets:
         path = Path(args.ablation_tex)
         text = path.read_text()
-        if not has_network_rows(text):
-            text_with_rows = insert_network_rows(text)
-        else:
-            text_with_rows = text
+        text_with_rows = place_network_rows_at_block_end(text)
         patched, changes = patch_ablation_tex(text_with_rows, results)
         patched, net_changes = patch_network_rows(patched, results)
         changes += net_changes
@@ -392,8 +513,12 @@ def main(argv: Iterable[str] | None = None) -> None:
             print("(dry-run, not written; pass --apply to write)")
 
     if "comparison" in args.targets:
-        # gparis full-model rows already available from the 3 session runs
-        gparis_full = results.get(("gparis", "full"), {})
+        # 500-agent comparison-table baseline (AgentSociety/CitySim methodology).
+        # Distinct from the ablation table's "full" variant, which for
+        # shanghai/yjmob/yjmob2/gparis is the N/2 population-halved baseline.
+        gparis_full = results.get(("gparis", "500sample"), {}) or results.get(
+            ("gparis", "full"), {}
+        )
         shanghai_full = results.get(("shanghai", "500sample"), {}) or results.get(
             ("shanghai", "full"), {}
         )

@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
+    "build:static-demo": "VITE_STATIC_DEMO=true npm run build",
     "preview": "vite preview"
   },
   "dependencies": {

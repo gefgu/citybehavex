@@ -157,6 +157,7 @@ def report(
         network_validation_config=loaded.comparison.network_validation,
         transport_spatial_config=loaded.comparison.transport_spatial,
         evaluation_adaptation_config=loaded.comparison.evaluation_adaptation,
+        sections=loaded.comparison.sections,
     )
 
 

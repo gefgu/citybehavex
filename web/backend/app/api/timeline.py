@@ -4,10 +4,13 @@ and a single clicked agent's profile/trips/encounters."""
 from __future__ import annotations
 
 from datetime import datetime, timedelta
+from pathlib import Path
 from typing import Any, Optional
 
 import duckdb
 from citybehavex.activities import build_catalog
+from citybehavex.embedding.service import diary_to_prose
+from citybehavex.llm_diaries.cache import apply_variant, cache_path, load_validated_diary_cache
 from citybehavex.profiles import AgentProfile, profile_to_narrative
 from fastapi import APIRouter, HTTPException, Query
 
@@ -123,6 +126,44 @@ def _crp_agent_id(display_uid: int) -> int:
     return int(display_uid) - 1
 
 
+def _diary_cache_base_path(experiment: Experiment) -> Path:
+    llm_config = experiment.config.llm if hasattr(experiment, "config") else None
+    if llm_config is not None:
+        return cache_path(llm_config)
+    # Experiment stores the config path, so load_config is avoided here to keep
+    # the common path light; the normal Experiment object has no root config.
+    from citybehavex.config import load_config
+
+    return cache_path(load_config(str(experiment.config_path)).llm)
+
+
+def _diary_descriptions(experiment: Experiment, day_types: set[str]) -> dict[tuple[str, str], dict[str, Any]]:
+    descriptions: dict[tuple[str, str], dict[str, Any]] = {}
+    if not day_types or not hasattr(experiment, "config_path"):
+        return descriptions
+    try:
+        base_path = _diary_cache_base_path(experiment)
+    except Exception:  # noqa: BLE001 - descriptions are optional timeline context
+        return descriptions
+    for day_type in sorted(day_types):
+        path = apply_variant(base_path, day_type)
+        if not path.exists():
+            continue
+        try:
+            batch = load_validated_diary_cache(path)
+        except Exception:  # noqa: BLE001 - diary descriptions are optional UI context
+            continue
+        for diary in batch.diaries:
+            descriptions[(day_type, diary.diary_id)] = {
+                "description": diary_to_prose(diary),
+                "episodes": [
+                    {"start": ep.start, "end": ep.end, "purpose": ep.purpose}
+                    for ep in diary.episodes
+                ],
+            }
+    return descriptions
+
+
 @router.get("/experiments/{exp_id}/timeline/meta")
 def get_timeline_meta(
     exp_id: str, run: Optional[str] = Query(None, description="Run id. Defaults to the latest run.")
@@ -235,6 +276,8 @@ def get_timeline_agent(
                     selected.activities_path, int(encounter["contact_uid"]), int(stop_id), encounter["ts"]
                 )
                 encounter.update(_activity_fields(activity_row.get("activity") if activity_row else None))
+                if activity_row and activity_row.get("dwell_minutes") is not None:
+                    encounter["dwell_minutes"] = activity_row["dwell_minutes"]
             else:
                 encounter.update(_activity_fields(encounter.get("activity")))
             contact = contact_profiles.get(int(encounter["contact_uid"]))
@@ -269,7 +312,7 @@ def get_timeline_agent_crp(
 ) -> ApiResponseWrapper[dict[str, Any]]:
     """ddCRP diary-selection state for one agent: T_a, alpha_a, and per-diary
     usage counts + profile similarity, split by day-type bank."""
-    _experiment, selected = _resolve_run(exp_id, run)
+    experiment, selected = _resolve_run(exp_id, run)
     warnings: list[str] = []
     diaries: list[dict[str, Any]] = []
     T_a: Optional[float] = None
@@ -280,12 +323,17 @@ def get_timeline_agent_crp(
         if rows:
             T_a = float(rows[0]["T_a"])
             alpha_a = float(rows[0]["alpha_a"])
+            description_by_diary = _diary_descriptions(
+                experiment,
+                {str(r["day_type"]) for r in rows if r.get("day_type") is not None},
+            )
             diaries = [
                 {
                     "diary_id": r["diary_id"],
                     "day_type": r["day_type"],
                     "sim": float(r["sim"]),
                     "usage_count": int(r["usage_count"]),
+                    **description_by_diary.get((str(r["day_type"]), str(r["diary_id"])), {}),
                 }
                 for r in rows
             ]
