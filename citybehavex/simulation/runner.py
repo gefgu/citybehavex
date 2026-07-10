@@ -12,9 +12,9 @@ import numpy as np
 import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
-import skmob2
+import fkmob
 import typer
-from skmob2.models import DensityEPR
+from fkmob.models import DensityEPR
 
 from citybehavex.activities import (
     ActivitiesConfig,
@@ -779,7 +779,7 @@ def _run_density_epr(
     relevance_column: str,
     start_date: pd.Timestamp,
     end_date: pd.Timestamp,
-) -> tuple[skmob2.TrajDataFrame, Optional[str]]:
+) -> tuple[fkmob.TrajDataFrame, Optional[str]]:
     typer.echo(
         f"Running DensityEPR: {config.simulation.agents} agents x {config.simulation.days} days "
         f"({start_date.date()} -> {end_date.date()})"
@@ -793,7 +793,7 @@ def _run_density_epr(
         relevance_column=relevance_column,
         random_state=config.simulation.random_state,
     )
-    traj = skmob2.TrajDataFrame(traj)
+    traj = fkmob.TrajDataFrame(traj)
     synth_activity_col = None
     if "purpose" in tessellation_df.columns:
         traj.df = _merge_tessellation_metadata(
@@ -1181,7 +1181,7 @@ def _run_simulation_core(
     bank: Optional[DiaryBank] = None,
     profile_clusters: Optional[ProfileClusters] = None,
     output_path: Optional[str] = None,
-) -> tuple[skmob2.TrajDataFrame, Optional[str], bool]:
+) -> tuple[fkmob.TrajDataFrame, Optional[str], bool]:
     granularity = config.simulation.granularity_minutes
     typer.echo(
         f"Running simulation core: {config.simulation.agents} agents x {config.simulation.days} days "
@@ -1449,7 +1449,7 @@ def _run_simulation_core(
             f"Saved {trip_writer.rows_written:,} records "
             f"({config.simulation.agents} agents) -> {base}"
         )
-    traj = skmob2.TrajDataFrame(
+    traj = fkmob.TrajDataFrame(
         df, datetime_col="datetime", lat_col="lat", lng_col="lng", uid_col="uid"
     )
     return traj, "purpose", trip_writer is not None
@@ -1678,7 +1678,7 @@ def maybe_build_profiles(
     return profiles
 
 
-def run_simulation(config: CityBehavExConfig) -> skmob2.TrajDataFrame:
+def run_simulation(config: CityBehavExConfig) -> fkmob.TrajDataFrame:
     ts = datetime.now().strftime("%Y%m%dT%H%M%S")
     stamped_output = _stamp_path(config.simulation.output, ts)
     # All of this run's sidecar artifacts (CRP state, social network, encounters,

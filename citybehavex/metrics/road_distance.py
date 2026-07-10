@@ -1,6 +1,6 @@
 """Road-network jump lengths / radius of gyration for mobility comparison.
 
-skmob2's ``jump_lengths``/``radius_of_gyration`` measure straight-line
+fkmob's ``jump_lengths``/``radius_of_gyration`` measure straight-line
 Haversine distance between stop points. citybehavex's simulation already
 routes agents over a real, cached road network (Overture-derived,
 contraction-hierarchy routing via ``citybehavex._core.RoadNetworkHandle``);
@@ -82,7 +82,7 @@ def jump_lengths_km(
 ) -> np.ndarray:
     """Road-network jump lengths (km): distance between consecutive stops
     for the same user, sorted by datetime -- mirrors
-    ``skmob2.jump_lengths(merge=True)``'s sort key and its inclusion of
+    ``fkmob.jump_lengths(merge=True)``'s sort key and its inclusion of
     zero-length jumps, but measures along the road network instead of
     straight-line, falling back to Haversine per-pair when unsnapped or
     disconnected.
@@ -129,10 +129,10 @@ def radius_of_gyration_km(
 ) -> pl.DataFrame:
     """Road-network radius of gyration (km) per user: RMS road-network
     distance from each of a user's stops to the arithmetic-mean centroid of
-    their stops -- mirrors skmob2's unweighted-centroid formula
+    their stops -- mirrors fkmob's unweighted-centroid formula
     (``r_g(u) = sqrt(mean(d(r_i, r_cm)^2))``), but measures ``d`` along the
     road network instead of straight-line. Returns a
-    ``DataFrame[[uid_col, "radius_of_gyration"]]`` matching skmob2's shape.
+    ``DataFrame[[uid_col, "radius_of_gyration"]]`` matching fkmob's shape.
     """
     df = _as_polars(df)
     if df.is_empty():
