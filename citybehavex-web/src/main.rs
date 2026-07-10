@@ -1,4 +1,6 @@
 mod cache;
+mod columns;
+mod comparison;
 mod config;
 mod datasource;
 mod experiments;
