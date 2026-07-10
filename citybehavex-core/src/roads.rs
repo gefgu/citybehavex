@@ -6,7 +6,7 @@
 use rayon::prelude::*;
 use rustc_hash::FxHashMap;
 
-pub(crate) struct RoadGraph {
+pub struct RoadGraph {
     fast_graph: fast_paths::FastGraph,
     edge_weight_ds: FxHashMap<(usize, usize), i64>,
     edge_length_m: FxHashMap<(usize, usize), f64>,
@@ -16,7 +16,7 @@ impl RoadGraph {
     /// Builds and prepares the contraction hierarchy from directed edges.
     /// Parallel edges between the same (from, to) pair are deduped, keeping
     /// the smallest weight; self-loops are dropped (`fast_paths` disallows them).
-    pub(crate) fn build(edge_from: &[usize], edge_to: &[usize], edge_weight_ds: &[usize]) -> Self {
+    pub fn build(edge_from: &[usize], edge_to: &[usize], edge_weight_ds: &[usize]) -> Self {
         Self::build_with_length(edge_from, edge_to, edge_weight_ds, &[])
     }
 
@@ -27,7 +27,7 @@ impl RoadGraph {
     /// `edge_length_m[i]` is missing/short (e.g. `&[]`, as `build` passes) ->
     /// treated as `0.0`, which is fine since the live simulation path never
     /// reads `edge_length_m()`.
-    pub(crate) fn build_with_length(
+    pub fn build_with_length(
         edge_from: &[usize],
         edge_to: &[usize],
         edge_weight_ds: &[usize],
@@ -75,13 +75,13 @@ impl RoadGraph {
         }
     }
 
-    pub(crate) fn new_calculator(&self) -> fast_paths::PathCalculator {
+    pub fn new_calculator(&self) -> fast_paths::PathCalculator {
         fast_paths::create_calculator(&self.fast_graph)
     }
 
     /// Returns (total_weight_ds, node_path including endpoints) or `None` if
     /// `from`/`to` are in disconnected components of the graph.
-    pub(crate) fn shortest_path(
+    pub fn shortest_path(
         &self,
         calc: &mut fast_paths::PathCalculator,
         from: usize,
@@ -91,11 +91,11 @@ impl RoadGraph {
         Some((path.get_weight(), path.get_nodes().clone()))
     }
 
-    pub(crate) fn edge_weight_ds(&self, from: usize, to: usize) -> i64 {
+    pub fn edge_weight_ds(&self, from: usize, to: usize) -> i64 {
         *self.edge_weight_ds.get(&(from, to)).unwrap_or(&0)
     }
 
-    pub(crate) fn edge_length_m(&self, from: usize, to: usize) -> f64 {
+    pub fn edge_length_m(&self, from: usize, to: usize) -> f64 {
         *self.edge_length_m.get(&(from, to)).unwrap_or(&0.0)
     }
 }
@@ -113,7 +113,7 @@ impl RoadGraph {
 /// `snap_locations_to_graph`) and CH-disconnected pairs both report
 /// `(0.0, false)`, leaving the straight-line Haversine fallback decision to
 /// the caller.
-pub(crate) fn batch_road_distances(
+pub fn batch_road_distances(
     graph: &RoadGraph,
     from_nodes: &[i64],
     to_nodes: &[i64],
@@ -154,7 +154,7 @@ pub(crate) fn batch_road_distances(
 
 /// Given the full node path and per-node cumulative time, subsample down to
 /// at most `max_points`, always keeping the first and last point.
-pub(crate) fn subsample_waypoints(
+pub fn subsample_waypoints(
     lats: &[f64],
     lngs: &[f64],
     times: &[i64],

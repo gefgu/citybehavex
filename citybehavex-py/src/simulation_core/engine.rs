@@ -17,7 +17,7 @@ use crate::simulation_core::inputs::{
 use crate::simulation_core::outputs::{
     ActivityOutputBuffers, RoadPathOutputBuffers, SimulationOutput, TripOutputBuffers,
 };
-use crate::simulation_core::roads::{RoadGraph, subsample_waypoints};
+use citybehavex_core::roads::{RoadGraph, subsample_waypoints};
 use crate::simulation_core::social::{
     LocationChoiceContext, choose_location_local, pick_starting_loc, update_edge_sim,
 };

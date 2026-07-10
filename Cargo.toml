@@ -1,5 +1,5 @@
 [workspace]
-members = ["citybehavex-py"]
+members = ["citybehavex-py", "citybehavex-core", "citybehavex-web"]
 resolver = "2"
 
 [profile.release]

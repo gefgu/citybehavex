@@ -1,13 +1,15 @@
 //! CityBehavEx simulation core with social exploration and trip-duration stay emission.
+//!
+//! H3 batch conversion, contraction-hierarchy road routing, and co-presence/
+//! graph-metrics used to live in `h3_batch`/`roads`/`network_graph` modules
+//! here; they're now in the shared `citybehavex-core` crate (also consumed
+//! directly, no PyO3, by `citybehavex-web`) and imported from there below.
 
 mod activity;
 mod engine;
-mod h3_batch;
 mod inputs;
-mod network_graph;
 mod outputs;
 mod py_interface;
-mod roads;
 mod social;
 mod types;
 
