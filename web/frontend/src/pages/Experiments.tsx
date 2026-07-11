@@ -628,7 +628,7 @@ function ExperimentRuns({
   experiment: Experiment;
   onDeleteRun: (runId: string) => void;
 }) {
-  const runnable = experiment.observed_exists && experiment.runs.length > 0;
+  const runnable = experiment.runs.length > 0;
 
   return (
     <div className="experiment-runs">

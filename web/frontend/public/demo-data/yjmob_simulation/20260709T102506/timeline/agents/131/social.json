@@ -1,1 +1,0 @@
-{"data":{"uid":131,"run_id":"20260709T102506_first1000","parameters":{"degree":0,"total_social_strength":0.0,"social_graph_k":20,"layout":"profile_svd","kind":"final_dynamic_social","directed":true,"rho":0.6,"gamma":0.21,"alpha":0.2,"dt_update_mob_sim_hours":168.0,"indipendency_window_hours":0.5},"friends":[],"warnings":[]}}
