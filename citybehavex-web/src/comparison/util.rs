@@ -56,8 +56,12 @@ pub fn haversine_km_expr(lat1: Expr, lng1: Expr, lat2: Expr, lng2: Expr) -> Expr
 /// (used where callers already have materialized numpy-equivalent arrays,
 /// e.g. `_observed_transport_leg_records`).
 pub fn haversine_km(lat1: f64, lng1: f64, lat2: f64, lng2: f64) -> f64 {
-    let (lat1_r, lng1_r, lat2_r, lng2_r) =
-        (lat1.to_radians(), lng1.to_radians(), lat2.to_radians(), lng2.to_radians());
+    let (lat1_r, lng1_r, lat2_r, lng2_r) = (
+        lat1.to_radians(),
+        lng1.to_radians(),
+        lat2.to_radians(),
+        lng2.to_radians(),
+    );
     let dlat = lat2_r - lat1_r;
     let dlng = lng2_r - lng1_r;
     let a = (dlat / 2.0).sin().powi(2) + lat1_r.cos() * lat2_r.cos() * (dlng / 2.0).sin().powi(2);

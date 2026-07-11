@@ -1,16 +1,16 @@
 {
   "wasserstein": {
-    "jump_lengths_km": 2.578759617639672,
+    "jump_lengths_km": 1.586177265968171,
     "visits_per_user": 4.069412698412626,
     "radius_of_gyration_km": 1.099040245586684,
     "dwell_time_min": 69.25402964738159,
     "trip_duration_min": 5.808935835196975
   },
   "jsd": {
-    "activity_distribution": 0.073952433974483,
-    "activity_transitions": 0.22074087338663617,
-    "daily_activity_profile": 0.36304236713417953,
-    "daily_motifs": 0.2595769502448029
+    "activity_distribution": 0.001258264582785119,
+    "activity_transitions": 0.06788567600126638,
+    "daily_activity_profile": 0.029738892469997367,
+    "daily_motifs": 0.19165627031044546
   },
   "cpc": {
     "h3_7": 0.07105982386881263,
@@ -25,29 +25,29 @@
           "mode": "walk",
           "count": 3091,
           "percent": 25.302881466928618,
-          "mean_jump_km": 0.30877412260532383,
+          "mean_jump_km": 20015.423216158524,
           "mean_duration_min": 3.859489916963226
         },
         {
           "mode": "bike",
           "count": 789,
           "percent": 6.458742632612966,
-          "mean_jump_km": 2.0827204487756266,
-          "mean_duration_min": 8.329974651457542
+          "mean_jump_km": 20017.197162484703,
+          "mean_duration_min": 8.329974651457539
         },
         {
           "mode": "car",
           "count": 7265,
           "percent": 59.471185330713816,
-          "mean_jump_km": 13.438602222134563,
-          "mean_duration_min": 14.0581280110117
+          "mean_jump_km": 20028.553044258057,
+          "mean_duration_min": 14.058128011011698
         },
         {
           "mode": "rail",
           "count": 1071,
           "percent": 8.767190569744598,
-          "mean_jump_km": 26.225239640190065,
-          "mean_duration_min": 36.78596327419857
+          "mean_jump_km": 20041.339681676116,
+          "mean_duration_min": 36.785963274198565
         }
       ]
     }

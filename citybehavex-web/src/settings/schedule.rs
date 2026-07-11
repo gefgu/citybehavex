@@ -62,7 +62,10 @@ impl ScheduleConfig {
             ("temperature_beta_b", self.temperature_beta_b),
             ("alpha_beta_a", self.alpha_beta_a),
             ("alpha_beta_b", self.alpha_beta_b),
-            ("alignment_checkpoint_every", self.alignment_checkpoint_every as f64),
+            (
+                "alignment_checkpoint_every",
+                self.alignment_checkpoint_every as f64,
+            ),
         ];
         for (name, v) in positives {
             if !(v > 0.0) {

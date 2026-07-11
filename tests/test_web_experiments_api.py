@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import yaml
 import pandas as pd
 from types import SimpleNamespace
@@ -158,6 +159,77 @@ def test_unknown_experiment_and_run_return_404(monkeypatch, tmp_path):
     assert client.patch("/api/experiments/missing", json={"label": "x"}).status_code == 404
     assert client.post("/api/experiments/missing/archive").status_code == 404
     assert client.delete(f"/api/experiments/{exp_id}/runs/missing").status_code == 404
+
+
+def test_list_experiments_reuses_cached_unchanged_config(monkeypatch, tmp_path):
+    configs_dir = tmp_path / "configs"
+    configs_dir.mkdir()
+    _write_config(configs_dir, tmp_path / "data")
+    monkeypatch.setattr(experiments_mod, "CONFIGS_DIR", configs_dir)
+
+    original_load_config = experiments_mod.load_config
+    calls = []
+
+    def counting_load_config(path):
+        calls.append(path)
+        return original_load_config(path)
+
+    monkeypatch.setattr(experiments_mod, "load_config", counting_load_config)
+
+    first = experiments_mod.list_experiments()
+    second = experiments_mod.list_experiments()
+
+    assert first[0].label == "before"
+    assert second[0].label == "before"
+    assert len(calls) == 1
+
+
+def test_list_experiments_reload_changed_config(monkeypatch, tmp_path):
+    configs_dir = tmp_path / "configs"
+    configs_dir.mkdir()
+    exp_id, _output = _write_config(configs_dir, tmp_path / "data")
+    config_path = configs_dir / f"{exp_id}.yaml"
+    monkeypatch.setattr(experiments_mod, "CONFIGS_DIR", configs_dir)
+
+    first = experiments_mod.list_experiments()
+    raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    raw["comparison"]["label"] = "after"
+    raw["simulation"]["agents"] = 25
+    config_path.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
+    bumped = int(config_path.stat().st_mtime) + 2
+    os.utime(config_path, (bumped, bumped))
+    second = experiments_mod.list_experiments()
+
+    assert first[0].label == "before"
+    assert second[0].label == "after"
+    assert second[0].params["agents"] == 25
+
+
+def test_config_cache_keeps_run_discovery_fresh(monkeypatch, tmp_path):
+    configs_dir = tmp_path / "configs"
+    configs_dir.mkdir()
+    _exp_id, output = _write_config(configs_dir, tmp_path / "data")
+    monkeypatch.setattr(experiments_mod, "CONFIGS_DIR", configs_dir)
+
+    original_load_config = experiments_mod.load_config
+    calls = []
+
+    def counting_load_config(path):
+        calls.append(path)
+        return original_load_config(path)
+
+    monkeypatch.setattr(experiments_mod, "load_config", counting_load_config)
+
+    first = experiments_mod.list_experiments()
+    output.with_name("trajectories_20260101T010203.parquet").write_text(
+        "placeholder",
+        encoding="utf-8",
+    )
+    second = experiments_mod.list_experiments()
+
+    assert first[0].runs == []
+    assert [run.run_id for run in second[0].runs] == ["20260101T010203"]
+    assert len(calls) == 1
 
 
 def test_charts_endpoint_allows_missing_observed_path(monkeypatch, tmp_path):

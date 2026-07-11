@@ -5,7 +5,9 @@
 //! the web port calls into `fkmob-core` for directly instead (see
 //! `metrics.rs`).
 
-use crate::columns::{DATETIME_CANDIDATES, LAT_CANDIDATES, LNG_CANDIDATES, UID_CANDIDATES, detect_in};
+use crate::columns::{
+    DATETIME_CANDIDATES, LAT_CANDIDATES, LNG_CANDIDATES, UID_CANDIDATES, detect_in,
+};
 use polars::prelude::*;
 use std::path::Path;
 

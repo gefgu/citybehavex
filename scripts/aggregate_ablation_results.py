@@ -280,15 +280,25 @@ def patch_ablation_tex(
             if not re.search(label_pattern, line):
                 continue
             cells = line.split("&")
+            # Bold only the actual best (lowest, since every metric here is
+            # a distance/divergence/runtime -- lower means closer to real or
+            # cheaper) value in the row, not unconditionally "full".
+            row_values = {
+                variant: results.get((dataset, variant), {}).get(metric_key)
+                for variant, col_idx in ABLATION_COLUMN_INDEX.items()
+                if col_idx < len(cells)
+            }
+            finite = {v: data[0] for v, data in row_values.items() if data is not None}
+            best_variant = min(finite, key=finite.get) if finite else None
             for variant, col_idx in ABLATION_COLUMN_INDEX.items():
                 if col_idx >= len(cells):
                     continue
-                cell_data = results.get((dataset, variant), {}).get(metric_key)
+                cell_data = row_values.get(variant)
                 if cell_data is None:
                     continue
                 mean, std, n = cell_data
                 new_cell = format_cell(
-                    mean, std, n, decimals, bold=(variant == "full"),
+                    mean, std, n, decimals, bold=(variant == best_variant),
                     flagged=(dataset, metric_key) in NEEDS_CHECKING,
                 )
                 cells[col_idx] = replace_cell_value(cells[col_idx], new_cell)
@@ -392,6 +402,16 @@ def patch_network_rows(
             if row_label not in line:
                 continue
             cells = line.split("&")
+            # Bold only the actual best (lowest) value in the row, not
+            # unconditionally "full". no_social is excluded from the
+            # comparison (forced dash below), so it can never win it.
+            row_values = {
+                variant: results.get((dataset, variant), {}).get(metric_key)
+                for variant, col_idx in ABLATION_COLUMN_INDEX.items()
+                if col_idx < len(cells) and variant != "no_social"
+            }
+            finite = {v: data[0] for v, data in row_values.items() if data is not None}
+            best_variant = min(finite, key=finite.get) if finite else None
             for variant, col_idx in ABLATION_COLUMN_INDEX.items():
                 if col_idx >= len(cells):
                     continue
@@ -403,12 +423,12 @@ def patch_network_rows(
                 if variant == "no_social":
                     cells[col_idx] = replace_cell_value(cells[col_idx], "$-$")
                     continue
-                cell_data = results.get((dataset, variant), {}).get(metric_key)
+                cell_data = row_values.get(variant)
                 if cell_data is None:
                     continue
                 mean, std, n = cell_data
                 new_cell = format_cell(
-                    mean, std, n, decimals, bold=(variant == "full"),
+                    mean, std, n, decimals, bold=(variant == best_variant),
                     flagged=(dataset, metric_key) in NEEDS_CHECKING,
                 )
                 cells[col_idx] = replace_cell_value(cells[col_idx], new_cell)
@@ -471,6 +491,62 @@ def patch_comparison_row(
             cells[col_idx] = replace_cell_value(cells[col_idx], new_cell)
             changes.append(f"{dataset}/{metric_key}: n={n} mean={mean:.3f} std={std:.3f}")
         lines[i] = "&".join(cells)
+    return "\n".join(lines), changes
+
+
+def _parse_cell_mean(cell: str) -> float | None:
+    m = _MATH_SPAN.search(cell)
+    if not m:
+        return None
+    inner = re.sub(r"\\mathbf\{(.*)\}", r"\1", m.group(0)[1:-1])
+    num_m = re.search(r"[-\d.]+", inner)
+    return float(num_m.group(0)) if num_m else None
+
+
+def _set_cell_bold(cell: str, bold: bool) -> str:
+    m = _MATH_SPAN.search(cell)
+    if not m:
+        return cell
+    inner = re.sub(r"\\mathbf\{(.*)\}", r"\1", m.group(0)[1:-1])
+    new_math = f"$\\mathbf{{{inner}}}$" if bold else f"${inner}$"
+    return replace_cell_value(cell, new_math)
+
+
+def rebold_comparison_table(text: str, datasets: list[str], n_cols: int = 8) -> tuple[str, list[str]]:
+    """AgentSociety/CitySim rows are static baseline text (never computed by
+    this script) and CBX's row is unconditionally bold from
+    patch_comparison_row -- neither reflects who's actually best. Re-derive
+    bolding per column across all 3 (or however many) source rows in each
+    dataset block, bolding only the true minimum (every metric here is a
+    W1 distance or JSD -- lower is closer to real, always better)."""
+    lines = text.split("\n")
+    changes: list[str] = []
+    for dataset in datasets:
+        labels = COMPARISON_DATASET_LABELS.get(dataset, [])
+        row_idx = [
+            i for i, l in enumerate(lines)
+            if "&" in l and any(lbl in l for lbl in labels) and "Ref." not in l
+        ]
+        if len(row_idx) < 2:
+            continue
+        split_rows = [lines[i].split("&") for i in row_idx]
+        for col in range(n_cols):
+            cell_idx = 2 + col
+            vals = [
+                (r, _parse_cell_mean(row[cell_idx])) if cell_idx < len(row) else (r, None)
+                for r, row in enumerate(split_rows)
+            ]
+            finite = [(r, v) for r, v in vals if v is not None]
+            if not finite:
+                continue
+            best_r = min(finite, key=lambda rv: rv[1])[0]
+            for r, row in enumerate(split_rows):
+                if cell_idx >= len(row):
+                    continue
+                row[cell_idx] = _set_cell_bold(row[cell_idx], r == best_r)
+        for i, row in zip(row_idx, split_rows):
+            lines[i] = "&".join(row)
+        changes.append(f"{dataset}: rebolded across {len(row_idx)} source rows")
     return "\n".join(lines), changes
 
 
@@ -537,6 +613,8 @@ def main(argv: Iterable[str] | None = None) -> None:
                 continue
             text, changes = patch_comparison_row(text, dataset, metrics_in_order, values)
             all_changes += changes
+        text, rebold_changes = rebold_comparison_table(text, list(per_dataset), n_cols=len(metrics_in_order))
+        all_changes += rebold_changes
         print(f"=== {tex_path} ({len(all_changes)} cells) ===")
         for c in all_changes:
             print(" ", c)

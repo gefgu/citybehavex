@@ -138,7 +138,7 @@ comparison:
   sections: ["activity_jsd"]
   evaluation_adaptation:
     mode: auto
-    h3_resolution: 8
+    h3_resolution: 6
   network_validation:
     enabled: true
     observed_enabled: false

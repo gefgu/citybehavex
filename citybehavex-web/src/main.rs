@@ -4,7 +4,9 @@ mod comparison;
 mod config;
 mod datasource;
 mod experiments;
+mod home_work;
 mod models;
+mod payload;
 mod routes;
 mod settings;
 
@@ -50,7 +52,10 @@ fn cors_layer() -> CorsLayer {
 /// JSON 404 for unmatched `/api/*` paths, matching FastAPI's default
 /// `HTTPException(404)` body shape.
 async fn api_not_found() -> impl IntoResponse {
-    (StatusCode::NOT_FOUND, axum::Json(json!({"detail": "Not Found"})))
+    (
+        StatusCode::NOT_FOUND,
+        axum::Json(json!({"detail": "Not Found"})),
+    )
 }
 
 /// Routes under `/api` only -- nested into the top-level router below so its
@@ -60,8 +65,13 @@ async fn api_not_found() -> impl IntoResponse {
 /// router silently overwrites the first, which is what nesting avoids here.)
 fn api_router() -> Router {
     Router::new()
-        .route("/health", get(|| async { axum::Json(json!({"status": "ok"})) }))
+        .route(
+            "/health",
+            get(|| async { axum::Json(json!({"status": "ok"})) }),
+        )
         .merge(routes::experiments_router())
+        .merge(routes::charts_router())
+        .merge(routes::timeline_router())
         .fallback(api_not_found)
 }
 
@@ -83,7 +93,10 @@ async fn spa_fallback(dist: PathBuf, req: Request<Body>) -> Response {
                 bytes,
             )
                 .into_response(),
-            Err(_) => (StatusCode::NOT_FOUND, axum::Json(json!({"detail": "Not Found"})))
+            Err(_) => (
+                StatusCode::NOT_FOUND,
+                axum::Json(json!({"detail": "Not Found"})),
+            )
                 .into_response(),
         },
     }
@@ -107,7 +120,11 @@ async fn collapse_api_404(dist_mounted: bool, req: Request, next: Next) -> Respo
     let is_api_path = req.uri().path().starts_with("/api");
     let response = next.run(req).await;
     if dist_mounted && is_api_path && response.status() == StatusCode::NOT_FOUND {
-        return (StatusCode::NOT_FOUND, axum::Json(json!({"detail": "Not Found"}))).into_response();
+        return (
+            StatusCode::NOT_FOUND,
+            axum::Json(json!({"detail": "Not Found"})),
+        )
+            .into_response();
     }
     response
 }

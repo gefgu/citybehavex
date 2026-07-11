@@ -335,6 +335,17 @@ body {
   font-size: 13px;
   margin: 0;
 }
+.experiment-panel-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-sm);
+  justify-content: flex-end;
+}
+.experiment-panel-actions .btn {
+  min-height: 48px;
+  padding-inline: 22px;
+}
 .experiment-panel-body {
   display: grid;
   grid-template-columns: minmax(280px, 0.9fr) minmax(360px, 1.1fr);
@@ -349,6 +360,10 @@ body {
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: var(--space-md);
   align-content: start;
+}
+.experiment-edit-note {
+  grid-column: 1 / -1;
+  margin: 0;
 }
 .experiment-edit-form label {
   color: var(--muted);
@@ -369,7 +384,25 @@ body {
   width: auto;
 }
 .form-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
   grid-column: 1 / -1;
+}
+.form-actions .btn {
+  flex: 1 1 0;
+  min-height: 56px;
+}
+.pretend-run-button {
+  cursor: pointer;
+}
+.pretend-run-button:hover {
+  border-color: var(--ink);
+  color: var(--ink);
+  transform: translateY(-1px);
+}
+.pretend-run-button:active {
+  transform: translateY(0);
 }
 .inline-error {
   border: 1px solid var(--coral);
@@ -382,6 +415,70 @@ body {
 .experiment-runs h3 {
   font-size: 18px;
   margin: 0 0 var(--space-sm);
+}
+.experiment-runs-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-md);
+  margin-bottom: var(--space-sm);
+}
+.experiment-runs-head h3 {
+  font-size: 18px;
+  margin: 0;
+}
+.experiment-bbox-editor {
+  min-width: 0;
+}
+.experiment-bbox-map {
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-sm);
+  height: 340px;
+  overflow: hidden;
+  width: 100%;
+}
+.experiment-bbox-map .leaflet-control-zoom a {
+  display: block;
+  width: 30px;
+  min-width: 0;
+  height: 30px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-bottom: 1px solid #cccccc;
+  border-radius: 0;
+  background: #ffffff;
+  box-shadow: none;
+  line-height: 30px;
+  font-size: 22px;
+  font-weight: 700;
+  color: #000000;
+  text-align: center;
+  text-decoration: none;
+  transform: none;
+}
+.experiment-bbox-map .leaflet-control-zoom a:last-child {
+  border-bottom: 0;
+}
+.experiment-bbox-map .leaflet-control-zoom a:hover {
+  background: #f4f4f4;
+  color: #000000;
+  text-decoration: none;
+  transform: none;
+}
+.bbox-fields {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--space-sm);
+  margin-top: var(--space-md);
+}
+.bbox-fields label {
+  color: var(--muted);
+  font-size: 13px;
+  margin: 0;
+}
+.bbox-fields input {
+  margin-top: 4px;
 }
 .muted-small {
   color: var(--muted);
@@ -1177,7 +1274,8 @@ table.agent-table td:first-child { color: var(--muted); }
   .signature-grid { grid-template-columns: 1fr; }
   .experiment-grid-row,
   .experiment-panel-body,
-  .experiment-edit-form {
+  .experiment-edit-form,
+  .bbox-fields {
     grid-template-columns: 1fr;
   }
   .experiment-panel-head,

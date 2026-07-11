@@ -106,7 +106,13 @@ impl Cache {
         };
         let extra: Vec<Value> = extra_paths
             .iter()
-            .map(|p| json!([p.display().to_string(), p.file_stem().map(|s| s.to_string_lossy().to_string()), mtime_or(p, "missing")]))
+            .map(|p| {
+                json!([
+                    p.display().to_string(),
+                    p.file_stem().map(|s| s.to_string_lossy().to_string()),
+                    mtime_or(p, "missing")
+                ])
+            })
             .collect();
         let key_parts = json!({
             "version": PAYLOAD_CACHE_VERSION,
@@ -191,7 +197,10 @@ impl Cache {
         if did_build.load(Ordering::SeqCst) {
             self.inflight.lock().unwrap().remove(&cache_key);
             if let Ok(payload) = &result {
-                let _ = std::fs::write(&cache_file, serde_json::to_string(payload).unwrap_or_default());
+                let _ = std::fs::write(
+                    &cache_file,
+                    serde_json::to_string(payload).unwrap_or_default(),
+                );
             }
         }
         Ok(result?)
@@ -229,7 +238,8 @@ mod tests {
     use std::time::Duration;
 
     fn tmp_dir(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("cbx-cache-test-{name}-{}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("cbx-cache-test-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         dir
@@ -256,15 +266,28 @@ mod tests {
         for _ in 0..3 {
             let calls = calls.clone();
             let value = cache
-                .get_or_build("exp", "run", &synthetic, None, &[], None, false, || async move {
-                    calls.fetch_add(1, Ordering::SeqCst);
-                    Ok(json!({"n": 1}))
-                })
+                .get_or_build(
+                    "exp",
+                    "run",
+                    &synthetic,
+                    None,
+                    &[],
+                    None,
+                    false,
+                    || async move {
+                        calls.fetch_add(1, Ordering::SeqCst);
+                        Ok(json!({"n": 1}))
+                    },
+                )
                 .await
                 .unwrap();
             assert_eq!(value, json!({"n": 1}));
         }
-        assert_eq!(calls.load(Ordering::SeqCst), 1, "second/third call should hit disk cache");
+        assert_eq!(
+            calls.load(Ordering::SeqCst),
+            1,
+            "second/third call should hit disk cache"
+        );
     }
 
     #[tokio::test]
@@ -275,15 +298,29 @@ mod tests {
         let cache = Cache::new(dir.join("cache"));
 
         let a = cache
-            .get_or_build("exp", "run", &synthetic, None, &[], Some(&json!({"section": "a"})), false, || async {
-                Ok(json!({"which": "a"}))
-            })
+            .get_or_build(
+                "exp",
+                "run",
+                &synthetic,
+                None,
+                &[],
+                Some(&json!({"section": "a"})),
+                false,
+                || async { Ok(json!({"which": "a"})) },
+            )
             .await
             .unwrap();
         let b = cache
-            .get_or_build("exp", "run", &synthetic, None, &[], Some(&json!({"section": "b"})), false, || async {
-                Ok(json!({"which": "b"}))
-            })
+            .get_or_build(
+                "exp",
+                "run",
+                &synthetic,
+                None,
+                &[],
+                Some(&json!({"section": "b"})),
+                false,
+                || async { Ok(json!({"which": "b"})) },
+            )
             .await
             .unwrap();
         assert_ne!(a, b);
@@ -304,11 +341,20 @@ mod tests {
             let calls = calls.clone();
             handles.push(tokio::spawn(async move {
                 cache
-                    .get_or_build("exp", "run", &synthetic, None, &[], None, false, || async move {
-                        calls.fetch_add(1, Ordering::SeqCst);
-                        tokio::time::sleep(Duration::from_millis(50)).await;
-                        Ok(json!({"n": 1}))
-                    })
+                    .get_or_build(
+                        "exp",
+                        "run",
+                        &synthetic,
+                        None,
+                        &[],
+                        None,
+                        false,
+                        || async move {
+                            calls.fetch_add(1, Ordering::SeqCst);
+                            tokio::time::sleep(Duration::from_millis(50)).await;
+                            Ok(json!({"n": 1}))
+                        },
+                    )
                     .await
                     .unwrap()
             }));
@@ -316,7 +362,11 @@ mod tests {
         for h in handles {
             assert_eq!(h.await.unwrap(), json!({"n": 1}));
         }
-        assert_eq!(calls.load(Ordering::SeqCst), 1, "concurrent identical requests must coalesce");
+        assert_eq!(
+            calls.load(Ordering::SeqCst),
+            1,
+            "concurrent identical requests must coalesce"
+        );
     }
 
     #[tokio::test]
@@ -330,14 +380,27 @@ mod tests {
         for _ in 0..2 {
             let calls = calls.clone();
             cache
-                .get_or_build("exp", "run", &synthetic, None, &[], None, true, || async move {
-                    calls.fetch_add(1, Ordering::SeqCst);
-                    Ok(json!({"n": 1}))
-                })
+                .get_or_build(
+                    "exp",
+                    "run",
+                    &synthetic,
+                    None,
+                    &[],
+                    None,
+                    true,
+                    || async move {
+                        calls.fetch_add(1, Ordering::SeqCst);
+                        Ok(json!({"n": 1}))
+                    },
+                )
                 .await
                 .unwrap();
         }
-        assert_eq!(calls.load(Ordering::SeqCst), 2, "refresh=true must always rebuild");
+        assert_eq!(
+            calls.load(Ordering::SeqCst),
+            2,
+            "refresh=true must always rebuild"
+        );
     }
 
     #[tokio::test]
@@ -351,22 +414,42 @@ mod tests {
         // First build "poisons" the cache with a null mobility_laws, as a
         // previously-buggy build might have.
         cache
-            .get_or_build("exp", "run", &synthetic, None, &[], Some(&extra_key), false, || async {
-                Ok(json!({"mobility_laws": null}))
-            })
+            .get_or_build(
+                "exp",
+                "run",
+                &synthetic,
+                None,
+                &[],
+                Some(&extra_key),
+                false,
+                || async { Ok(json!({"mobility_laws": null})) },
+            )
             .await
             .unwrap();
 
         let calls = Arc::new(AtomicUsize::new(0));
         let calls2 = calls.clone();
         let value = cache
-            .get_or_build("exp", "run", &synthetic, None, &[], Some(&extra_key), false, || async move {
-                calls2.fetch_add(1, Ordering::SeqCst);
-                Ok(json!({"mobility_laws": {"groups": []}}))
-            })
+            .get_or_build(
+                "exp",
+                "run",
+                &synthetic,
+                None,
+                &[],
+                Some(&extra_key),
+                false,
+                || async move {
+                    calls2.fetch_add(1, Ordering::SeqCst);
+                    Ok(json!({"mobility_laws": {"groups": []}}))
+                },
+            )
             .await
             .unwrap();
-        assert_eq!(calls.load(Ordering::SeqCst), 1, "stale null-mobility_laws entry must trigger a rebuild");
+        assert_eq!(
+            calls.load(Ordering::SeqCst),
+            1,
+            "stale null-mobility_laws entry must trigger a rebuild"
+        );
         assert_eq!(value, json!({"mobility_laws": {"groups": []}}));
     }
 

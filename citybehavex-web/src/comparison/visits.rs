@@ -2,9 +2,9 @@
 //! `_modal_location_per_user`, `_derive_purpose_groups_from_heuristic`,
 //! `_prepare_activity_visits`, and `_motif_visits`.
 
+use super::ActivityVisitsResult;
 use super::h3::h3_cells;
 use super::util::to_datetime_expr;
-use super::{ActivityVisitsResult};
 use polars::prelude::*;
 
 /// Mirrors `comparison.py::_visits_for_comparison`. Produces
@@ -32,31 +32,59 @@ pub fn visits_for_comparison(
         .collect()?;
 
     if let Some(activity_col) = activity_col {
-        visits.with_column(df.column(activity_col)?.as_materialized_series().clone().with_name("purpose".into()))?;
+        visits.with_column(
+            df.column(activity_col)?
+                .as_materialized_series()
+                .clone()
+                .with_name("purpose".into()),
+        )?;
     }
 
     if let Some(location_col) = location_col {
         visits.with_column(
-            df.column(location_col)?.as_materialized_series().cast(&DataType::String)?.with_name("location_id".into()),
+            df.column(location_col)?
+                .as_materialized_series()
+                .cast(&DataType::String)?
+                .with_name("location_id".into()),
         )?;
     } else {
-        let lat_name = lat_col.ok_or_else(|| anyhow::anyhow!("lat_col required when location_col is absent"))?;
-        let lng_name = lng_col.ok_or_else(|| anyhow::anyhow!("lng_col required when location_col is absent"))?;
-        let cells = h3_cells(df.column(lat_name)?.as_materialized_series(), df.column(lng_name)?.as_materialized_series(), location_resolution)?;
+        let lat_name = lat_col
+            .ok_or_else(|| anyhow::anyhow!("lat_col required when location_col is absent"))?;
+        let lng_name = lng_col
+            .ok_or_else(|| anyhow::anyhow!("lng_col required when location_col is absent"))?;
+        let cells = h3_cells(
+            df.column(lat_name)?.as_materialized_series(),
+            df.column(lng_name)?.as_materialized_series(),
+            location_resolution,
+        )?;
         visits.with_column(cells.with_name("location_id".into()))?;
     }
 
     if let Some(end_col) = end_col {
         let end_expr = to_datetime_expr(&schema, end_col);
-        let end_series = df.clone().lazy().select([end_expr.alias("end_timestamp")]).collect()?;
-        visits.with_column(end_series.column("end_timestamp")?.as_materialized_series().clone())?;
+        let end_series = df
+            .clone()
+            .lazy()
+            .select([end_expr.alias("end_timestamp")])
+            .collect()?;
+        visits.with_column(
+            end_series
+                .column("end_timestamp")?
+                .as_materialized_series()
+                .clone(),
+        )?;
     } else {
         visits = visits
             .lazy()
             .sort(["uid", "start_timestamp"], SortMultipleOptions::default())
-            .with_columns([col("start_timestamp").shift(lit(-1)).over([col("uid")]).alias("end_timestamp")])
+            .with_columns([col("start_timestamp")
+                .shift(lit(-1))
+                .over([col("uid")])
+                .alias("end_timestamp")])
             .with_columns([col("end_timestamp")
-                .fill_null(col("start_timestamp").dt().truncate(lit("1d")) + lit(Duration::parse("1d")))
+                .fill_null(
+                    col("start_timestamp").dt().truncate(lit("1d")) + lit(Duration::parse("1d")),
+                )
                 .alias("end_timestamp")])
             .collect()?;
     }
@@ -115,22 +143,43 @@ pub fn derive_purpose_groups_from_heuristic(visits: &DataFrame) -> anyhow::Resul
         .clone()
         .lazy()
         .with_row_index("_row", None)
-        .with_columns([col("start_timestamp").dt().hour().cast(DataType::Int32).alias("_hour")])
+        .with_columns([col("start_timestamp")
+            .dt()
+            .hour()
+            .cast(DataType::Int32)
+            .alias("_hour")])
         .collect()?;
 
-    let home_candidates = derived.clone().lazy().filter(col("_hour").is_between(lit(2), lit(5), ClosedInterval::Both)).collect()?;
+    let home_candidates = derived
+        .clone()
+        .lazy()
+        .filter(col("_hour").is_between(lit(2), lit(5), ClosedInterval::Both))
+        .collect()?;
     let home_loc = modal_location_per_user(&home_candidates)?
         .lazy()
         .rename(["location_id"], ["_home_loc"], true)
         .collect()?;
 
-    let work_mask_expr = col("_hour").eq(lit(10)).or(col("_hour").is_between(lit(14), lit(16), ClosedInterval::Both));
+    let work_mask_expr = col("_hour").eq(lit(10)).or(col("_hour").is_between(
+        lit(14),
+        lit(16),
+        ClosedInterval::Both,
+    ));
     let work_candidates_joined = derived
         .clone()
         .lazy()
         .filter(work_mask_expr)
-        .join(home_loc.clone().lazy(), [col("uid")], [col("uid")], JoinArgs::new(JoinType::Left))
-        .filter(col("_home_loc").is_null().or(col("location_id").neq(col("_home_loc"))))
+        .join(
+            home_loc.clone().lazy(),
+            [col("uid")],
+            [col("uid")],
+            JoinArgs::new(JoinType::Left),
+        )
+        .filter(
+            col("_home_loc")
+                .is_null()
+                .or(col("location_id").neq(col("_home_loc"))),
+        )
         .select([col("uid"), col("location_id")])
         .collect()?;
     let work_loc = modal_location_per_user(&work_candidates_joined)?
@@ -140,12 +189,31 @@ pub fn derive_purpose_groups_from_heuristic(visits: &DataFrame) -> anyhow::Resul
 
     let result = derived
         .lazy()
-        .join(home_loc.lazy(), [col("uid")], [col("uid")], JoinArgs::new(JoinType::Left))
-        .join(work_loc.lazy(), [col("uid")], [col("uid")], JoinArgs::new(JoinType::Left))
+        .join(
+            home_loc.lazy(),
+            [col("uid")],
+            [col("uid")],
+            JoinArgs::new(JoinType::Left),
+        )
+        .join(
+            work_loc.lazy(),
+            [col("uid")],
+            [col("uid")],
+            JoinArgs::new(JoinType::Left),
+        )
         .with_columns([{
-            let is_home = col("_home_loc").is_not_null().and(col("location_id").eq(col("_home_loc")));
-            let is_work = col("_work_loc").is_not_null().and(col("location_id").eq(col("_work_loc")));
-            when(is_home).then(lit("HOME")).when(is_work).then(lit("WORK")).otherwise(lit("OTHER")).alias("purpose")
+            let is_home = col("_home_loc")
+                .is_not_null()
+                .and(col("location_id").eq(col("_home_loc")));
+            let is_work = col("_work_loc")
+                .is_not_null()
+                .and(col("location_id").eq(col("_work_loc")));
+            when(is_home)
+                .then(lit("HOME"))
+                .when(is_work)
+                .then(lit("WORK"))
+                .otherwise(lit("OTHER"))
+                .alias("purpose")
         }])
         .sort(["_row"], SortMultipleOptions::default())
         .drop(cols(["_row", "_home_loc", "_work_loc", "_hour"]))
@@ -178,7 +246,15 @@ pub fn prepare_activity_visits(
     let resolved_activity_col = activity_col.filter(|c| col_names.contains(c));
 
     let visits = visits_for_comparison(
-        df, uid_col, datetime_col, resolved_activity_col, location_col, location_resolution, end_col, lat_col, lng_col,
+        df,
+        uid_col,
+        datetime_col,
+        resolved_activity_col,
+        location_col,
+        location_resolution,
+        end_col,
+        lat_col,
+        lng_col,
     )?;
     let visits = visits
         .lazy()
@@ -212,7 +288,10 @@ pub fn motif_visits(visits: &DataFrame) -> anyhow::Result<DataFrame> {
     Ok(visits
         .clone()
         .lazy()
-        .with_columns([when(col("purpose").eq(lit("HOME"))).then(col("purpose")).otherwise(lit("VISIT")).alias("purpose")])
+        .with_columns([when(col("purpose").eq(lit("HOME")))
+            .then(col("purpose"))
+            .otherwise(lit("VISIT"))
+            .alias("purpose")])
         .collect()?)
 }
 
@@ -236,27 +315,81 @@ mod tests {
     #[test]
     fn visits_for_comparison_derives_end_timestamp_from_next_start() {
         let df = sample_df();
-        let visits = visits_for_comparison(&df, "uid", "dt", Some("purpose"), Some("location_id"), 10, None, None, None).unwrap();
+        let visits = visits_for_comparison(
+            &df,
+            "uid",
+            "dt",
+            Some("purpose"),
+            Some("location_id"),
+            10,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
         assert_eq!(visits.height(), 5);
-        assert!(visits.get_column_names().iter().any(|c| c.as_str() == "end_timestamp"));
+        assert!(
+            visits
+                .get_column_names()
+                .iter()
+                .any(|c| c.as_str() == "end_timestamp")
+        );
     }
 
     #[test]
     fn collapse_explicit_purposes_normalizes_case_and_whitespace() {
         let df = sample_df();
-        let visits = visits_for_comparison(&df, "uid", "dt", Some("purpose"), Some("location_id"), 10, None, None, None).unwrap();
+        let visits = visits_for_comparison(
+            &df,
+            "uid",
+            "dt",
+            Some("purpose"),
+            Some("location_id"),
+            10,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
         let collapsed = collapse_explicit_purposes(&visits).unwrap();
-        let purposes: Vec<String> = collapsed.column("purpose").unwrap().str().unwrap().into_iter().flatten().map(str::to_string).collect();
+        let purposes: Vec<String> = collapsed
+            .column("purpose")
+            .unwrap()
+            .str()
+            .unwrap()
+            .into_iter()
+            .flatten()
+            .map(str::to_string)
+            .collect();
         assert_eq!(purposes, vec!["HOME", "WORK", "OTHER", "HOME", "OTHER"]);
     }
 
     #[test]
     fn motif_visits_collapses_to_home_or_visit() {
         let df = sample_df();
-        let visits = visits_for_comparison(&df, "uid", "dt", Some("purpose"), Some("location_id"), 10, None, None, None).unwrap();
+        let visits = visits_for_comparison(
+            &df,
+            "uid",
+            "dt",
+            Some("purpose"),
+            Some("location_id"),
+            10,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
         let collapsed = collapse_explicit_purposes(&visits).unwrap();
         let motif = motif_visits(&collapsed).unwrap();
-        let purposes: Vec<String> = motif.column("purpose").unwrap().str().unwrap().into_iter().flatten().map(str::to_string).collect();
+        let purposes: Vec<String> = motif
+            .column("purpose")
+            .unwrap()
+            .str()
+            .unwrap()
+            .into_iter()
+            .flatten()
+            .map(str::to_string)
+            .collect();
         assert_eq!(purposes, vec!["HOME", "VISIT", "VISIT", "HOME", "VISIT"]);
     }
 }

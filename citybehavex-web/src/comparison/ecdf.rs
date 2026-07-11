@@ -111,20 +111,41 @@ pub fn ecdf_block(
     x_label: &str,
     x_unit: &str,
 ) -> EcdfBlock {
-    let mut series = vec![SeriesPoints { name: label_syn.to_string(), role: "synthetic".to_string(), points: ecdf(syn_values) }];
+    let mut series = vec![SeriesPoints {
+        name: label_syn.to_string(),
+        role: "synthetic".to_string(),
+        points: ecdf(syn_values),
+    }];
     if let Some((label_obs, obs_values)) = obs {
-        series.push(SeriesPoints { name: label_obs.to_string(), role: "observed".to_string(), points: ecdf(obs_values) });
+        series.push(SeriesPoints {
+            name: label_obs.to_string(),
+            role: "observed".to_string(),
+            points: ecdf(obs_values),
+        });
     }
-    EcdfBlock { x_label: x_label.to_string(), x_unit: x_unit.to_string(), series }
+    EcdfBlock {
+        x_label: x_label.to_string(),
+        x_unit: x_unit.to_string(),
+        series,
+    }
 }
 
 fn mode_sort_key(m: &str) -> (usize, String) {
-    (DEFAULT_MODE_ORDER.iter().position(|d| *d == m).unwrap_or(99), m.to_string())
+    (
+        DEFAULT_MODE_ORDER
+            .iter()
+            .position(|d| *d == m)
+            .unwrap_or(99),
+        m.to_string(),
+    )
 }
 
 /// Mirrors `legacy.py::_transport_ecdf_block`: per (source, mode) jump-length
 /// ECDF series over the combined synthetic+observed transport-leg records.
-pub fn transport_ecdf_block(records: &DataFrame, observed_label: &str) -> anyhow::Result<EcdfBlock> {
+pub fn transport_ecdf_block(
+    records: &DataFrame,
+    observed_label: &str,
+) -> anyhow::Result<EcdfBlock> {
     let mut modes: Vec<String> = records
         .column("mode")?
         .as_materialized_series()
@@ -139,7 +160,11 @@ pub fn transport_ecdf_block(records: &DataFrame, observed_label: &str) -> anyhow
 
     let mut series = Vec::new();
     for (source, label) in [("synthetic", "synthetic"), ("observed", observed_label)] {
-        let source_df = records.clone().lazy().filter(col("source").eq(lit(source))).collect()?;
+        let source_df = records
+            .clone()
+            .lazy()
+            .filter(col("source").eq(lit(source)))
+            .collect()?;
         if source_df.height() == 0 {
             continue;
         }
@@ -158,10 +183,18 @@ pub fn transport_ecdf_block(records: &DataFrame, observed_label: &str) -> anyhow
             if values.is_empty() {
                 continue;
             }
-            series.push(SeriesPoints { name: format!("{label} · {mode}"), role: source.to_string(), points: ecdf(&values) });
+            series.push(SeriesPoints {
+                name: format!("{label} · {mode}"),
+                role: source.to_string(),
+                points: ecdf(&values),
+            });
         }
     }
-    Ok(EcdfBlock { x_label: "jump length".to_string(), x_unit: "km".to_string(), series })
+    Ok(EcdfBlock {
+        x_label: "jump length".to_string(),
+        x_unit: "km".to_string(),
+        series,
+    })
 }
 
 #[cfg(test)]

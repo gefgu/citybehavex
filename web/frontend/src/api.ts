@@ -4,6 +4,12 @@
 
 const STATIC_DEMO = import.meta.env.VITE_STATIC_DEMO === "true";
 const STATIC_ROOT = `${import.meta.env.BASE_URL.replace(/\/?$/, "/")}demo-data`;
+const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "";
+
+function apiUrl(path: string): string {
+  if (/^https?:\/\//.test(path)) return path;
+  return `${API_BASE}${path}`;
+}
 
 async function getStaticJson<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${STATIC_ROOT}/${path.replace(/^\/+/, "")}`, init);
@@ -17,12 +23,12 @@ async function getStaticRawJson<T>(path: string): Promise<T> {
 }
 
 async function getJson<T>(url: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(url, init);
+  const res = await fetch(apiUrl(url), init);
   return readJson<T>(res);
 }
 
 async function sendJson<T>(url: string, init: RequestInit): Promise<T> {
-  const res = await fetch(url, {
+  const res = await fetch(apiUrl(url), {
     ...init,
     headers: {
       "Content-Type": "application/json",
@@ -75,6 +81,13 @@ export interface Experiment {
   runs: Run[];
 }
 
+export interface BBox {
+  min_lat: number;
+  min_lng: number;
+  max_lat: number;
+  max_lng: number;
+}
+
 let staticExperimentsCache: Promise<Experiment[]> | null = null;
 
 async function staticExperiments(): Promise<Experiment[]> {
@@ -108,6 +121,7 @@ export interface ExperimentUpdate {
   time_use_weight_col?: string;
   profiles_enabled?: boolean;
   profiles_output?: string;
+  bbox?: BBox;
 }
 
 export function fetchExperiments(withSummary = false): Promise<Experiment[]> {
@@ -206,7 +220,7 @@ export async function downloadMetricsExport(id: string, run?: string): Promise<B
   const q = new URLSearchParams({ format: "json" });
   if (run) q.set("run", run);
   const res = await fetch(
-    `/api/experiments/${encodeURIComponent(id)}/metrics-export?${q.toString()}`,
+    apiUrl(`/api/experiments/${encodeURIComponent(id)}/metrics-export?${q.toString()}`),
   );
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));

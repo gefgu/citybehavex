@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import threading
 from concurrent.futures import ThreadPoolExecutor
 
@@ -124,3 +125,30 @@ def test_get_or_build_coalesces_concurrent_identical_calls(tmp_path, monkeypatch
     assert results[0] == {"ok": True}
     assert results[1] == {"ok": True}
     assert len(calls) == 1
+
+
+def test_cached_run_summary_reuses_unchanged_file_and_reloads_changed_file(tmp_path, monkeypatch):
+    import web.backend.app.datasource as datasource_mod
+
+    datasource_mod._run_summary_cache.clear()
+    run = tmp_path / "synthetic.parquet"
+    run.write_text("x", encoding="utf-8")
+    calls = []
+
+    def fake_run_summary(path):
+        calls.append(path)
+        return {"rows": len(calls)}
+
+    monkeypatch.setattr(datasource_mod, "run_summary", fake_run_summary)
+
+    first = datasource_mod.cached_run_summary(run)
+    second = datasource_mod.cached_run_summary(run)
+    run.write_text("xx", encoding="utf-8")
+    bumped = int(run.stat().st_mtime) + 2
+    os.utime(run, (bumped, bumped))
+    third = datasource_mod.cached_run_summary(run)
+
+    assert first == ({"rows": 1}, None)
+    assert second == ({"rows": 1}, None)
+    assert third == ({"rows": 2}, None)
+    assert len(calls) == 2

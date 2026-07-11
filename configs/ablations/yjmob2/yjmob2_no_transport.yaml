@@ -169,7 +169,7 @@ comparison:
   sections: ["activity_jsd"]
   evaluation_adaptation:
     mode: force
-    h3_resolution: 7
+    h3_resolution: 5
   network_validation:
     enabled: true
     observed_enabled: false

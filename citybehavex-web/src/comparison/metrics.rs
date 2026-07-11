@@ -24,7 +24,10 @@ pub fn wasserstein_distance(values1: &[f64], values2: &[f64]) -> f64 {
 }
 
 fn normalize_distribution(values: &[f64]) -> Vec<f64> {
-    let mut out: Vec<f64> = values.iter().map(|v| if v.is_finite() { *v } else { 0.0 }).collect();
+    let mut out: Vec<f64> = values
+        .iter()
+        .map(|v| if v.is_finite() { *v } else { 0.0 })
+        .collect();
     let total: f64 = out.iter().sum();
     if total > 0.0 {
         for v in &mut out {
@@ -40,11 +43,18 @@ fn normalize_distribution(values: &[f64]) -> Vec<f64> {
 /// under numerical-stability edge cases (and the reference formula IS the
 /// canonical JS-divergence definition), computing it directly here matches
 /// fkmob's result for the overwhelming common case.
-pub fn jensen_shannon_divergence(distribution1: &[f64], distribution2: &[f64]) -> anyhow::Result<f64> {
+pub fn jensen_shannon_divergence(
+    distribution1: &[f64],
+    distribution2: &[f64],
+) -> anyhow::Result<f64> {
     let p = normalize_distribution(distribution1);
     let q = normalize_distribution(distribution2);
     if p.len() != q.len() {
-        anyhow::bail!("distribution shapes must match, got {} and {}", p.len(), q.len());
+        anyhow::bail!(
+            "distribution shapes must match, got {} and {}",
+            p.len(),
+            q.len()
+        );
     }
     if p.is_empty() || (p.iter().sum::<f64>() == 0.0 && q.iter().sum::<f64>() == 0.0) {
         return Ok(0.0);
@@ -155,7 +165,11 @@ pub fn common_part_of_commuters(
 /// without needing to replicate fkmob's permutation-index plumbing (that
 /// exists there purely to avoid a physical dataframe sort at fkmob's much
 /// larger internal call volume; irrelevant for this one metric).
-pub fn waiting_times_minutes(df: &DataFrame, uid_col: &str, datetime_col: &str) -> anyhow::Result<Vec<f64>> {
+pub fn waiting_times_minutes(
+    df: &DataFrame,
+    uid_col: &str,
+    datetime_col: &str,
+) -> anyhow::Result<Vec<f64>> {
     let schema = df.schema();
     let dt_expr = super::util::to_datetime_expr(&schema, datetime_col);
     let sorted = df

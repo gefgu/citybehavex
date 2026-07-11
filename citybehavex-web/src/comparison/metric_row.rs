@@ -21,7 +21,12 @@ pub struct MetricRow {
 /// Mirrors `_metric_row`: `None`/non-finite values are dropped (returns
 /// `None`, matching the Python function's guard clause) rather than emitted
 /// as `null`/`NaN` JSON.
-pub fn metric_row(meta: &FilterMeta, metric_name: &str, value: Option<f64>, unit: &str) -> Option<MetricRow> {
+pub fn metric_row(
+    meta: &FilterMeta,
+    metric_name: &str,
+    value: Option<f64>,
+    unit: &str,
+) -> Option<MetricRow> {
     let value = value?;
     if !value.is_finite() {
         return None;
@@ -32,17 +37,29 @@ pub fn metric_row(meta: &FilterMeta, metric_name: &str, value: Option<f64>, unit
         metric_name: metric_name.to_string(),
         name: metric_name.to_string(),
         value,
-        unit: if unit.is_empty() { None } else { Some(unit.to_string()) },
+        unit: if unit.is_empty() {
+            None
+        } else {
+            Some(unit.to_string())
+        },
     })
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::filters::FilterKind;
+    use super::*;
 
     fn meta() -> FilterMeta {
-        FilterMeta { key: "all".into(), label: "All".into(), kind: FilterKind::Base, start: None, end: None, hour_start: None, hour_end: None }
+        FilterMeta {
+            key: "all".into(),
+            label: "All".into(),
+            kind: FilterKind::Base,
+            start: None,
+            end: None,
+            hour_start: None,
+            hour_end: None,
+        }
     }
 
     #[test]
