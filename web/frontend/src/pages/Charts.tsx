@@ -818,49 +818,48 @@ export function Charts() {
         </div>
       )}
 
-      <SectionHeading
-        controls={
-          <>
-            <SegmentedControl
-              label="Metrics day type filter"
-              onChange={setSyncedDayFilter}
-              options={dayFilters}
-              value={dayFilter}
-            />
-            <button
-              aria-label="Export chart metrics as JSON"
-              className="btn btn-secondary btn-compact"
-              disabled={exportingMetrics}
-              onClick={() => void handleMetricsExport()}
-              title="Download the current run's validation metrics as a JSON file"
-              type="button"
-            >
-              {exportingMetrics ? "Exporting..." : "Export JSON"}
-            </button>
-          </>
-        }
-        description="Summary distances between synthetic and observed behavior; smaller Wasserstein, Jensen-Shannon, time-use, STVD, and CPC gaps indicate closer agreement."
-        title="Metrics"
-      />
-      {payload.mode === "synthetic_only" ? (
-        <div className="network-empty">
-          Synthetic-only mode. Add an observed comparison parquet to show Wasserstein,
-          Jensen-Shannon and CPC metrics.
-        </div>
-      ) : metricsLoading ? (
-        <div className="state">Building selected metrics…</div>
-      ) : metricsError ? (
-        <div className="state">Failed to load metrics: {metricsError}</div>
-      ) : !hasMetricRows ? (
-        <div className="state">No metrics returned for {metricSectionFilter}.</div>
-      ) : (
-        <div className="metric-tables">
-          <FilteredMetricTable title="Wasserstein distances" rows={metricRows.wasserstein} />
-          <FilteredMetricTable title="Jensen-Shannon divergences" rows={metricRows.jsd} />
-          <FilteredMetricTable title="Common Part of Commuters" rows={metricRows.cpc} />
-          <FilteredMetricTable title="Time-use metrics" rows={metricRows.time_use} />
-          <FilteredMetricTable title="STVD distances" rows={metricRows.stvd} />
-        </div>
+      {payload.mode !== "synthetic_only" && (
+        <>
+          <SectionHeading
+            controls={
+              <>
+                <SegmentedControl
+                  label="Metrics day type filter"
+                  onChange={setSyncedDayFilter}
+                  options={dayFilters}
+                  value={dayFilter}
+                />
+                <button
+                  aria-label="Export chart metrics as JSON"
+                  className="btn btn-secondary btn-compact"
+                  disabled={exportingMetrics}
+                  onClick={() => void handleMetricsExport()}
+                  title="Download the current run's validation metrics as a JSON file"
+                  type="button"
+                >
+                  {exportingMetrics ? "Exporting..." : "Export JSON"}
+                </button>
+              </>
+            }
+            description="Summary distances between synthetic and observed behavior; smaller Wasserstein, Jensen-Shannon, time-use, STVD, and CPC gaps indicate closer agreement."
+            title="Metrics"
+          />
+          {metricsLoading ? (
+            <div className="state">Building selected metrics…</div>
+          ) : metricsError ? (
+            <div className="state">Failed to load metrics: {metricsError}</div>
+          ) : !hasMetricRows ? (
+            <div className="state">No metrics returned for {metricSectionFilter}.</div>
+          ) : (
+            <div className="metric-tables">
+              <FilteredMetricTable title="Wasserstein distances" rows={metricRows.wasserstein} />
+              <FilteredMetricTable title="Jensen-Shannon divergences" rows={metricRows.jsd} />
+              <FilteredMetricTable title="Common Part of Commuters" rows={metricRows.cpc} />
+              <FilteredMetricTable title="Time-use metrics" rows={metricRows.time_use} />
+              <FilteredMetricTable title="STVD distances" rows={metricRows.stvd} />
+            </div>
+          )}
+        </>
       )}
 
       <SectionHeading
@@ -872,8 +871,12 @@ export function Charts() {
             value={distributionFilter}
           />
         }
-        description="ECDFs show the share of people or visits below each value, comparing trip lengths, visit counts, mobility radius, dwell time, and trip duration."
-        title="Distribution comparisons"
+        description={
+          payload.mode === "synthetic_only"
+            ? "ECDFs show the share of people or visits below each value for trip lengths, visit counts, mobility radius, dwell time, and trip duration."
+            : "ECDFs show the share of people or visits below each value, comparing trip lengths, visit counts, mobility radius, dwell time, and trip duration."
+        }
+        title={payload.mode === "synthetic_only" ? "Distributions" : "Distribution comparisons"}
       />
       {distributionFilterLoading && (
         <div className="state">Building {distributionFilter} distribution…</div>

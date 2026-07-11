@@ -1,5 +1,7 @@
 import { Link } from "react-router-dom";
 
+const assetBase = import.meta.env.BASE_URL.replace(/\/?$/, "/");
+
 export function Home() {
   return (
     <>
@@ -23,7 +25,7 @@ export function Home() {
         </div>
         <img
           className="hero-figure"
-          src="/map_timeline_view.jpg"
+          src={`${assetBase}map_timeline_view.jpg`}
           alt="CityBehavEx time-line map view"
         />
       </section>
