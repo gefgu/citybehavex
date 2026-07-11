@@ -49,7 +49,7 @@ diaries:
   city_profile: Greater Paris metropolitan region, urban mobility with commuting, errands, leisure, healthcare, studies, and home routines.
   city_profile_weekday: 'Greater Paris weekday routines: commuting to work or studies, midday errands, evening leisure, and home.'
   city_profile_weekend: 'Greater Paris weekend routines: later mornings at home, leisure, shopping, social visits, fewer work/study trips.'
-  representative_day: 2023-02-08
+  representative_day: '2023-02-08'
   location_count_mu: 1
   location_count_sigma: 0.75
   max_locations: 6
