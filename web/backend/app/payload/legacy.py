@@ -1200,7 +1200,7 @@ def _build_comparison_payload(
                 )[0], "visits"),
                 _metric_row(meta, "Radius of gyration", wasserstein_distance(synth_rog, real_rog), "km") if real_rog is not None and len(real_rog) else None,
                 _metric_row(meta, "Dwell time", wasserstein_distance(synth_dwell, real_dwell), "min") if real_dwell else None,
-                _metric_row(meta, "Trip duration (car)", wasserstein_distance(synth_trip, real_trip), "min") if synth_trip and real_trip else None,
+                _metric_row(meta, "Trip duration", wasserstein_distance(synth_trip, real_trip), "min") if synth_trip and real_trip else None,
             ):
                 if row is not None:
                     wasserstein.append(row)

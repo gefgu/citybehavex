@@ -139,7 +139,10 @@ mod tests {
 
     #[test]
     fn expand_env_leaves_unresolved_vars_literal() {
-        assert_eq!(expand_env_str("$DOES_NOT_EXIST_XYZ/foo"), "$DOES_NOT_EXIST_XYZ/foo");
+        assert_eq!(
+            expand_env_str("$DOES_NOT_EXIST_XYZ/foo"),
+            "$DOES_NOT_EXIST_XYZ/foo"
+        );
     }
 
     #[test]
@@ -148,7 +151,10 @@ mod tests {
         unsafe {
             std::env::set_var("CBX_TEST_VAR_1", "value");
         }
-        assert_eq!(expand_env_str("prefix-${CBX_TEST_VAR_1}-suffix"), "prefix-value-suffix");
+        assert_eq!(
+            expand_env_str("prefix-${CBX_TEST_VAR_1}-suffix"),
+            "prefix-value-suffix"
+        );
         assert_eq!(expand_env_str("$CBX_TEST_VAR_1"), "value");
         unsafe {
             std::env::remove_var("CBX_TEST_VAR_1");

@@ -13,6 +13,7 @@
 
 pub mod activity;
 pub mod ecdf;
+pub mod features;
 pub mod filters;
 pub mod h3;
 pub mod metric_row;
@@ -20,6 +21,7 @@ pub mod metrics;
 pub mod micro_activity;
 pub mod mobility_laws;
 pub mod panel;
+pub mod sections;
 pub mod stvd;
 pub mod trajectory;
 pub mod transport;

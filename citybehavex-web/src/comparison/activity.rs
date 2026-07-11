@@ -16,9 +16,17 @@ pub struct Factorized {
 }
 
 pub fn factorize(values: &[String]) -> Factorized {
-    let categories: Vec<String> = values.iter().cloned().collect::<BTreeSet<_>>().into_iter().collect();
-    let index: std::collections::HashMap<&str, u64> =
-        categories.iter().enumerate().map(|(i, c)| (c.as_str(), i as u64)).collect();
+    let categories: Vec<String> = values
+        .iter()
+        .cloned()
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect();
+    let index: std::collections::HashMap<&str, u64> = categories
+        .iter()
+        .enumerate()
+        .map(|(i, c)| (c.as_str(), i as u64))
+        .collect();
     let codes = values.iter().map(|v| index[v.as_str()]).collect();
     Factorized { categories, codes }
 }
@@ -50,7 +58,11 @@ pub fn contiguous_user_ranges<T: PartialEq>(sorted_uid: &[T]) -> (Vec<usize>, Ve
 /// frame). Returns `(categories, matrix)` where `matrix[from][to]` is the
 /// percentage of all consecutive-visit transitions (summed across every
 /// user) that went from activity `categories[from]` to `categories[to]`.
-pub fn activity_transition_matrix(sorted_df: &DataFrame, uid_col: &str, activity_col: &str) -> anyhow::Result<(Vec<String>, Vec<Vec<f64>>)> {
+pub fn activity_transition_matrix(
+    sorted_df: &DataFrame,
+    uid_col: &str,
+    activity_col: &str,
+) -> anyhow::Result<(Vec<String>, Vec<Vec<f64>>)> {
     let activities: Vec<String> = sorted_df
         .column(activity_col)?
         .as_materialized_series()
@@ -65,11 +77,22 @@ pub fn activity_transition_matrix(sorted_df: &DataFrame, uid_col: &str, activity
         return Ok((factorized.categories, Vec::new()));
     }
 
-    let uid: Vec<i64> = sorted_df.column(uid_col)?.cast(&DataType::Int64)?.i64()?.into_iter().map(|v| v.unwrap_or(i64::MIN)).collect();
+    let uid: Vec<i64> = sorted_df
+        .column(uid_col)?
+        .cast(&DataType::Int64)?
+        .i64()?
+        .into_iter()
+        .map(|v| v.unwrap_or(i64::MIN))
+        .collect();
     let (indices, ends) = contiguous_user_ranges(&uid);
 
-    let counts = fkmob_core::measures::individual::activity::activity_transition_counts(&factorized.codes, &indices, &ends, n)
-        .map_err(|e| anyhow::anyhow!(e))?;
+    let counts = fkmob_core::measures::individual::activity::activity_transition_counts(
+        &factorized.codes,
+        &indices,
+        &ends,
+        n,
+    )
+    .map_err(|e| anyhow::anyhow!(e))?;
     let total: u64 = counts.iter().sum();
     let mut matrix = vec![vec![0.0f64; n]; n];
     if total > 0 {
@@ -112,7 +135,9 @@ pub fn daily_activity_distribution(
     )
     .map_err(|e| anyhow::anyhow!(e))?;
 
-    let matrix = (0..n).map(|a| flat[a * n_bins..(a + 1) * n_bins].to_vec()).collect();
+    let matrix = (0..n)
+        .map(|a| flat[a * n_bins..(a + 1) * n_bins].to_vec())
+        .collect();
     Ok((factorized.categories, matrix))
 }
 
@@ -138,16 +163,24 @@ pub struct MotifDistributionRow {
 /// `[uid, start_timestamp]`. Builds the `location_id + "_" + purpose` node
 /// names, extracts hour-of-day and days-since-epoch, and calls
 /// `fkmob-core`'s `compute_daily_motifs` directly.
-pub fn discover_daily_motifs_from_agents(sorted_visits: &DataFrame) -> anyhow::Result<(Vec<DailyMotif>, Vec<MotifDistributionRow>)> {
+pub fn discover_daily_motifs_from_agents(
+    sorted_visits: &DataFrame,
+) -> anyhow::Result<(Vec<DailyMotif>, Vec<MotifDistributionRow>)> {
     let uid = sorted_visits.column("uid")?.cast(&DataType::String)?;
     let uid = uid.str()?;
-    let location_id = sorted_visits.column("location_id")?.cast(&DataType::String)?;
+    let location_id = sorted_visits
+        .column("location_id")?
+        .cast(&DataType::String)?;
     let location_id = location_id.str()?;
     let purpose = sorted_visits.column("purpose")?.cast(&DataType::String)?;
     let purpose = purpose.str()?;
-    let start_ts = sorted_visits.column("start_timestamp")?.cast(&DataType::Datetime(TimeUnit::Microseconds, None))?;
+    let start_ts = sorted_visits
+        .column("start_timestamp")?
+        .cast(&DataType::Datetime(TimeUnit::Microseconds, None))?;
     let start_ts = start_ts.datetime()?.clone();
-    let end_ts = sorted_visits.column("end_timestamp")?.cast(&DataType::Datetime(TimeUnit::Microseconds, None))?;
+    let end_ts = sorted_visits
+        .column("end_timestamp")?
+        .cast(&DataType::Datetime(TimeUnit::Microseconds, None))?;
     let end_ts = end_ts.datetime()?.clone();
 
     let n = sorted_visits.height();
@@ -185,23 +218,34 @@ pub fn discover_daily_motifs_from_agents(sorted_visits: &DataFrame) -> anyhow::R
         start = end;
     }
 
-    let (out_user_ids, out_date_ids, out_motif_ids) = fkmob_core::measures::individual::motifs::compute_daily_motifs(
-        unique_ids,
-        purposes,
-        start_hours,
-        end_hours,
-        date_ids,
-        durations,
-        user_ranges,
-        user_id_labels,
-    )
-    .map_err(|e| anyhow::anyhow!(e))?;
+    let (out_user_ids, out_date_ids, out_motif_ids) =
+        fkmob_core::measures::individual::motifs::compute_daily_motifs(
+            unique_ids,
+            purposes,
+            start_hours,
+            end_hours,
+            date_ids,
+            durations,
+            user_ranges,
+            user_id_labels,
+        )
+        .map_err(|e| anyhow::anyhow!(e))?;
 
     let mut daily = Vec::with_capacity(out_user_ids.len());
     let mut counts: std::collections::HashMap<i64, i64> = std::collections::HashMap::new();
-    for ((user_id, date_id), motif_id) in out_user_ids.into_iter().zip(out_date_ids).zip(out_motif_ids) {
+    for ((user_id, date_id), motif_id) in out_user_ids
+        .into_iter()
+        .zip(out_date_ids)
+        .zip(out_motif_ids)
+    {
         let (num_nodes, num_edges) = decode_motif_id(motif_id);
-        daily.push(DailyMotif { user_id, date_id, motif_id, num_nodes, num_edges });
+        daily.push(DailyMotif {
+            user_id,
+            date_id,
+            motif_id,
+            num_nodes,
+            num_edges,
+        });
         *counts.entry(motif_id).or_insert(0) += 1;
     }
 
@@ -211,7 +255,11 @@ pub fn discover_daily_motifs_from_agents(sorted_visits: &DataFrame) -> anyhow::R
         .map(|(motif_id, count)| MotifDistributionRow {
             motif_id,
             count,
-            percentage: if total > 0.0 { count as f64 / total * 100.0 } else { 0.0 },
+            percentage: if total > 0.0 {
+                count as f64 / total * 100.0
+            } else {
+                0.0
+            },
         })
         .collect();
     distribution.sort_by_key(|r| r.motif_id);
@@ -239,7 +287,12 @@ mod tests {
 
     #[test]
     fn factorize_sorts_categories_lexicographically() {
-        let values = vec!["b".to_string(), "a".to_string(), "c".to_string(), "a".to_string()];
+        let values = vec![
+            "b".to_string(),
+            "a".to_string(),
+            "c".to_string(),
+            "a".to_string(),
+        ];
         let f = factorize(&values);
         assert_eq!(f.categories, vec!["a", "b", "c"]);
         assert_eq!(f.codes, vec![1, 0, 2, 0]);
@@ -299,8 +352,18 @@ mod tests {
         .unwrap()
         .lazy()
         .with_columns([
-            col("start_timestamp").str().to_datetime(Some(TimeUnit::Microseconds), None, StrptimeOptions::default(), lit("raise")),
-            col("end_timestamp").str().to_datetime(Some(TimeUnit::Microseconds), None, StrptimeOptions::default(), lit("raise")),
+            col("start_timestamp").str().to_datetime(
+                Some(TimeUnit::Microseconds),
+                None,
+                StrptimeOptions::default(),
+                lit("raise"),
+            ),
+            col("end_timestamp").str().to_datetime(
+                Some(TimeUnit::Microseconds),
+                None,
+                StrptimeOptions::default(),
+                lit("raise"),
+            ),
         ])
         .collect()
         .unwrap();
@@ -328,15 +391,33 @@ mod tests {
     #[test]
     #[ignore = "requires repo data at data/gparis/results/gparis_simulation_core_trajectories_20260710T073952.parquet"]
     fn gparis_activity_metrics_match_python_reference() {
-        let repo_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().to_path_buf();
-        let path = repo_root.join("data/gparis/results/gparis_simulation_core_trajectories_20260710T073952.parquet");
+        let repo_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .to_path_buf();
+        let path = repo_root.join(
+            "data/gparis/results/gparis_simulation_core_trajectories_20260710T073952.parquet",
+        );
         let traj = super::super::trajectory::load_trajectory(&path).unwrap();
 
-        let cols: Vec<&str> = traj.df.get_column_names().iter().map(|s| s.as_str()).collect();
+        let cols: Vec<&str> = traj
+            .df
+            .get_column_names()
+            .iter()
+            .map(|s| s.as_str())
+            .collect();
         let activity_col = crate::columns::detect_in(&cols, crate::columns::ACTIVITY_CANDIDATES);
         let result = super::super::visits::prepare_activity_visits(
-            &traj.df, "synthetic", Some(&traj.uid_col), Some(&traj.datetime_col),
-            activity_col.as_deref(), None, Some(&traj.lat_col), Some(&traj.lng_col), 10, None,
+            &traj.df,
+            "synthetic",
+            Some(&traj.uid_col),
+            Some(&traj.datetime_col),
+            activity_col.as_deref(),
+            None,
+            Some(&traj.lat_col),
+            Some(&traj.lng_col),
+            10,
+            None,
         )
         .unwrap()
         .unwrap();
@@ -350,7 +431,8 @@ mod tests {
             .collect()
             .unwrap();
 
-        let (categories, matrix) = activity_transition_matrix(&sorted_visits, "uid", "purpose").unwrap();
+        let (categories, matrix) =
+            activity_transition_matrix(&sorted_visits, "uid", "purpose").unwrap();
         assert_eq!(categories, vec!["HOME", "OTHER", "WORK"]);
         let expected = [
             [0.0f64, 16.513472, 21.237985],
@@ -363,27 +445,65 @@ mod tests {
             }
         }
 
-        let purpose: Vec<String> = sorted_visits.column("purpose").unwrap().str().unwrap().into_iter().flatten().map(str::to_string).collect();
-        let start_ts = sorted_visits.column("start_timestamp").unwrap().cast(&DataType::Datetime(TimeUnit::Microseconds, None)).unwrap();
+        let purpose: Vec<String> = sorted_visits
+            .column("purpose")
+            .unwrap()
+            .str()
+            .unwrap()
+            .into_iter()
+            .flatten()
+            .map(str::to_string)
+            .collect();
+        let start_ts = sorted_visits
+            .column("start_timestamp")
+            .unwrap()
+            .cast(&DataType::Datetime(TimeUnit::Microseconds, None))
+            .unwrap();
         let start_ts = start_ts.datetime().unwrap().clone();
-        let end_ts = sorted_visits.column("end_timestamp").unwrap().cast(&DataType::Datetime(TimeUnit::Microseconds, None)).unwrap();
+        let end_ts = sorted_visits
+            .column("end_timestamp")
+            .unwrap()
+            .cast(&DataType::Datetime(TimeUnit::Microseconds, None))
+            .unwrap();
         let end_ts = end_ts.datetime().unwrap().clone();
         const MICROS_PER_DAY: i64 = 86_400_000_000;
         const MICROS_PER_MINUTE: i64 = 60_000_000;
         let n = sorted_visits.height();
-        let start_minutes: Vec<i64> = (0..n).map(|i| start_ts.phys.get(i).unwrap_or(0).rem_euclid(MICROS_PER_DAY) / MICROS_PER_MINUTE).collect();
-        let end_minutes: Vec<i64> = (0..n).map(|i| end_ts.phys.get(i).unwrap_or(0).rem_euclid(MICROS_PER_DAY) / MICROS_PER_MINUTE).collect();
+        let start_minutes: Vec<i64> = (0..n)
+            .map(|i| {
+                start_ts.phys.get(i).unwrap_or(0).rem_euclid(MICROS_PER_DAY) / MICROS_PER_MINUTE
+            })
+            .collect();
+        let end_minutes: Vec<i64> = (0..n)
+            .map(|i| end_ts.phys.get(i).unwrap_or(0).rem_euclid(MICROS_PER_DAY) / MICROS_PER_MINUTE)
+            .collect();
         let valid_rows = vec![true; n];
 
-        let (dist_categories, dist_matrix) = daily_activity_distribution(&purpose, &start_minutes, &end_minutes, &valid_rows, 60).unwrap();
+        let (dist_categories, dist_matrix) =
+            daily_activity_distribution(&purpose, &start_minutes, &end_minutes, &valid_rows, 60)
+                .unwrap();
         assert_eq!(dist_categories, vec!["HOME", "OTHER", "WORK"]);
         let home_row = &dist_matrix[dist_categories.iter().position(|c| c == "HOME").unwrap()];
-        let expected_home_head = [97.29753215, 97.22222222, 97.22222222, 97.22222222, 97.22222222, 97.22222222];
+        let expected_home_head = [
+            97.29753215,
+            97.22222222,
+            97.22222222,
+            97.22222222,
+            97.22222222,
+            97.22222222,
+        ];
         for (got, want) in home_row[..6].iter().zip(expected_home_head.iter()) {
             assert!((got - want).abs() < 1e-5, "got {got} want {want}");
         }
         let work_row = &dist_matrix[dist_categories.iter().position(|c| c == "WORK").unwrap()];
-        let expected_work_mid = [50.93947271, 42.30568597, 38.73090482, 38.54118374, 37.77661483, 35.64643016];
+        let expected_work_mid = [
+            50.93947271,
+            42.30568597,
+            38.73090482,
+            38.54118374,
+            37.77661483,
+            35.64643016,
+        ];
         for (got, want) in work_row[8..14].iter().zip(expected_work_mid.iter()) {
             assert!((got - want).abs() < 1e-5, "got {got} want {want}");
         }
@@ -398,18 +518,41 @@ mod tests {
     #[test]
     #[ignore = "requires repo data at data/gparis/results/gparis_simulation_core_trajectories_20260710T073952.parquet"]
     fn gparis_motif_discovery_matches_python_reference() {
-        let repo_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().to_path_buf();
-        let path = repo_root.join("data/gparis/results/gparis_simulation_core_trajectories_20260710T073952.parquet");
+        let repo_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .to_path_buf();
+        let path = repo_root.join(
+            "data/gparis/results/gparis_simulation_core_trajectories_20260710T073952.parquet",
+        );
         let traj = super::super::trajectory::load_trajectory(&path).unwrap();
-        let cols: Vec<&str> = traj.df.get_column_names().iter().map(|s| s.as_str()).collect();
+        let cols: Vec<&str> = traj
+            .df
+            .get_column_names()
+            .iter()
+            .map(|s| s.as_str())
+            .collect();
         let activity_col = crate::columns::detect_in(&cols, crate::columns::ACTIVITY_CANDIDATES);
         let result = super::super::visits::prepare_activity_visits(
-            &traj.df, "synthetic", Some(&traj.uid_col), Some(&traj.datetime_col),
-            activity_col.as_deref(), None, Some(&traj.lat_col), Some(&traj.lng_col), 10, None,
+            &traj.df,
+            "synthetic",
+            Some(&traj.uid_col),
+            Some(&traj.datetime_col),
+            activity_col.as_deref(),
+            None,
+            Some(&traj.lat_col),
+            Some(&traj.lng_col),
+            10,
+            None,
         )
         .unwrap()
         .unwrap();
-        let sorted_visits = result.visits.lazy().sort(["uid", "start_timestamp"], SortMultipleOptions::default()).collect().unwrap();
+        let sorted_visits = result
+            .visits
+            .lazy()
+            .sort(["uid", "start_timestamp"], SortMultipleOptions::default())
+            .collect()
+            .unwrap();
         let motif_input = super::super::visits::motif_visits(&sorted_visits).unwrap();
 
         let (daily, distribution) = discover_daily_motifs_from_agents(&motif_input).unwrap();
@@ -443,9 +586,16 @@ mod tests {
             (274877933592, 858, 8.372365),
         ];
         for (motif_id, count, percentage) in expected_dist {
-            let row = distribution.iter().find(|r| r.motif_id == motif_id).unwrap();
+            let row = distribution
+                .iter()
+                .find(|r| r.motif_id == motif_id)
+                .unwrap();
             assert_eq!(row.count, count);
-            assert!((row.percentage - percentage).abs() < 1e-5, "motif {motif_id}: got {}", row.percentage);
+            assert!(
+                (row.percentage - percentage).abs() < 1e-5,
+                "motif {motif_id}: got {}",
+                row.percentage
+            );
         }
     }
 }

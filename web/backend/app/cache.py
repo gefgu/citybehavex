@@ -26,11 +26,19 @@ from typing import Any, Callable
 
 from .config import CACHE_DIR
 
-PAYLOAD_CACHE_VERSION = "v8"
+PAYLOAD_CACHE_VERSION = "v9"
 MAX_CACHE_KEY_PREFIX = 120
 
 _inflight: dict[str, Future] = {}
 _inflight_lock = threading.Lock()
+
+
+def _is_stale_payload(payload: dict[str, Any], extra_key: dict[str, Any] | None) -> bool:
+    if not isinstance(extra_key, dict):
+        return False
+    if extra_key.get("section") == "mobility-laws" and payload.get("mobility_laws") is None:
+        return True
+    return False
 
 
 def _safe_part(value: str) -> str:
@@ -92,7 +100,9 @@ async def get_or_build(
     cache_key = _key(exp_id, run_id, synthetic, observed, extra_paths, extra_key)
     cache_file = CACHE_DIR / cache_key
     if cache_file.exists() and not refresh:
-        return json.loads(cache_file.read_text())
+        cached = json.loads(cache_file.read_text())
+        if not _is_stale_payload(cached, extra_key):
+            return cached
 
     kwargs = build_kwargs or {}
     with _inflight_lock:

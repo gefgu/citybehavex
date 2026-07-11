@@ -13,19 +13,133 @@
 use super::h3::h3_cells;
 use super::util::to_datetime_expr;
 use polars::prelude::*;
+use std::collections::HashMap;
 
-/// **Not yet implemented** -- mirrors fkmob's `fit_values_to_truncated_powerlaw`
-/// (`p(x) = c*(x+r0)^-beta * exp(-x/kappa)`, fit via scipy's bounded
-/// Trust-Region-Reflective `curve_fit` in log-space over a log-spaced,
-/// density-normalized histogram). Feeds the jump-length and
-/// radius-of-gyration truncated-power-law mobility-law curves (2 of the 3
-/// curve families in that payload section; `distance_frequency_dataset`
-/// above is the third and IS done). Deferred pending a bounded-NLLS crate
-/// decision -- see the plan's Phase 5 notes.
-pub fn truncated_powerlaw_dataset(_values: &[f64], _label: &str) -> anyhow::Result<(Vec<f64>, Vec<f64>, Vec<f64>, String)> {
-    anyhow::bail!(
-        "truncated_powerlaw_dataset is not yet implemented (needs a bounded-NLLS solver decision, see plan Phase 5)"
-    )
+/// Bounded least-squares approximation of fkmob's
+/// `fit_values_to_truncated_powerlaw`.
+///
+/// Python uses scipy's Trust-Region-Reflective `curve_fit`. To keep the web
+/// backend Python-free, this builds the same log-spaced density histogram and
+/// fits `log(y) = log(c) - beta*log(x+r0) - x/kappa`. Bounds are enforced by
+/// a deterministic coarse-to-fine grid over `(r0, beta, kappa)`, with the
+/// optimal `c` solved in closed form in log-space for every candidate. This is
+/// intentionally conservative: stable, dependency-free, and close enough for
+/// the rendered reference curves without blocking the migration on scipy.
+pub fn truncated_powerlaw_dataset(
+    values: &[f64],
+    label: &str,
+) -> anyhow::Result<(Vec<f64>, Vec<f64>, Vec<f64>, String)> {
+    let mut clean: Vec<f64> = values
+        .iter()
+        .copied()
+        .filter(|v| v.is_finite() && *v > 0.0)
+        .collect();
+    if clean.len() < 2 {
+        anyhow::bail!("at least two positive finite values are required");
+    }
+    clean.sort_by(|a, b| a.total_cmp(b));
+    let min_x = clean[0].max(1.0e-9);
+    let max_x = *clean.last().unwrap();
+    if max_x <= min_x {
+        anyhow::bail!("positive values must span a non-zero range");
+    }
+
+    let n_bins = 30usize.min(clean.len().max(2));
+    let log_min = min_x.log10();
+    let log_max = max_x.log10();
+    let edges: Vec<f64> = (0..=n_bins)
+        .map(|i| 10f64.powf(log_min + (log_max - log_min) * (i as f64) / (n_bins as f64)))
+        .collect();
+    let mut x = Vec::new();
+    let mut y = Vec::new();
+    for i in 0..n_bins {
+        let lo = edges[i];
+        let hi = edges[i + 1];
+        let count = clean
+            .iter()
+            .filter(|&&v| {
+                if i == n_bins - 1 {
+                    v >= lo && v <= hi
+                } else {
+                    v >= lo && v < hi
+                }
+            })
+            .count();
+        if count == 0 {
+            continue;
+        }
+        let width = hi - lo;
+        if width > 0.0 {
+            x.push((lo * hi).sqrt());
+            y.push(count as f64 / (clean.len() as f64 * width));
+        }
+    }
+    if x.len() < 2 {
+        anyhow::bail!("not enough occupied histogram bins to fit");
+    }
+
+    fn geom_grid(lo: f64, hi: f64, n: usize) -> Vec<f64> {
+        let log_lo = lo.ln();
+        let log_hi = hi.ln();
+        (0..n)
+            .map(|i| (log_lo + (log_hi - log_lo) * (i as f64) / ((n - 1).max(1) as f64)).exp())
+            .collect()
+    }
+    fn lin_grid(lo: f64, hi: f64, n: usize) -> Vec<f64> {
+        (0..n)
+            .map(|i| lo + (hi - lo) * (i as f64) / ((n - 1).max(1) as f64))
+            .collect()
+    }
+
+    let fit_once = |r0_values: Vec<f64>, beta_values: Vec<f64>, kappa_values: Vec<f64>| {
+        let log_y: Vec<f64> = y.iter().map(|v| v.ln()).collect();
+        let mut best = (f64::INFINITY, 1.0, 1.0, 1.5, 100.0);
+        for r0 in r0_values {
+            for beta in &beta_values {
+                for kappa in &kappa_values {
+                    let shape_log: Vec<f64> = x
+                        .iter()
+                        .map(|&xi| -beta * (xi + r0).ln() - xi / kappa)
+                        .collect();
+                    let log_c = log_y
+                        .iter()
+                        .zip(shape_log.iter())
+                        .map(|(ly, sl)| ly - sl)
+                        .sum::<f64>()
+                        / log_y.len() as f64;
+                    let sse = log_y
+                        .iter()
+                        .zip(shape_log.iter())
+                        .map(|(ly, sl)| (ly - (log_c + sl)).powi(2))
+                        .sum::<f64>();
+                    if sse < best.0 {
+                        best = (sse, log_c.exp(), r0, *beta, *kappa);
+                    }
+                }
+            }
+        }
+        best
+    };
+
+    let coarse = fit_once(
+        geom_grid(0.01, max_x.max(1.0), 10),
+        lin_grid(0.2, 4.0, 16),
+        geom_grid(1.0, (max_x * 20.0).max(10.0), 14),
+    );
+    let (_, _c0, r00, beta0, kappa0) = coarse;
+    let r0_lo = (r00 / 3.0).max(0.001);
+    let r0_hi = (r00 * 3.0).max(r0_lo * 1.01);
+    let beta_lo = (beta0 - 0.6).max(0.01);
+    let beta_hi = beta0 + 0.6;
+    let kappa_lo = (kappa0 / 3.0).max(0.1);
+    let kappa_hi = (kappa0 * 3.0).max(kappa_lo * 1.01);
+    let (_sse, c, r0, beta, kappa) = fit_once(
+        geom_grid(r0_lo, r0_hi, 12),
+        lin_grid(beta_lo, beta_hi, 14),
+        geom_grid(kappa_lo, kappa_hi, 12),
+    );
+
+    Ok((vec![c, r0, beta, kappa], x, y, label.to_string()))
 }
 
 /// Mirrors `comparison.py::_mobility_law_visits`.
@@ -65,12 +179,17 @@ pub fn mobility_law_visits(
 
     let lat_series = source.column(lat_col)?.as_materialized_series();
     let lng_series = source.column(lng_col)?.as_materialized_series();
+    let user_id = canonical_user_ids(source.column(uid_col)?.as_materialized_series())?;
 
     let location_id: Series = if let Some(location_col) = location_col {
-        let loc = source.column(location_col)?.as_materialized_series().cast(&DataType::String)?;
+        let loc = source
+            .column(location_col)?
+            .as_materialized_series()
+            .cast(&DataType::String)?;
         let missing_mask = loc.is_null();
         if missing_mask.sum().unwrap_or(0) > 0 {
-            let fallback = h3_cells(lat_series, lng_series, location_resolution)?.cast(&DataType::String)?;
+            let fallback =
+                h3_cells(lat_series, lng_series, location_resolution)?.cast(&DataType::String)?;
             let loc_str = loc.str()?;
             let fallback_str = fallback.str()?;
             let combined: StringChunked = loc_str
@@ -87,7 +206,7 @@ pub fn mobility_law_visits(
     };
 
     let mut visits = df![
-        "user_id" => source.column(uid_col)?.as_materialized_series().clone(),
+        "user_id" => user_id,
         "timestamp" => source.column(datetime_col)?.as_materialized_series().clone(),
         "lat" => lat_series.clone(),
         "lng" => lng_series.clone(),
@@ -95,10 +214,48 @@ pub fn mobility_law_visits(
     visits.with_column(location_id.with_name("location_id".into()))?;
     if let Some(activity_col) = activity_col {
         visits.with_column(
-            source.column(activity_col)?.as_materialized_series().clone().with_name("purpose".into()),
+            source
+                .column(activity_col)?
+                .as_materialized_series()
+                .clone()
+                .with_name("purpose".into()),
         )?;
     }
     Ok(visits)
+}
+
+fn canonical_user_ids(uid: &Series) -> anyhow::Result<Series> {
+    if matches!(
+        uid.dtype(),
+        DataType::Int64
+            | DataType::Int32
+            | DataType::Int16
+            | DataType::Int8
+            | DataType::UInt64
+            | DataType::UInt32
+            | DataType::UInt16
+            | DataType::UInt8
+    ) {
+        return Ok(uid.cast(&DataType::Int64)?.with_name("user_id".into()));
+    }
+
+    let uid = uid.cast(&DataType::String)?;
+    let uid = uid.str()?;
+    let mut labels = HashMap::<String, i64>::new();
+    let mut next = 0i64;
+    let values: Vec<Option<i64>> = uid
+        .into_iter()
+        .map(|value| {
+            value.map(|value| {
+                *labels.entry(value.to_string()).or_insert_with(|| {
+                    let current = next;
+                    next += 1;
+                    current
+                })
+            })
+        })
+        .collect();
+    Ok(Series::new("user_id".into(), values))
 }
 
 /// Mirrors `comparison.py::_daily_location_lognormal_dataset`.
@@ -129,7 +286,8 @@ pub fn daily_location_lognormal_dataset(
 
     let log_values: Vec<f64> = values.iter().map(|v| v.ln()).collect();
     let mu = log_values.iter().sum::<f64>() / log_values.len() as f64;
-    let variance = log_values.iter().map(|v| (v - mu).powi(2)).sum::<f64>() / log_values.len() as f64;
+    let variance =
+        log_values.iter().map(|v| (v - mu).powi(2)).sum::<f64>() / log_values.len() as f64;
     let sigma = variance.sqrt();
     if !sigma.is_finite() || sigma <= 1e-12 {
         anyhow::bail!("daily location counts must have positive log variance");
@@ -177,7 +335,10 @@ fn top_location_per_user(df: &DataFrame, count_col: &str) -> anyhow::Result<Data
 /// home-to-location Haversine distance `r_km` via `fkmob-core`'s
 /// `visitation_distances_km` kernel (bit-identical to fkmob's own Rust call).
 pub fn visitation_law_data(visits: &DataFrame) -> anyhow::Result<DataFrame> {
-    let has_purpose = visits.get_column_names().iter().any(|c| c.as_str() == "purpose");
+    let has_purpose = visits
+        .get_column_names()
+        .iter()
+        .any(|c| c.as_str() == "purpose");
 
     let loc_coords = visits
         .clone()
@@ -190,12 +351,18 @@ pub fn visitation_law_data(visits: &DataFrame) -> anyhow::Result<DataFrame> {
         .clone()
         .lazy()
         .drop_nulls(Some(cols(["user_id", "location_id", "timestamp"])))
-        .with_columns([col("timestamp").dt().truncate(lit("1d")).alias("__visit_day__")])
+        .with_columns([col("timestamp")
+            .dt()
+            .truncate(lit("1d"))
+            .alias("__visit_day__")])
         .drop_nulls(Some(cols(["__visit_day__"])));
 
     let visit_counts = base
         .group_by([col("user_id"), col("location_id")])
-        .agg([len().alias("n_visits"), col("__visit_day__").n_unique().alias("f")])
+        .agg([
+            len().alias("n_visits"),
+            col("__visit_day__").n_unique().alias("f"),
+        ])
         .sort(["user_id", "location_id"], SortMultipleOptions::default())
         .collect()?;
     if visit_counts.height() == 0 {
@@ -248,11 +415,21 @@ pub fn visitation_law_data(visits: &DataFrame) -> anyhow::Result<DataFrame> {
             [col("location_id")],
             JoinArgs::new(JoinType::Inner),
         )
-        .select([col("user_id"), col("location_id").alias("_home_location_id"), col("lat").alias("home_lat"), col("lng").alias("home_lng")]);
+        .select([
+            col("user_id"),
+            col("location_id").alias("_home_location_id"),
+            col("lat").alias("home_lat"),
+            col("lng").alias("home_lng"),
+        ]);
 
     let merged = visit_counts
         .lazy()
-        .join(home_with_coords, [col("user_id")], [col("user_id")], JoinArgs::new(JoinType::Inner))
+        .join(
+            home_with_coords,
+            [col("user_id")],
+            [col("user_id")],
+            JoinArgs::new(JoinType::Inner),
+        )
         .join(
             loc_coords.lazy(),
             [col("location_id")],
@@ -265,22 +442,57 @@ pub fn visitation_law_data(visits: &DataFrame) -> anyhow::Result<DataFrame> {
         return empty_law_data();
     }
 
-    let home_lat: Vec<f64> = merged.column("home_lat")?.f64()?.into_iter().map(|v| v.unwrap_or(f64::NAN)).collect();
-    let home_lng: Vec<f64> = merged.column("home_lng")?.f64()?.into_iter().map(|v| v.unwrap_or(f64::NAN)).collect();
-    let loc_lat: Vec<f64> = merged.column("loc_lat")?.f64()?.into_iter().map(|v| v.unwrap_or(f64::NAN)).collect();
-    let loc_lng: Vec<f64> = merged.column("loc_lng")?.f64()?.into_iter().map(|v| v.unwrap_or(f64::NAN)).collect();
-    let r_km = fkmob_core::measures::collective::visitation_law::visitation_distances_km(home_lat, home_lng, loc_lat, loc_lng)
-        .map_err(|e| anyhow::anyhow!(e))?;
+    let home_lat: Vec<f64> = merged
+        .column("home_lat")?
+        .f64()?
+        .into_iter()
+        .map(|v| v.unwrap_or(f64::NAN))
+        .collect();
+    let home_lng: Vec<f64> = merged
+        .column("home_lng")?
+        .f64()?
+        .into_iter()
+        .map(|v| v.unwrap_or(f64::NAN))
+        .collect();
+    let loc_lat: Vec<f64> = merged
+        .column("loc_lat")?
+        .f64()?
+        .into_iter()
+        .map(|v| v.unwrap_or(f64::NAN))
+        .collect();
+    let loc_lng: Vec<f64> = merged
+        .column("loc_lng")?
+        .f64()?
+        .into_iter()
+        .map(|v| v.unwrap_or(f64::NAN))
+        .collect();
+    let r_km = fkmob_core::measures::collective::visitation_law::visitation_distances_km(
+        home_lat, home_lng, loc_lat, loc_lng,
+    )
+    .map_err(|e| anyhow::anyhow!(e))?;
 
     let mut out = merged.select(["user_id", "location_id", "f", "n_visits"])?;
     out.with_column(Series::new("r_km".into(), r_km.clone()))?;
-    let f_vals: Vec<f64> = out.column("f")?.cast(&DataType::Float64)?.f64()?.into_iter().map(|v| v.unwrap_or(f64::NAN)).collect();
+    let f_vals: Vec<f64> = out
+        .column("f")?
+        .cast(&DataType::Float64)?
+        .f64()?
+        .into_iter()
+        .map(|v| v.unwrap_or(f64::NAN))
+        .collect();
     let rf: Vec<f64> = r_km.iter().zip(f_vals.iter()).map(|(r, f)| r * f).collect();
     out.with_column(Series::new("rf".into(), rf))?;
 
     Ok(out
         .lazy()
-        .select([col("user_id"), col("location_id"), col("r_km"), col("f"), col("rf"), col("n_visits")])
+        .select([
+            col("user_id"),
+            col("location_id"),
+            col("r_km"),
+            col("f"),
+            col("rf"),
+            col("n_visits"),
+        ])
         .sort(["user_id", "location_id"], SortMultipleOptions::default())
         .collect()?)
 }
@@ -322,13 +534,16 @@ pub fn bin_visitation_law_data(
     // key: (location_id, r_center_bits, f_bits) -> set of user ids
     let mut groups: HashMap<(String, u64, u64), HashSet<i64>> = HashMap::new();
     for i in 0..law_data.height() {
-        let (Some(uid), Some(loc), Some(r), Some(freq)) = (user_id.get(i), location_id.get(i), r_km.get(i), f.get(i)) else {
+        let (Some(uid), Some(loc), Some(r), Some(freq)) =
+            (user_id.get(i), location_id.get(i), r_km.get(i), f.get(i))
+        else {
             continue;
         };
         if !(r.is_finite() && r > 0.0 && freq.is_finite() && freq > 0.0) {
             continue;
         }
-        let r_center = (r / distance_bin_width_km).floor() * distance_bin_width_km + distance_bin_width_km / 2.0;
+        let r_center = (r / distance_bin_width_km).floor() * distance_bin_width_km
+            + distance_bin_width_km / 2.0;
         groups
             .entry((loc.to_string(), r_center.to_bits(), freq.to_bits()))
             .or_default()
@@ -367,7 +582,9 @@ pub fn bin_visitation_law_data(
     let edges: Vec<f64> = (0..=n_bins)
         .map(|i| 10f64.powf(log_min + (log_max - log_min) * (i as f64) / (n_bins as f64)))
         .collect();
-    let centers: Vec<f64> = (0..n_bins).map(|i| (edges[i] * edges[i + 1]).sqrt()).collect();
+    let centers: Vec<f64> = (0..n_bins)
+        .map(|i| (edges[i] * edges[i + 1]).sqrt())
+        .collect();
 
     let mut rf_out = Vec::new();
     let mut rho_out = Vec::new();
@@ -377,7 +594,11 @@ pub fn bin_visitation_law_data(
         let is_last = idx == n_bins - 1;
         let mut bucket = Vec::new();
         for (&rf, &rho) in rf_values.iter().zip(rho_values.iter()) {
-            let in_bin = if is_last { rf >= lo && rf <= hi } else { rf >= lo && rf < hi };
+            let in_bin = if is_last {
+                rf >= lo && rf <= hi
+            } else {
+                rf >= lo && rf < hi
+            };
             if in_bin {
                 bucket.push(rho);
             }
@@ -393,14 +614,19 @@ pub fn bin_visitation_law_data(
 /// Mirrors fkmob's `fit_visitation_law`: OLS fit of `log(rho)` on `log(rf)`
 /// (`rho(r,f) = mu * (rf)^-eta`), no bounds/scipy needed -- a closed-form
 /// degree-1 polynomial fit.
-pub fn fit_visitation_law(rf_values: &[f64], rho_values: &[f64]) -> anyhow::Result<(f64, f64, f64)> {
+pub fn fit_visitation_law(
+    rf_values: &[f64],
+    rho_values: &[f64],
+) -> anyhow::Result<(f64, f64, f64)> {
     if rf_values.len() != rho_values.len() {
         anyhow::bail!("rf_values and rho_values must have the same length");
     }
     let xy: Vec<(f64, f64)> = rf_values
         .iter()
         .zip(rho_values.iter())
-        .filter(|pair: &(&f64, &f64)| pair.0.is_finite() && pair.1.is_finite() && *pair.0 > 0.0 && *pair.1 > 0.0)
+        .filter(|pair: &(&f64, &f64)| {
+            pair.0.is_finite() && pair.1.is_finite() && *pair.0 > 0.0 && *pair.1 > 0.0
+        })
         .map(|(&rf, &rho)| (rf.ln(), rho.ln()))
         .collect();
     if xy.len() < 2 {
@@ -420,15 +646,25 @@ pub fn fit_visitation_law(rf_values: &[f64], rho_values: &[f64]) -> anyhow::Resu
     let eta = -slope;
     let mu = intercept.exp();
 
-    let ss_res: f64 = xy.iter().map(|(x, y)| (y - (intercept + slope * x)).powi(2)).sum();
+    let ss_res: f64 = xy
+        .iter()
+        .map(|(x, y)| (y - (intercept + slope * x)).powi(2))
+        .sum();
     let ss_tot: f64 = xy.iter().map(|(_, y)| (y - y_mean).powi(2)).sum();
-    let r2 = if ss_tot == 0.0 { 1.0 } else { 1.0 - ss_res / ss_tot };
+    let r2 = if ss_tot == 0.0 {
+        1.0
+    } else {
+        1.0 - ss_res / ss_tot
+    };
 
     Ok((eta, mu, r2))
 }
 
 /// Mirrors `comparison.py::_distance_frequency_dataset`.
-pub fn distance_frequency_dataset(visits: &DataFrame, label: &str) -> anyhow::Result<(Vec<f64>, Vec<f64>, f64, f64, String)> {
+pub fn distance_frequency_dataset(
+    visits: &DataFrame,
+    label: &str,
+) -> anyhow::Result<(Vec<f64>, Vec<f64>, f64, f64, String)> {
     let law_data = visitation_law_data(visits)?;
     let (rf_points, rho_points) = bin_visitation_law_data(&law_data, 30, 1.0)?;
     let (eta, mu, _r2) = fit_visitation_law(&rf_points, &rho_points)?;
@@ -464,10 +700,37 @@ mod tests {
         ]
         .unwrap()
         .lazy()
-        .with_columns([col("timestamp").str().to_datetime(Some(TimeUnit::Microseconds), None, StrptimeOptions::default(), lit("raise"))])
+        .with_columns([col("timestamp").str().to_datetime(
+            Some(TimeUnit::Microseconds),
+            None,
+            StrptimeOptions::default(),
+            lit("raise"),
+        )])
         .collect()
         .unwrap();
         assert!(daily_location_lognormal_dataset(&visits, "test").is_err());
+    }
+
+    #[test]
+    fn mobility_law_visits_factorizes_string_user_ids() {
+        let df = df![
+            "user_id" => ["u1", "u2", "u1"],
+            "timestamp" => ["2026-01-01T00:00:00", "2026-01-01T01:00:00", "2026-01-01T02:00:00"],
+            "lat" => [48.85, 48.86, 48.87],
+            "lng" => [2.35, 2.36, 2.37],
+        ]
+        .unwrap();
+        let visits =
+            mobility_law_visits(&df, "user_id", "timestamp", "lat", "lng", None, None, 10).unwrap();
+        assert_eq!(visits.column("user_id").unwrap().dtype(), &DataType::Int64);
+        let ids: Vec<i64> = visits
+            .column("user_id")
+            .unwrap()
+            .i64()
+            .unwrap()
+            .into_no_null_iter()
+            .collect();
+        assert_eq!(ids, vec![0, 1, 0]);
     }
 
     #[test]
@@ -495,11 +758,21 @@ mod tests {
     #[test]
     #[ignore = "requires repo data at data/gparis/results/gparis_simulation_core_trajectories_20260710T073952.parquet"]
     fn gparis_distance_frequency_matches_python_reference() {
-        let repo_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().to_path_buf();
-        let path = repo_root.join("data/gparis/results/gparis_simulation_core_trajectories_20260710T073952.parquet");
+        let repo_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .to_path_buf();
+        let path = repo_root.join(
+            "data/gparis/results/gparis_simulation_core_trajectories_20260710T073952.parquet",
+        );
         let traj = super::super::trajectory::load_trajectory(&path).unwrap();
 
-        let cols: Vec<&str> = traj.df.get_column_names().iter().map(|s| s.as_str()).collect();
+        let cols: Vec<&str> = traj
+            .df
+            .get_column_names()
+            .iter()
+            .map(|s| s.as_str())
+            .collect();
         let activity_col = crate::columns::detect_in(&cols, crate::columns::ACTIVITY_CANDIDATES);
         assert_eq!(activity_col.as_deref(), Some("purpose"));
 
@@ -516,7 +789,8 @@ mod tests {
         .unwrap();
         assert_eq!(visits.height(), 39578);
 
-        let (rf_points, rho_points, eta, mu, _label) = distance_frequency_dataset(&visits, "synthetic").unwrap();
+        let (rf_points, rho_points, eta, mu, _label) =
+            distance_frequency_dataset(&visits, "synthetic").unwrap();
         assert_eq!(rf_points.len(), 26);
         assert_eq!(rho_points.len(), 26);
         assert!((eta - 0.821291713354924).abs() < 1e-6, "eta={eta}");
@@ -530,10 +804,20 @@ mod tests {
     #[test]
     #[ignore = "requires repo data at data/gparis/results/gparis_simulation_core_trajectories_20260710T073952.parquet"]
     fn gparis_daily_location_lognormal_matches_python_reference() {
-        let repo_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().to_path_buf();
-        let path = repo_root.join("data/gparis/results/gparis_simulation_core_trajectories_20260710T073952.parquet");
+        let repo_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .to_path_buf();
+        let path = repo_root.join(
+            "data/gparis/results/gparis_simulation_core_trajectories_20260710T073952.parquet",
+        );
         let traj = super::super::trajectory::load_trajectory(&path).unwrap();
-        let cols: Vec<&str> = traj.df.get_column_names().iter().map(|s| s.as_str()).collect();
+        let cols: Vec<&str> = traj
+            .df
+            .get_column_names()
+            .iter()
+            .map(|s| s.as_str())
+            .collect();
         let activity_col = crate::columns::detect_in(&cols, crate::columns::ACTIVITY_CANDIDATES);
 
         let visits = mobility_law_visits(
@@ -548,7 +832,8 @@ mod tests {
         )
         .unwrap();
 
-        let (x_points, y_points, mu, sigma, _label) = daily_location_lognormal_dataset(&visits, "synthetic").unwrap();
+        let (x_points, y_points, mu, sigma, _label) =
+            daily_location_lognormal_dataset(&visits, "synthetic").unwrap();
         assert_eq!(x_points.len(), 5);
         assert_eq!(y_points.len(), 5);
         assert_eq!(x_points, vec![1.0, 2.0, 3.0, 4.0, 5.0]);

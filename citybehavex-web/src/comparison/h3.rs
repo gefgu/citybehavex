@@ -65,7 +65,10 @@ mod tests {
     #[test]
     fn null_and_nan_map_to_null_cell() {
         let lat = Series::new("lat".into(), vec![Some(37.769377f64), None, Some(f64::NAN)]);
-        let lng = Series::new("lng".into(), vec![Some(-122.388519f64), Some(1.0), Some(2.0)]);
+        let lng = Series::new(
+            "lng".into(),
+            vec![Some(-122.388519f64), Some(1.0), Some(2.0)],
+        );
         let cells = h3_cells(&lat, &lng, 9).unwrap();
         let ca = cells.u64().unwrap();
         assert!(ca.get(0).is_some());

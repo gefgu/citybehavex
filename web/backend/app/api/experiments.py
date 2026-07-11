@@ -38,6 +38,7 @@ class ExperimentUpdate(BaseModel):
     time_use_weight_col: str | None = None
     profiles_enabled: bool | None = None
     profiles_output: str | None = None
+    bbox: dict[str, float] | None = None
 
 
 @router.get("/experiments")

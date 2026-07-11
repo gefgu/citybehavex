@@ -62,7 +62,8 @@ impl Default for SocialNetworkConfig {
 
 impl SocialNetworkConfig {
     pub fn validate(&self) -> anyhow::Result<()> {
-        if !(0..=15).contains(&self.home_h3_resolution) || !(0..=15).contains(&self.work_h3_resolution)
+        if !(0..=15).contains(&self.home_h3_resolution)
+            || !(0..=15).contains(&self.work_h3_resolution)
         {
             anyhow::bail!("home/work_h3_resolution must be in [0, 15]");
         }
