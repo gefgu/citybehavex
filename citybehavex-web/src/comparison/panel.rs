@@ -51,7 +51,9 @@ pub fn looks_like_panel_observations(
     h3_resolution: u8,
 ) -> anyhow::Result<bool> {
     let cols: Vec<&str> = df.get_column_names().iter().map(|s| s.as_str()).collect();
-    if detect_in(&cols, END_TS_CANDIDATES).is_some() || detect_in(&cols, DURATION_CANDIDATES).is_some() {
+    if detect_in(&cols, END_TS_CANDIDATES).is_some()
+        || detect_in(&cols, DURATION_CANDIDATES).is_some()
+    {
         return Ok(false);
     }
     if df.height() == 0 {
@@ -73,7 +75,10 @@ pub fn looks_like_panel_observations(
     };
 
     let comparable = fill_null_false(&same_user);
-    let denominator = comparable.into_iter().filter(|v| v.unwrap_or(false)).count() as i64;
+    let denominator = comparable
+        .into_iter()
+        .filter(|v| v.unwrap_or(false))
+        .count() as i64;
     if denominator <= 0 {
         return Ok(false);
     }
@@ -83,6 +88,7 @@ pub fn looks_like_panel_observations(
     Ok(duplicate_share >= 0.2)
 }
 
+#[derive(Debug, Clone, Copy)]
 pub enum AdaptationMode {
     Auto,
     Force,
@@ -116,7 +122,15 @@ pub fn adapt_evaluation_dataframe(
     let location_col = configured_location_col.filter(|c| cols.contains(c));
 
     let should_adapt = matches!(mode, AdaptationMode::Force)
-        || looks_like_panel_observations(df, uid_col, datetime_col, lat_col, lng_col, location_col, h3_resolution)?;
+        || looks_like_panel_observations(
+            df,
+            uid_col,
+            datetime_col,
+            lat_col,
+            lng_col,
+            location_col,
+            h3_resolution,
+        )?;
     if !should_adapt {
         return Ok(EvaluationAdaptationResult {
             df: df.clone(),
@@ -130,7 +144,10 @@ pub fn adapt_evaluation_dataframe(
     let ordered = sorted(df, uid_col, datetime_col)?;
     let (key, key_source) = if let Some(location_col) = location_col {
         (
-            ordered.column(location_col)?.as_materialized_series().cast(&DataType::String)?,
+            ordered
+                .column(location_col)?
+                .as_materialized_series()
+                .cast(&DataType::String)?,
             format!("location column '{location_col}'"),
         )
     } else {
@@ -139,7 +156,10 @@ pub fn adapt_evaluation_dataframe(
             ordered.column(lng_col)?.as_materialized_series(),
             h3_resolution,
         )?;
-        (cells.cast(&DataType::String)?, format!("H3 resolution {h3_resolution}"))
+        (
+            cells.cast(&DataType::String)?,
+            format!("H3 resolution {h3_resolution}"),
+        )
     };
 
     let same_user = same_as_previous(ordered.column(uid_col)?.as_materialized_series())?;
@@ -161,7 +181,11 @@ pub fn adapt_evaluation_dataframe(
         adapted: true,
         warning: Some(warning),
         location_col: location_col.map(str::to_string),
-        h3_resolution: if location_col.is_some() { None } else { Some(h3_resolution as i64) },
+        h3_resolution: if location_col.is_some() {
+            None
+        } else {
+            Some(h3_resolution as i64)
+        },
     })
 }
 
@@ -187,7 +211,10 @@ mod tests {
         let df = df_panel_like();
         let result =
             looks_like_panel_observations(&df, "uid", "dt", "lat", "lng", None, 10).unwrap();
-        assert!(result, "4/5 comparable consecutive rows share a location -> panel-like");
+        assert!(
+            result,
+            "4/5 comparable consecutive rows share a location -> panel-like"
+        );
     }
 
     #[test]
@@ -219,12 +246,22 @@ mod tests {
     #[test]
     #[ignore = "requires repo data at data/gparis/gparis_visitation_df.parquet"]
     fn gparis_observed_data_is_not_panel_like() {
-        let repo_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().to_path_buf();
+        let repo_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .to_path_buf();
         let path = repo_root.join("data/gparis/gparis_visitation_df.parquet");
         let df = super::super::trajectory::read_parquet(&path).unwrap();
-        let result =
-            looks_like_panel_observations(&df, "user_id", "start_timestamp", "lat", "lon", None, 10)
-                .unwrap();
+        let result = looks_like_panel_observations(
+            &df,
+            "user_id",
+            "start_timestamp",
+            "lat",
+            "lon",
+            None,
+            10,
+        )
+        .unwrap();
         assert!(!result);
     }
 }

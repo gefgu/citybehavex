@@ -8,12 +8,20 @@ efficient column-projected loading.
 
 from __future__ import annotations
 
+import threading
+from collections import OrderedDict
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 import duckdb
 
 from .reports_bridge import detect_column
+
+RUN_SUMMARY_CACHE_CAPACITY = 512
+_RunSummaryCacheKey = tuple[str, int | None, int | None]
+_CachedRunSummary = tuple[dict[str, Any] | None, str | None]
+_run_summary_cache: OrderedDict[_RunSummaryCacheKey, _CachedRunSummary] = OrderedDict()
+_run_summary_cache_lock = threading.Lock()
 
 
 def quote_path(path: Path) -> str:
@@ -74,6 +82,40 @@ def run_summary(path: Path) -> dict[str, Any]:
         result["date_start"] = row[idx]
         result["date_end"] = row[idx + 1]
     return result
+
+
+def _run_summary_cache_key(path: Path) -> _RunSummaryCacheKey:
+    try:
+        stat = path.stat()
+    except OSError:
+        return (str(path), None, None)
+    return (str(path), int(stat.st_mtime), stat.st_size)
+
+
+def cached_run_summary(path: Path) -> _CachedRunSummary:
+    """Cached ``run_summary`` wrapper keyed by path, mtime seconds and size."""
+    key = _run_summary_cache_key(path)
+    with _run_summary_cache_lock:
+        cached = _run_summary_cache.get(key)
+        if cached is not None:
+            _run_summary_cache.move_to_end(key)
+            summary, error = cached
+            return (dict(summary) if summary is not None else None, error)
+
+    try:
+        summary = run_summary(path)
+        computed: _CachedRunSummary = (summary, None)
+    except Exception as exc:  # noqa: BLE001 - callers surface summary errors as metadata
+        computed = (None, str(exc))
+
+    with _run_summary_cache_lock:
+        _run_summary_cache[key] = computed
+        _run_summary_cache.move_to_end(key)
+        while len(_run_summary_cache) > RUN_SUMMARY_CACHE_CAPACITY:
+            _run_summary_cache.popitem(last=False)
+
+    summary, error = computed
+    return (dict(summary) if summary is not None else None, error)
 
 
 # Kept in sync with citybehavex.reports.comparison candidate lists.

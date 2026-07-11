@@ -45,7 +45,11 @@ pub fn stvd_hourly_histogram(
 
     let mut layers = HashMap::new();
     for &res in resolutions {
-        let cells = h3_cells(work.column(lat_col)?.as_materialized_series(), work.column(lng_col)?.as_materialized_series(), res)?;
+        let cells = h3_cells(
+            work.column(lat_col)?.as_materialized_series(),
+            work.column(lng_col)?.as_materialized_series(),
+            res,
+        )?;
         let cell_ca = cells.u64()?;
         let hour_ca = work.column("_hour")?.i32()?;
 
@@ -90,7 +94,11 @@ pub fn diff_stvd_layers(
     for &res in resolutions {
         let syn_lookup = syn_hourly.get(&res).cloned().unwrap_or_default();
         let real_lookup = real_hourly.get(&res).cloned().unwrap_or_default();
-        let mut all_cells: Vec<u64> = syn_lookup.keys().chain(real_lookup.keys()).copied().collect();
+        let mut all_cells: Vec<u64> = syn_lookup
+            .keys()
+            .chain(real_lookup.keys())
+            .copied()
+            .collect();
         all_cells.sort_unstable();
         all_cells.dedup();
 
@@ -107,22 +115,37 @@ pub fn diff_stvd_layers(
             // `max_by_key` flips that to match: the smallest tied hour ends
             // up processed last, so it's the one kept.
             let syn_peak = if syn_vol > 0.0 {
-                STVD_ALL_HOURS.iter().copied().rev().max_by_key(|&h| syn_row[h as usize]).unwrap_or(0)
+                STVD_ALL_HOURS
+                    .iter()
+                    .copied()
+                    .rev()
+                    .max_by_key(|&h| syn_row[h as usize])
+                    .unwrap_or(0)
             } else {
                 0
             };
             let real_peak = if real_vol > 0.0 {
-                STVD_ALL_HOURS.iter().copied().rev().max_by_key(|&h| real_row[h as usize]).unwrap_or(0)
+                STVD_ALL_HOURS
+                    .iter()
+                    .copied()
+                    .rev()
+                    .max_by_key(|&h| real_row[h as usize])
+                    .unwrap_or(0)
             } else {
                 0
             };
 
             let volume_diff_pct = (syn_vol - real_vol) / real_vol.max(1.0) * 100.0;
             let raw_shift = (syn_peak - real_peak).abs();
-            let candidate2 = if raw_shift <= 12 { 12 - raw_shift } else { raw_shift };
+            let candidate2 = if raw_shift <= 12 {
+                12 - raw_shift
+            } else {
+                raw_shift
+            };
             let peak_shift_hours = (raw_shift.min(candidate2) as f64).min(12.0);
 
-            let cell_index = CellIndex::try_from(cell).map_err(|e| anyhow::anyhow!("invalid H3 cell {cell}: {e}"))?;
+            let cell_index = CellIndex::try_from(cell)
+                .map_err(|e| anyhow::anyhow!("invalid H3 cell {cell}: {e}"))?;
             let boundary = cell_index.boundary();
             let mut ring: Vec<[f64; 2]> = boundary.iter().map(|ll| [ll.lng(), ll.lat()]).collect();
             if let Some(&first) = ring.first() {
@@ -155,8 +178,20 @@ pub fn compute_stvd_layers(
     real_datetime_col: &str,
     resolutions: &[u8],
 ) -> anyhow::Result<HashMap<u8, Vec<StvdFeature>>> {
-    let syn_hourly = stvd_hourly_histogram(syn_df, syn_lat_col, syn_lng_col, syn_datetime_col, resolutions)?;
-    let real_hourly = stvd_hourly_histogram(real_df, real_lat_col, real_lng_col, real_datetime_col, resolutions)?;
+    let syn_hourly = stvd_hourly_histogram(
+        syn_df,
+        syn_lat_col,
+        syn_lng_col,
+        syn_datetime_col,
+        resolutions,
+    )?;
+    let real_hourly = stvd_hourly_histogram(
+        real_df,
+        real_lat_col,
+        real_lng_col,
+        real_datetime_col,
+        resolutions,
+    )?;
     diff_stvd_layers(&syn_hourly, &real_hourly, resolutions)
 }
 
@@ -204,7 +239,11 @@ mod tests {
         // raw_shift=6 (<=12) -> candidate2=6 -> min(6,6)=6.
         // raw_shift=10 (<=12) -> candidate2=2 -> min(10,2)=2.
         for (raw_shift, expected) in [(13i32, 12.0f64), (6, 6.0), (10, 2.0), (0, 0.0), (12, 0.0)] {
-            let candidate2 = if raw_shift <= 12 { 12 - raw_shift } else { raw_shift };
+            let candidate2 = if raw_shift <= 12 {
+                12 - raw_shift
+            } else {
+                raw_shift
+            };
             let peak_shift_hours = (raw_shift.min(candidate2) as f64).min(12.0);
             assert_eq!(peak_shift_hours, expected, "raw_shift={raw_shift}");
         }
@@ -221,16 +260,27 @@ mod tests {
     #[test]
     #[ignore = "requires repo data at data/gparis/results/... and data/gparis/gparis_visitation_df.parquet"]
     fn gparis_stvd_layers_match_python_reference() {
-        let repo_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().to_path_buf();
-        let syn_path = repo_root.join("data/gparis/results/gparis_simulation_core_trajectories_20260710T073952.parquet");
+        let repo_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .to_path_buf();
+        let syn_path = repo_root.join(
+            "data/gparis/results/gparis_simulation_core_trajectories_20260710T073952.parquet",
+        );
         let obs_path = repo_root.join("data/gparis/gparis_visitation_df.parquet");
 
         let traj = super::super::trajectory::load_trajectory(&syn_path).unwrap();
         let obs_df = super::super::trajectory::read_parquet(&obs_path).unwrap();
 
         let layers = compute_stvd_layers(
-            &traj.df, &traj.lat_col, &traj.lng_col, &traj.datetime_col,
-            &obs_df, "lat", "lon", "start_timestamp",
+            &traj.df,
+            &traj.lat_col,
+            &traj.lng_col,
+            &traj.datetime_col,
+            &obs_df,
+            "lat",
+            "lon",
+            "start_timestamp",
             &[7],
         )
         .unwrap();
@@ -239,16 +289,43 @@ mod tests {
         assert_eq!(features.len(), 908);
 
         let expected = [
-            ("871fb0116ffffff", -100.0f64, 12.0f64, [2.698163878468575f64, 48.41851708165447]),
-            ("871fb0121ffffff", 700.0, 3.0, [2.786233140172542, 48.515507217271185]),
-            ("871fb012dffffff", 1300.0, 6.0, [2.8461272899312875, 48.51781644860264]),
+            (
+                "871fb0116ffffff",
+                -100.0f64,
+                12.0f64,
+                [2.698163878468575f64, 48.41851708165447],
+            ),
+            (
+                "871fb0121ffffff",
+                700.0,
+                3.0,
+                [2.786233140172542, 48.515507217271185],
+            ),
+            (
+                "871fb012dffffff",
+                1300.0,
+                6.0,
+                [2.8461272899312875, 48.51781644860264],
+            ),
         ];
         for (feature, (hex, vol, shift, first_coord)) in features.iter().zip(expected.iter()) {
             assert_eq!(&feature.cell_hex, hex);
-            assert!((feature.volume_diff_pct - vol).abs() < 1e-9, "{hex} volume_diff_pct");
-            assert!((feature.peak_shift_hours - shift).abs() < 1e-9, "{hex} peak_shift_hours");
-            assert!((feature.ring[0][0] - first_coord[0]).abs() < 1e-9, "{hex} ring lng");
-            assert!((feature.ring[0][1] - first_coord[1]).abs() < 1e-9, "{hex} ring lat");
+            assert!(
+                (feature.volume_diff_pct - vol).abs() < 1e-9,
+                "{hex} volume_diff_pct"
+            );
+            assert!(
+                (feature.peak_shift_hours - shift).abs() < 1e-9,
+                "{hex} peak_shift_hours"
+            );
+            assert!(
+                (feature.ring[0][0] - first_coord[0]).abs() < 1e-9,
+                "{hex} ring lng"
+            );
+            assert!(
+                (feature.ring[0][1] - first_coord[1]).abs() < 1e-9,
+                "{hex} ring lat"
+            );
         }
     }
 }

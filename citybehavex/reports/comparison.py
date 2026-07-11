@@ -1263,6 +1263,56 @@ def generate_comparison_report(
         uid_col=real_traj.uid_col,
     )
 
+    # The "synthetic" side is normally genuine simulation output (already
+    # has real stay boundaries via a dwell/duration column, so
+    # _looks_like_panel_observations correctly leaves it alone). But when
+    # this function is used to compare two REAL halves against each other
+    # (the paper's Ref. column: half A passed in as "traj", half B as the
+    # observed side), traj.df is raw panel data too and, without this,
+    # only the observed side got collapsed into stays -- an asymmetric
+    # comparison that inflated e.g. visits_per_user for the Ref. row
+    # specifically (confirmed: yjmob's Ref Vf went 84.6 -> 494.0 after
+    # fixing evaluation_adaptation.h3_resolution, because coarsening only
+    # helped the observed side while the still-raw "synthetic" half stayed
+    # put). Auto-detect and adapt traj the same way, so real-vs-real
+    # comparisons get symmetric treatment while simulation output is
+    # unaffected.
+    # "force" mode means "I know the OBSERVED side needs collapsing
+    # regardless of auto-detection" (e.g. yjmob2's config sets mode: force)
+    # -- it says nothing about the synthetic side's nature and must not
+    # propagate there, or genuine simulation output would get wrongly
+    # collapsed too. Downgrade force -> auto for this call specifically;
+    # "off" (explicitly disable the feature) and "auto" pass through
+    # unchanged, and h3_resolution/location_col are still inherited.
+    _synth_adapt_mode = _configured_adaptation_value(evaluation_adaptation_config, "mode", "auto")
+    if _synth_adapt_mode == "force":
+        _synth_adapt_config = {
+            "mode": "auto",
+            "location_col": _configured_adaptation_value(evaluation_adaptation_config, "location_col", None),
+            "h3_resolution": _configured_adaptation_value(evaluation_adaptation_config, "h3_resolution", 10),
+        }
+    else:
+        _synth_adapt_config = evaluation_adaptation_config
+    synth_eval = _adapt_evaluation_dataframe(
+        traj.df,
+        label="synthetic",
+        uid_col=traj.uid_col,
+        datetime_col=traj.datetime_col,
+        lat_col=traj.lat_col,
+        lng_col=traj.lng_col,
+        config=_synth_adapt_config,
+    )
+    if synth_eval.warning:
+        typer.echo(f"Warning: {synth_eval.warning}", err=True)
+    if synth_eval.adapted:
+        traj = fkmob.TrajDataFrame(
+            synth_eval.df,
+            datetime_col=traj.datetime_col,
+            lat_col=traj.lat_col,
+            lng_col=traj.lng_col,
+            uid_col=traj.uid_col,
+        )
+
     typer.echo("Computing mobility metrics ...")
     labels = ("synthetic", observed_label)
 
@@ -1640,7 +1690,7 @@ def generate_comparison_report(
         ("Dwell time", f"{w_dwell:.4f}", "min"),
     ]
     if w_trip is not None:
-        w_rows.append(("Trip duration (car)", f"{w_trip:.4f}", "min"))
+        w_rows.append(("Trip duration", f"{w_trip:.4f}", "min"))
 
     summary = "  ".join(f"{n}: {v}" for n, v, _ in w_rows)
     if json_output_path:

@@ -10,7 +10,9 @@ from .config import CityBehavExConfig, apply_overrides, load_config
 from .llm import LLMConfig
 from .reports import ComparisonConfig
 from .reports.comparison import (
+    _ACTIVITY_CANDIDATES,
     _activities_sidecar_path,
+    detect_column,
     generate_comparison_report,
     load_trajectory,
 )
@@ -144,11 +146,13 @@ def report(
         road_edges_df = pd.read_parquet(rn.edges_output)
 
     traj = load_trajectory(synthetic_path)
+    synth_activity_col = detect_column(traj.df, _ACTIVITY_CANDIDATES)
     generate_comparison_report(
         traj=traj,
         synthetic_path=synthetic_path,
         real_path=real_path,
         observed_label=label,
+        synth_activity_col=synth_activity_col,
         synthetic_activities_path=_activities_sidecar_path(synthetic_path),
         json_output_path=json_output,
         road_nodes_df=road_nodes_df,

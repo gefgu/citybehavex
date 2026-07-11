@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import re
 import shutil
+import threading
+from collections import OrderedDict
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Optional
@@ -21,9 +23,12 @@ from citybehavex.config.root import CityBehavExConfig
 from citybehavex.config import load_config
 
 from .config import CONFIGS_DIR, REPO_ROOT
-from .datasource import run_summary
+from .datasource import cached_run_summary
 
 _STAMP_RE = re.compile(r"_(\d{8}T\d{6})$")
+_CONFIG_CACHE_CAPACITY = 128
+_config_cache: OrderedDict[tuple[str, int, int], CityBehavExConfig] = OrderedDict()
+_config_cache_lock = threading.Lock()
 
 
 class ExperimentMutationError(ValueError):
@@ -79,10 +84,11 @@ class Run:
             "mtime": self.mtime,
         }
         if with_summary:
-            try:
-                d["summary"] = run_summary(self.path)
-            except Exception as exc:  # noqa: BLE001 - surface as metadata, don't 500
-                d["summary_error"] = str(exc)
+            summary, summary_error = cached_run_summary(self.path)
+            if summary is not None:
+                d["summary"] = summary
+            if summary_error is not None:
+                d["summary_error"] = summary_error
         return d
 
 
@@ -197,8 +203,27 @@ class Experiment:
         return None
 
 
-def _load_experiment(config_path: Path) -> Experiment:
+def _load_config_cached(config_path: Path) -> CityBehavExConfig:
+    stat = config_path.stat()
+    key = (str(config_path), int(stat.st_mtime), stat.st_size)
+    with _config_cache_lock:
+        cached = _config_cache.get(key)
+        if cached is not None:
+            _config_cache.move_to_end(key)
+            return cached
+
     cfg = load_config(str(config_path))
+
+    with _config_cache_lock:
+        _config_cache[key] = cfg
+        _config_cache.move_to_end(key)
+        while len(_config_cache) > _CONFIG_CACHE_CAPACITY:
+            _config_cache.popitem(last=False)
+    return cfg
+
+
+def _load_experiment(config_path: Path) -> Experiment:
+    cfg = _load_config_cached(config_path)
     synthetic_output = _resolve(cfg.simulation.output)
     observed_path = _resolve(cfg.comparison.path)
     time_use_path = _resolve(cfg.comparison.time_use_path)
@@ -220,6 +245,26 @@ def _load_experiment(config_path: Path) -> Experiment:
         "dt_update_mob_sim_hours": cfg.simulation.dt_update_mob_sim_hours,
         "indipendency_window_hours": cfg.simulation.indipendency_window_hours,
     }
+    tessellation_bbox = (
+        cfg.tessellation.min_lat,
+        cfg.tessellation.min_lon,
+        cfg.tessellation.max_lat,
+        cfg.tessellation.max_lon,
+    )
+    simulation_bbox = (
+        cfg.simulation.min_lat,
+        cfg.simulation.min_lon,
+        cfg.simulation.max_lat,
+        cfg.simulation.max_lon,
+    )
+    bbox = tessellation_bbox if all(v is not None for v in tessellation_bbox) else simulation_bbox
+    if all(v is not None for v in bbox):
+        params["bbox"] = {
+            "min_lat": bbox[0],
+            "min_lng": bbox[1],
+            "max_lat": bbox[2],
+            "max_lng": bbox[3],
+        }
     special_days = [
         {"name": sd.name, "start_date": sd.start_date, "end_date": sd.end_date}
         for sd in cfg.diaries.special_days
@@ -304,6 +349,19 @@ def update_experiment(exp_id: str, updates: dict[str, Any]) -> Experiment:
         "profiles_output": (profiles, "output"),
     }
     for api_field, value in updates.items():
+        if api_field == "bbox":
+            if value is None:
+                continue
+            target = _section(raw, "tessellation")
+            for api_key, config_key in (
+                ("min_lat", "min_lat"),
+                ("min_lng", "min_lon"),
+                ("max_lat", "max_lat"),
+                ("max_lng", "max_lon"),
+            ):
+                if api_key in value:
+                    target[config_key] = value[api_key]
+            continue
         if api_field not in field_map:
             continue
         section, config_field = field_map[api_field]

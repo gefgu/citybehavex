@@ -8,6 +8,7 @@ use crate::models::{ApiError, ApiResponse, ApiResult};
 use axum::Json;
 use axum::extract::rejection::JsonRejection;
 use axum::extract::{Path, Query};
+use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Deserialize)]
@@ -19,24 +20,44 @@ pub struct WithSummaryQuery {
 pub async fn list_experiments_route(
     Query(q): Query<WithSummaryQuery>,
 ) -> ApiResult<Vec<experiments::ExperimentJson>> {
-    let out = list_experiments()
-        .iter()
-        .map(|e| e.to_json(q.with_summary))
-        .collect();
+    let started = std::time::Instant::now();
+    let experiments = list_experiments();
+    let out: Vec<experiments::ExperimentJson> = if q.with_summary {
+        experiments.par_iter().map(|e| e.to_json(true)).collect()
+    } else {
+        experiments.iter().map(|e| e.to_json(false)).collect()
+    };
+    tracing::info!(
+        with_summary = q.with_summary,
+        experiments = out.len(),
+        runs = out.iter().map(|e| e.runs.len()).sum::<usize>(),
+        elapsed_ms = started.elapsed().as_millis(),
+        "listed experiments"
+    );
     Ok(ApiResponse::new(out))
 }
 
 pub async fn get_experiment_route(
     Path(exp_id): Path<String>,
 ) -> ApiResult<experiments::ExperimentJson> {
+    let started = std::time::Instant::now();
     let experiment = get_experiment(&exp_id)
         .ok_or_else(|| ApiError::not_found(format!("unknown experiment {exp_id:?}")))?;
-    Ok(ApiResponse::new(experiment.to_json(true)))
+    let out = experiment.to_json(true);
+    tracing::info!(
+        exp_id = %exp_id,
+        runs = out.runs.len(),
+        elapsed_ms = started.elapsed().as_millis(),
+        "loaded experiment"
+    );
+    Ok(ApiResponse::new(out))
 }
 
 fn mutation_error_response(exp_id: &str, err: ExperimentError) -> ApiError {
     match err {
-        ExperimentError::NotFound(_) => ApiError::not_found(format!("unknown experiment {exp_id:?}")),
+        ExperimentError::NotFound(_) => {
+            ApiError::not_found(format!("unknown experiment {exp_id:?}"))
+        }
         ExperimentError::RunNotFound(run_id) => {
             ApiError::not_found(format!("unknown run {run_id:?}"))
         }
@@ -53,8 +74,8 @@ pub async fn patch_experiment_route(
     // rejection) for a request body that fails to parse/validate against
     // the expected shape.
     let Json(update) = body.map_err(|e| ApiError::unprocessable(e.body_text()))?;
-    let experiment = update_experiment(&exp_id, &update)
-        .map_err(|e| mutation_error_response(&exp_id, e))?;
+    let experiment =
+        update_experiment(&exp_id, &update).map_err(|e| mutation_error_response(&exp_id, e))?;
     Ok(ApiResponse::new(experiment.to_json(true)))
 }
 
@@ -63,13 +84,15 @@ pub struct ArchivedConfig {
     archived_config: String,
 }
 
-pub async fn archive_experiment_route(
-    Path(exp_id): Path<String>,
-) -> ApiResult<ArchivedConfig> {
+pub async fn archive_experiment_route(Path(exp_id): Path<String>) -> ApiResult<ArchivedConfig> {
     let archived_path =
         archive_experiment(&exp_id).map_err(|e| mutation_error_response(&exp_id, e))?;
     Ok(ApiResponse::new(ArchivedConfig {
-        archived_config: archived_path.file_name().unwrap().to_string_lossy().to_string(),
+        archived_config: archived_path
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .to_string(),
     }))
 }
 
@@ -83,6 +106,9 @@ pub async fn delete_run_route(
 ) -> ApiResult<DeletedRun> {
     let deleted = delete_run(&exp_id, &run_id).map_err(|e| mutation_error_response(&exp_id, e))?;
     Ok(ApiResponse::new(DeletedRun {
-        deleted: deleted.into_iter().map(|p| p.display().to_string()).collect(),
+        deleted: deleted
+            .into_iter()
+            .map(|p| p.display().to_string())
+            .collect(),
     }))
 }

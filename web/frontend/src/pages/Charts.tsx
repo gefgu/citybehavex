@@ -294,21 +294,7 @@ function sectionKey(section: string, filter = "all") {
 function defaultSectionRequests(
   dayFilter: string,
   distributionFilter: string,
-  fastOnly = false,
 ): [string, string][] {
-  if (fastOnly) {
-    const metricFilter = distributionFilter === "all" ? dayFilter : distributionFilter;
-    return [
-      ["time-use", dayFilter],
-      ["metrics", metricFilter],
-      ["distributions", distributionFilter],
-      ["activity", dayFilter],
-      ["motifs", dayFilter],
-      ["stvd", dayFilter],
-      ["profiles", "all"],
-      ["social-network", "all"],
-    ];
-  }
   const metricFilter = distributionFilter === "all" ? dayFilter : distributionFilter;
   return [
     ["micro-activity", dayFilter],
@@ -580,7 +566,6 @@ export function Charts() {
   useEffect(() => {
     demoFilterRef.current = demoFilter;
   }, [demoFilter]);
-  const demoSafeMode = id.includes("yjmob2");
 
   const loadSectionRequests = useCallback(
     async (basePayload: ChartPayload, requests: [string, string][], requestScope: number) => {
@@ -668,7 +653,7 @@ export function Charts() {
       setPayload(chartsResult);
       await loadSectionRequests(
         chartsResult,
-        defaultSectionRequests("all", "all", demoSafeMode),
+        defaultSectionRequests("all", "all"),
         requestScopeRef.current,
       );
       if (cancelled) return;
@@ -685,29 +670,27 @@ export function Charts() {
       // /network-validation route) -- still fetched last, independent of
       // whether home-work succeeded, so one failing section doesn't block
       // the other.
-      if (!demoSafeMode) {
-        try {
-          const nv = await fetchNetworkValidation(id, run);
-          if (!cancelled) setNetworkValidation(nv);
-        } catch (e) {
-          if (!cancelled) setNetworkValidationError(String(e));
-        }
+      try {
+        const nv = await fetchNetworkValidation(id, run);
+        if (!cancelled) setNetworkValidation(nv);
+      } catch (e) {
+        if (!cancelled) setNetworkValidationError(String(e));
       }
     })();
 
     return () => {
       cancelled = true;
     };
-  }, [id, run, loadSectionRequests, demoSafeMode]);
+  }, [id, run, loadSectionRequests]);
 
   useEffect(() => {
     if (!payload) return;
     void loadSectionRequests(
       payload,
-      defaultSectionRequests(dayFilter, distributionFilter, demoSafeMode),
+      defaultSectionRequests(dayFilter, distributionFilter),
       requestScopeRef.current,
     );
-  }, [payload, dayFilter, distributionFilter, loadSectionRequests, demoSafeMode]);
+  }, [payload, dayFilter, distributionFilter, loadSectionRequests]);
 
   // Demographic-filter-only refetch: the sequential chain above already
   // covers the initial home-work fetch on mount/id/run change, so this only
@@ -1223,7 +1206,7 @@ export function Charts() {
         <div className="state">Failed to load social network: {sectionError("social-network")}</div>
       ) : socialNetworkLoading ? (
         <div className="state">Building social network…</div>
-      ) : networkValidation === null && !demoSafeMode ? (
+      ) : networkValidation === null ? (
         <div className="state">Building social network validation… (fetched separately from the rest of the charts)</div>
       ) : (
         <div className="network-empty">

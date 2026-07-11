@@ -7,8 +7,9 @@
 //! rather than trusting the literal path.
 
 use crate::config::{configs_dir, repo_root};
-use crate::datasource::{RunSummary, run_summary};
+use crate::datasource::{RunSummary, cached_run_summary};
 use crate::settings::{self, CityBehavExConfig};
+use rayon::prelude::*;
 use regex::Regex;
 use serde::Serialize;
 use std::path::{Path, PathBuf};
@@ -36,7 +37,11 @@ fn resolve(path_str: Option<&str>) -> Option<PathBuf> {
         return None;
     }
     let p = PathBuf::from(path_str);
-    Some(if p.is_absolute() { p } else { repo_root().join(p) })
+    Some(if p.is_absolute() {
+        p
+    } else {
+        repo_root().join(p)
+    })
 }
 
 fn display_path(path: Option<&Path>) -> Option<String> {
@@ -57,7 +62,10 @@ pub struct Run {
 impl Run {
     fn sibling(&self, suffix: &str) -> PathBuf {
         let stem = self.path.file_stem().unwrap_or_default().to_string_lossy();
-        let ext = self.path.extension().map(|e| e.to_string_lossy().to_string());
+        let ext = self
+            .path
+            .extension()
+            .map(|e| e.to_string_lossy().to_string());
         let filename = match ext {
             Some(ext) => format!("{stem}{suffix}.{ext}"),
             None => format!("{stem}{suffix}"),
@@ -79,15 +87,14 @@ impl Run {
     }
     pub fn social_network_path(&self) -> PathBuf {
         let stem = self.path.file_stem().unwrap_or_default().to_string_lossy();
-        self.path.with_file_name(format!("{stem}_social_network.json"))
+        self.path
+            .with_file_name(format!("{stem}_social_network.json"))
     }
 
     pub fn to_json(&self, with_summary: bool) -> RunJson {
         let (summary, summary_error) = if with_summary {
-            match run_summary(&self.path) {
-                Ok(s) => (Some(s), None),
-                Err(e) => (None, Some(e.to_string())),
-            }
+            let cached = cached_run_summary(&self.path);
+            (cached.summary, cached.summary_error)
         } else {
             (None, None)
         };
@@ -124,7 +131,11 @@ fn discover_runs(output_path: Option<&Path>) -> Vec<Run> {
     if !parent.is_dir() {
         return Vec::new();
     }
-    let stem = output_path.file_stem().unwrap_or_default().to_string_lossy().to_string();
+    let stem = output_path
+        .file_stem()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .to_string();
     let suffix = output_path
         .extension()
         .map(|e| format!(".{}", e.to_string_lossy()))
@@ -139,11 +150,19 @@ fn discover_runs(output_path: Option<&Path>) -> Vec<Run> {
         if !candidate.is_file() {
             continue;
         }
-        let filename = candidate.file_name().unwrap_or_default().to_string_lossy().to_string();
+        let filename = candidate
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .to_string();
         if !filename.starts_with(&stem) || !filename.ends_with(&suffix) {
             continue;
         }
-        let name = candidate.file_stem().unwrap_or_default().to_string_lossy().to_string();
+        let name = candidate
+            .file_stem()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .to_string();
         if name.ends_with("_encounters") || name.ends_with("_moving") || name.ends_with("_crp") {
             continue;
         }
@@ -163,9 +182,17 @@ fn discover_runs(output_path: Option<&Path>) -> Vec<Run> {
             .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
             .map(|d| d.as_secs_f64())
             .unwrap_or(0.0);
-        runs.push(Run { run_id, path: candidate, mtime });
+        runs.push(Run {
+            run_id,
+            path: candidate,
+            mtime,
+        });
     }
-    runs.sort_by(|a, b| b.mtime.partial_cmp(&a.mtime).unwrap_or(std::cmp::Ordering::Equal));
+    runs.sort_by(|a, b| {
+        b.mtime
+            .partial_cmp(&a.mtime)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
     runs
 }
 
@@ -189,6 +216,16 @@ pub struct ParamsJson {
     pub alpha: f64,
     pub dt_update_mob_sim_hours: f64,
     pub indipendency_window_hours: f64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bbox: Option<BBoxJson>,
+}
+
+#[derive(Debug, Clone, Serialize, serde::Deserialize)]
+pub struct BBoxJson {
+    pub min_lat: f64,
+    pub min_lng: f64,
+    pub max_lat: f64,
+    pub max_lng: f64,
 }
 
 pub struct Experiment {
@@ -202,6 +239,7 @@ pub struct Experiment {
     pub time_use_country: Option<String>,
     pub time_use_survey: Option<i64>,
     pub time_use_weight_col: String,
+    pub diary_cache_path: Option<PathBuf>,
     pub profiles_enabled: bool,
     pub profiles_output: Option<PathBuf>,
     pub profiles_path: Option<PathBuf>,
@@ -245,6 +283,12 @@ pub struct ExperimentJson {
 
 impl Experiment {
     pub fn to_json(&self, with_summary: bool) -> ExperimentJson {
+        let runs: Vec<RunJson> = if with_summary {
+            self.runs.par_iter().map(|r| r.to_json(true)).collect()
+        } else {
+            self.runs.iter().map(|r| r.to_json(false)).collect()
+        };
+
         ExperimentJson {
             id: self.id.clone(),
             config: display_path(Some(&self.config_path)),
@@ -279,9 +323,10 @@ impl Experiment {
                 alpha: self.params.alpha,
                 dt_update_mob_sim_hours: self.params.dt_update_mob_sim_hours,
                 indipendency_window_hours: self.params.indipendency_window_hours,
+                bbox: self.params.bbox.clone(),
             },
             special_days: self.special_days.clone(),
-            runs: self.runs.iter().map(|r| r.to_json(with_summary)).collect(),
+            runs,
         }
     }
 
@@ -298,6 +343,13 @@ fn load_experiment(config_path: &Path) -> anyhow::Result<Experiment> {
     let synthetic_output = resolve(Some(&cfg.simulation.output));
     let observed_path = resolve(cfg.comparison.path.as_deref());
     let time_use_path = resolve(cfg.comparison.time_use_path.as_deref());
+    let default_diary_cache = format!("{}/validated_diaries.json", cfg.llm.cache_dir);
+    let diary_cache_path = resolve(
+        cfg.llm
+            .validated_diaries_path
+            .as_deref()
+            .or(Some(default_diary_cache.as_str())),
+    );
     let profiles_output = resolve(Some(&cfg.profiles.output));
     let profiles_path = if cfg.profiles.enabled {
         profiles_output.clone()
@@ -315,6 +367,34 @@ fn load_experiment(config_path: &Path) -> anyhow::Result<Experiment> {
     } else {
         None
     };
+    let tessellation_bbox = match (
+        cfg.tessellation.min_lat,
+        cfg.tessellation.min_lon,
+        cfg.tessellation.max_lat,
+        cfg.tessellation.max_lon,
+    ) {
+        (Some(min_lat), Some(min_lng), Some(max_lat), Some(max_lng)) => Some(BBoxJson {
+            min_lat,
+            min_lng,
+            max_lat,
+            max_lng,
+        }),
+        _ => None,
+    };
+    let simulation_bbox = match (
+        cfg.simulation.min_lat,
+        cfg.simulation.min_lon,
+        cfg.simulation.max_lat,
+        cfg.simulation.max_lon,
+    ) {
+        (Some(min_lat), Some(min_lng), Some(max_lat), Some(max_lng)) => Some(BBoxJson {
+            min_lat,
+            min_lng,
+            max_lat,
+            max_lng,
+        }),
+        _ => None,
+    };
     let params = ParamsJson {
         agents: cfg.simulation.agents,
         days: cfg.simulation.days,
@@ -327,6 +407,7 @@ fn load_experiment(config_path: &Path) -> anyhow::Result<Experiment> {
         alpha: cfg.simulation.alpha,
         dt_update_mob_sim_hours: cfg.simulation.dt_update_mob_sim_hours,
         indipendency_window_hours: cfg.simulation.indipendency_window_hours,
+        bbox: tessellation_bbox.or(simulation_bbox),
     };
     let special_days = cfg
         .diaries
@@ -357,6 +438,7 @@ fn load_experiment(config_path: &Path) -> anyhow::Result<Experiment> {
         time_use_country: cfg.comparison.time_use_country.clone(),
         time_use_survey: cfg.comparison.time_use_survey,
         time_use_weight_col: cfg.comparison.time_use_weight_col.clone(),
+        diary_cache_path,
         profiles_enabled: cfg.profiles.enabled,
         profiles_output,
         profiles_path,
@@ -384,8 +466,8 @@ pub fn list_experiments() -> Vec<Experiment> {
         .filter(|p| p.extension().is_some_and(|e| e == "yaml"))
         .collect();
     paths.sort();
-    paths
-        .into_iter()
+    let mut experiments: Vec<Experiment> = paths
+        .into_par_iter()
         .filter_map(|p| match load_experiment(&p) {
             Ok(exp) => Some(exp),
             Err(e) => {
@@ -393,7 +475,9 @@ pub fn list_experiments() -> Vec<Experiment> {
                 None
             }
         })
-        .collect()
+        .collect();
+    experiments.sort_by(|a, b| a.id.cmp(&b.id));
+    experiments
 }
 
 pub fn get_experiment(exp_id: &str) -> Option<Experiment> {
@@ -450,8 +534,8 @@ fn yaml_scalar_would_lose_string_type(s: &str) -> bool {
     }
     static NULL_WORDS: &[&str] = &["~", "null", "Null", "NULL"];
     static BOOL_WORDS: &[&str] = &[
-        "y", "Y", "yes", "Yes", "YES", "n", "N", "no", "No", "NO", "true", "True", "TRUE",
-        "false", "False", "FALSE", "on", "On", "ON", "off", "Off", "OFF",
+        "y", "Y", "yes", "Yes", "YES", "n", "N", "no", "No", "NO", "true", "True", "TRUE", "false",
+        "False", "FALSE", "on", "On", "ON", "off", "Off", "OFF",
     ];
     if NULL_WORDS.contains(&s) || BOOL_WORDS.contains(&s) {
         return true;
@@ -551,12 +635,17 @@ pub struct ExperimentUpdate {
     pub profiles_enabled: Option<Option<bool>>,
     #[serde(default, with = "::serde_with::rust::double_option")]
     pub profiles_output: Option<Option<String>>,
+    #[serde(default, with = "::serde_with::rust::double_option")]
+    pub bbox: Option<Option<BBoxJson>>,
 }
 
 /// Applies `updates` to `configs/{exp_id}.yaml`, re-validating the *whole*
 /// merged document against `CityBehavExConfig` before writing -- a partial/
 /// invalid PATCH never corrupts the file. Mirrors `experiments.py::update_experiment`.
-pub fn update_experiment(exp_id: &str, updates: &ExperimentUpdate) -> Result<Experiment, ExperimentError> {
+pub fn update_experiment(
+    exp_id: &str,
+    updates: &ExperimentUpdate,
+) -> Result<Experiment, ExperimentError> {
     let config_path = configs_dir().join(format!("{exp_id}.yaml"));
     if !config_path.is_file() {
         return Err(ExperimentError::NotFound(exp_id.to_string()));
@@ -597,7 +686,11 @@ pub fn update_experiment(exp_id: &str, updates: &ExperimentUpdate) -> Result<Exp
     apply!(updates.agents, "simulation", "agents");
     apply!(updates.days, "simulation", "days");
     apply_str!(updates.start_date, "simulation", "start_date");
-    apply!(updates.granularity_minutes, "simulation", "granularity_minutes");
+    apply!(
+        updates.granularity_minutes,
+        "simulation",
+        "granularity_minutes"
+    );
     apply!(updates.car_speed_kmh, "simulation", "car_speed_kmh");
     apply_str!(updates.simulation_output, "simulation", "output");
     apply_str!(updates.label, "comparison", "label");
@@ -606,13 +699,40 @@ pub fn update_experiment(exp_id: &str, updates: &ExperimentUpdate) -> Result<Exp
     apply_str!(updates.time_use_label, "comparison", "time_use_label");
     apply_str!(updates.time_use_country, "comparison", "time_use_country");
     apply!(updates.time_use_survey, "comparison", "time_use_survey");
-    apply_str!(updates.time_use_weight_col, "comparison", "time_use_weight_col");
+    apply_str!(
+        updates.time_use_weight_col,
+        "comparison",
+        "time_use_weight_col"
+    );
     apply!(updates.profiles_enabled, "profiles", "enabled");
     apply_str!(updates.profiles_output, "profiles", "output");
+    if let Some(Some(bbox)) = &updates.bbox {
+        let tessellation = section(&mut raw, "tessellation")?;
+        set_field(
+            tessellation,
+            "min_lat",
+            serde_yaml::to_value(bbox.min_lat).unwrap_or(serde_yaml::Value::Null),
+        );
+        set_field(
+            tessellation,
+            "min_lon",
+            serde_yaml::to_value(bbox.min_lng).unwrap_or(serde_yaml::Value::Null),
+        );
+        set_field(
+            tessellation,
+            "max_lat",
+            serde_yaml::to_value(bbox.max_lat).unwrap_or(serde_yaml::Value::Null),
+        );
+        set_field(
+            tessellation,
+            "max_lon",
+            serde_yaml::to_value(bbox.max_lng).unwrap_or(serde_yaml::Value::Null),
+        );
+    }
 
     let value = serde_yaml::Value::Mapping(raw.clone());
-    let config: CityBehavExConfig = serde_yaml::from_value(value)
-        .map_err(|e| ExperimentError::Mutation(e.to_string()))?;
+    let config: CityBehavExConfig =
+        serde_yaml::from_value(value).map_err(|e| ExperimentError::Mutation(e.to_string()))?;
     config
         .validate()
         .map_err(|e| ExperimentError::Mutation(e.to_string()))?;
@@ -649,7 +769,8 @@ pub fn archive_experiment(exp_id: &str) -> Result<PathBuf, ExperimentError> {
 /// `_activities`/`_crp` sidecars and `_social_network.json`. Mirrors
 /// `experiments.py::delete_run`.
 pub fn delete_run(exp_id: &str, run_id: &str) -> Result<Vec<PathBuf>, ExperimentError> {
-    let experiment = get_experiment(exp_id).ok_or_else(|| ExperimentError::NotFound(exp_id.to_string()))?;
+    let experiment =
+        get_experiment(exp_id).ok_or_else(|| ExperimentError::NotFound(exp_id.to_string()))?;
     let run = experiment
         .run(Some(run_id))
         .ok_or_else(|| ExperimentError::RunNotFound(run_id.to_string()))?;
@@ -678,7 +799,18 @@ mod yaml_quoting_tests {
 
     #[test]
     fn dates_and_reserved_words_need_quoting() {
-        for s in ["2026-01-01", "true", "false", "yes", "no", "null", "~", "", "42", "3.14"] {
+        for s in [
+            "2026-01-01",
+            "true",
+            "false",
+            "yes",
+            "no",
+            "null",
+            "~",
+            "",
+            "42",
+            "3.14",
+        ] {
             assert!(
                 yaml_scalar_would_lose_string_type(s),
                 "{s:?} should be flagged as ambiguous"
@@ -714,7 +846,10 @@ mod yaml_quoting_tests {
             &mut ambiguous,
         );
         assert_eq!(value, serde_yaml::Value::String("2026-01-01".to_string()));
-        assert_eq!(ambiguous, vec![("start_date".to_string(), "2026-01-01".to_string())]);
+        assert_eq!(
+            ambiguous,
+            vec![("start_date".to_string(), "2026-01-01".to_string())]
+        );
 
         let mut map = serde_yaml::Mapping::new();
         map.insert(serde_yaml::Value::String("start_date".into()), value);

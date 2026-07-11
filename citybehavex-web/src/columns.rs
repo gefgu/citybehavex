@@ -20,15 +20,37 @@ pub const DATETIME_CANDIDATES: &[&str] = &[
 ];
 pub const LAT_CANDIDATES: &[&str] = &["lat", "latitude"];
 pub const LNG_CANDIDATES: &[&str] = &["lng", "lon", "longitude", "long"];
-pub const DURATION_CANDIDATES: &[&str] =
-    &["duration_minutes", "duration", "trip_duration_minutes", "duration_hours"];
-pub const ACTIVITY_CANDIDATES: &[&str] =
-    &["purpose", "activity", "act", "location_type", "category", "purpose_d"];
-pub const LOCATION_CANDIDATES: &[&str] =
-    &["location_id", "tile_id", "Code_INSEE_D", "area", "venueId", "location"];
+pub const DURATION_CANDIDATES: &[&str] = &[
+    "duration_minutes",
+    "duration",
+    "trip_duration_minutes",
+    "duration_hours",
+];
+pub const ACTIVITY_CANDIDATES: &[&str] = &[
+    "purpose",
+    "activity",
+    "act",
+    "location_type",
+    "category",
+    "purpose_d",
+];
+pub const LOCATION_CANDIDATES: &[&str] = &[
+    "location_id",
+    "tile_id",
+    "Code_INSEE_D",
+    "area",
+    "venueId",
+    "location",
+];
 pub const END_TS_CANDIDATES: &[&str] = &["end_timestamp", "_end_time", "end_time"];
-pub const TRANSPORT_CANDIDATES: &[&str] =
-    &["mode", "transport_mode", "transport", "travel_mode", "trip_mode", "vehicle_mode"];
+pub const TRANSPORT_CANDIDATES: &[&str] = &[
+    "mode",
+    "transport_mode",
+    "transport",
+    "travel_mode",
+    "trip_mode",
+    "vehicle_mode",
+];
 
 /// Case-insensitive first-match column lookup, mirrors
 /// `citybehavex/reports/comparison.py::detect_column`.
@@ -72,6 +94,9 @@ mod tests {
     #[test]
     fn detect_in_matches_str_slice() {
         let cols = ["Latitude", "Longitude"];
-        assert_eq!(detect_in(&cols, LAT_CANDIDATES), Some("Latitude".to_string()));
+        assert_eq!(
+            detect_in(&cols, LAT_CANDIDATES),
+            Some("Latitude".to_string())
+        );
     }
 }

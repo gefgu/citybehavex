@@ -26,10 +26,21 @@ pub struct MicroActivityUsage {
 }
 
 /// Mirrors `comparison.py::_micro_activity_daily_usage_data`.
-pub fn micro_activity_daily_usage_data(activities: &DataFrame, bin_size_minutes: i64) -> anyhow::Result<MicroActivityUsage> {
+pub fn micro_activity_daily_usage_data(
+    activities: &DataFrame,
+    bin_size_minutes: i64,
+) -> anyhow::Result<MicroActivityUsage> {
     let required = ["uid", "activity", "arrival", "departure"];
-    let existing: Vec<&str> = activities.get_column_names().iter().map(|s| s.as_str()).collect();
-    let missing: Vec<&str> = required.iter().copied().filter(|c| !existing.contains(c)).collect();
+    let existing: Vec<&str> = activities
+        .get_column_names()
+        .iter()
+        .map(|s| s.as_str())
+        .collect();
+    let missing: Vec<&str> = required
+        .iter()
+        .copied()
+        .filter(|c| !existing.contains(c))
+        .collect();
     if !missing.is_empty() {
         anyhow::bail!("activities table missing columns: {}", missing.join(", "));
     }
@@ -43,8 +54,16 @@ pub fn micro_activity_daily_usage_data(activities: &DataFrame, bin_size_minutes:
     let work = activities
         .clone()
         .lazy()
-        .select([col("uid"), col("activity").cast(DataType::Float64), col("arrival"), col("departure")])
-        .with_columns([arrival_expr.alias("arrival"), departure_expr.alias("departure")])
+        .select([
+            col("uid"),
+            col("activity").cast(DataType::Float64),
+            col("arrival"),
+            col("departure"),
+        ])
+        .with_columns([
+            arrival_expr.alias("arrival"),
+            departure_expr.alias("departure"),
+        ])
         .drop_nulls(Some(cols(["arrival", "departure", "activity"])))
         .filter(col("departure").gt(col("arrival")))
         .collect()?;
@@ -55,7 +74,10 @@ pub fn micro_activity_daily_usage_data(activities: &DataFrame, bin_size_minutes:
     let n_bins = (1440 / bin_size_minutes) as usize;
     let bin_seconds = bin_size_minutes * 60;
     let activity_ids: Vec<i64> = catalog::CATALOG.iter().map(|a| a.idx as i64).collect();
-    let labels: std::collections::HashMap<i64, &str> = catalog::CATALOG.iter().map(|a| (a.idx as i64, a.name)).collect();
+    let labels: std::collections::HashMap<i64, &str> = catalog::CATALOG
+        .iter()
+        .map(|a| (a.idx as i64, a.name))
+        .collect();
     let mut id_to_row: std::collections::HashMap<i64, usize> = std::collections::HashMap::new();
     for (row, &id) in activity_ids.iter().enumerate() {
         id_to_row.insert(id, row);
@@ -70,9 +92,11 @@ pub fn micro_activity_daily_usage_data(activities: &DataFrame, bin_size_minutes:
     let departure_unit = departure_ca.time_unit();
 
     for i in 0..work.height() {
-        let (Some(activity), Some(arrival_raw), Some(departure_raw)) =
-            (activity_ca.get(i), arrival_ca.phys.get(i), departure_ca.phys.get(i))
-        else {
+        let (Some(activity), Some(arrival_raw), Some(departure_raw)) = (
+            activity_ca.get(i),
+            arrival_ca.phys.get(i),
+            departure_ca.phys.get(i),
+        ) else {
             continue;
         };
         let activity_id = activity as i64;
@@ -94,7 +118,10 @@ pub fn micro_activity_daily_usage_data(activities: &DataFrame, bin_size_minutes:
             for bin_idx in start_bin..(end_bin + 1).min(n_bins) {
                 let bin_start = midnight + TimeDelta::seconds((bin_idx as i64) * bin_seconds);
                 let bin_end = bin_start + TimeDelta::seconds(bin_seconds);
-                let overlap = (segment_end.min(bin_end) - current.max(bin_start)).num_microseconds().unwrap_or(0) as f64 / 1_000_000.0;
+                let overlap = (segment_end.min(bin_end) - current.max(bin_start))
+                    .num_microseconds()
+                    .unwrap_or(0) as f64
+                    / 1_000_000.0;
                 if overlap > 0.0 {
                     seconds[row][bin_idx] += overlap;
                 }
@@ -145,8 +172,12 @@ fn round6(v: f64) -> f64 {
 
 fn datetime_from_units(raw: i64, unit: TimeUnit) -> NaiveDateTime {
     match unit {
-        TimeUnit::Milliseconds => chrono::DateTime::from_timestamp_millis(raw).unwrap().naive_utc(),
-        TimeUnit::Microseconds => chrono::DateTime::from_timestamp_micros(raw).unwrap().naive_utc(),
+        TimeUnit::Milliseconds => chrono::DateTime::from_timestamp_millis(raw)
+            .unwrap()
+            .naive_utc(),
+        TimeUnit::Microseconds => chrono::DateTime::from_timestamp_micros(raw)
+            .unwrap()
+            .naive_utc(),
         TimeUnit::Nanoseconds => chrono::DateTime::from_timestamp_nanos(raw).naive_utc(),
     }
 }
@@ -196,7 +227,10 @@ mod tests {
     #[test]
     #[ignore = "requires repo data at data/gparis/results/gparis_simulation_core_trajectories_20260710T073952_activities.parquet"]
     fn gparis_activities_match_python_reference() {
-        let repo_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().to_path_buf();
+        let repo_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .to_path_buf();
         let path = repo_root.join("data/gparis/results/gparis_simulation_core_trajectories_20260710T073952_activities.parquet");
         let activities = super::super::trajectory::read_parquet(&path).unwrap();
         assert_eq!(activities.height(), 239352);
@@ -205,16 +239,28 @@ mod tests {
         assert_eq!(usage.n_bins, 144);
 
         let sleep = usage.series.iter().find(|s| s.name == "sleep").unwrap();
-        let expected_sleep_head = [19.143079, 20.025651, 22.187587, 24.522746, 26.597095, 28.342698, 30.049556, 31.72181, 33.229111, 34.66327];
+        let expected_sleep_head = [
+            19.143079, 20.025651, 22.187587, 24.522746, 26.597095, 28.342698, 30.049556, 31.72181,
+            33.229111, 34.66327,
+        ];
         for (got, want) in sleep.values[..10].iter().zip(expected_sleep_head.iter()) {
             assert!((got - want).abs() < 1e-6, "got {got} want {want}");
         }
         let sleep_sum: f64 = sleep.values.iter().sum();
-        assert!((sleep_sum - 3084.517315).abs() < 1e-3, "sleep_sum={sleep_sum}");
+        assert!(
+            (sleep_sum - 3084.517315).abs() < 1e-3,
+            "sleep_sum={sleep_sum}"
+        );
 
         let paidwork = usage.series.iter().find(|s| s.name == "paidwork").unwrap();
-        let expected_paidwork_mid = [33.533254, 33.120571, 31.780175, 31.830254, 31.621317, 31.612286, 31.812222, 31.336889, 29.653746, 29.53027];
-        for (got, want) in paidwork.values[80..90].iter().zip(expected_paidwork_mid.iter()) {
+        let expected_paidwork_mid = [
+            33.533254, 33.120571, 31.780175, 31.830254, 31.621317, 31.612286, 31.812222, 31.336889,
+            29.653746, 29.53027,
+        ];
+        for (got, want) in paidwork.values[80..90]
+            .iter()
+            .zip(expected_paidwork_mid.iter())
+        {
             assert!((got - want).abs() < 1e-6, "got {got} want {want}");
         }
     }

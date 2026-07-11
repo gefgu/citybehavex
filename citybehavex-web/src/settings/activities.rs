@@ -105,7 +105,10 @@ impl ActivitiesConfig {
             ("kappa", self.kappa),
             ("temperature", self.temperature),
             ("alignment_timeout_seconds", self.alignment_timeout_seconds),
-            ("poi_type_choice_temperature", self.poi_type_choice_temperature),
+            (
+                "poi_type_choice_temperature",
+                self.poi_type_choice_temperature,
+            ),
             ("act_dur_scale", self.act_dur_scale),
             ("act_dur_sigma_scale", self.act_dur_sigma_scale),
         ] {
@@ -116,7 +119,8 @@ impl ActivitiesConfig {
         if self.alignment_batch_size <= 0 {
             anyhow::bail!("alignment_batch_size must be > 0");
         }
-        if self.alignment_concurrency < 1 || self.alignment_retries < 1
+        if self.alignment_concurrency < 1
+            || self.alignment_retries < 1
             || self.alignment_checkpoint_every < 1
         {
             anyhow::bail!("alignment_concurrency/retries/checkpoint_every must be >= 1");

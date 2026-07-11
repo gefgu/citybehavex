@@ -1,10 +1,14 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
+import { MapContainer, Rectangle, TileLayer, useMap } from "react-leaflet";
+import type { LatLngBoundsExpression } from "leaflet";
+import "leaflet/dist/leaflet.css";
 import {
   archiveExperiment,
   deleteExperimentRun,
   fetchExperiments,
   updateExperiment,
+  type BBox,
   type Experiment,
   type ExperimentUpdate,
 } from "../api";
@@ -20,6 +24,10 @@ type EditForm = {
   observed_path: string;
   profiles_enabled: boolean;
   profiles_output: string;
+  bbox_min_lat: string;
+  bbox_min_lng: string;
+  bbox_max_lat: string;
+  bbox_max_lng: string;
 };
 
 type PanelMode = "view" | "edit";
@@ -39,7 +47,20 @@ function paramString(value: unknown, fallback = "-") {
   return value === null || value === undefined || value === "" ? fallback : String(value);
 }
 
+function bboxFromParams(params: Record<string, unknown>): BBox | null {
+  const bbox = params.bbox;
+  if (!bbox || typeof bbox !== "object") return null;
+  const candidate = bbox as Record<string, unknown>;
+  const min_lat = Number(candidate.min_lat);
+  const min_lng = Number(candidate.min_lng);
+  const max_lat = Number(candidate.max_lat);
+  const max_lng = Number(candidate.max_lng);
+  if (![min_lat, min_lng, max_lat, max_lng].every(Number.isFinite)) return null;
+  return { min_lat, min_lng, max_lat, max_lng };
+}
+
 function formFromExperiment(exp: Experiment): EditForm {
+  const bbox = bboxFromParams(exp.params);
   return {
     label: exp.label,
     agents: paramString(exp.params.agents, ""),
@@ -51,11 +72,15 @@ function formFromExperiment(exp: Experiment): EditForm {
     observed_path: exp.observed_path ?? "",
     profiles_enabled: Boolean(exp.profiles_enabled),
     profiles_output: exp.profiles_output ?? exp.profiles_path ?? "",
+    bbox_min_lat: bbox ? String(bbox.min_lat) : "",
+    bbox_min_lng: bbox ? String(bbox.min_lng) : "",
+    bbox_max_lat: bbox ? String(bbox.max_lat) : "",
+    bbox_max_lng: bbox ? String(bbox.max_lng) : "",
   };
 }
 
 function payloadFromForm(form: EditForm): ExperimentUpdate {
-  return {
+  const payload: ExperimentUpdate = {
     label: form.label.trim(),
     agents: Number(form.agents),
     days: Number(form.days),
@@ -67,6 +92,16 @@ function payloadFromForm(form: EditForm): ExperimentUpdate {
     profiles_enabled: form.profiles_enabled,
     profiles_output: form.profiles_output.trim(),
   };
+  const bbox = {
+    min_lat: Number(form.bbox_min_lat),
+    min_lng: Number(form.bbox_min_lng),
+    max_lat: Number(form.bbox_max_lat),
+    max_lng: Number(form.bbox_max_lng),
+  };
+  if (Object.values(bbox).every(Number.isFinite)) {
+    payload.bbox = bbox;
+  }
+  return payload;
 }
 
 function chunkExperiments(experiments: Experiment[], size: number) {
@@ -208,7 +243,10 @@ export function Experiments() {
                   experiment={openExperiment}
                   form={form}
                   onArchive={() => handleArchive(openExperiment)}
-                  onDeleteRun={(runId) => handleDeleteRun(openExperiment, runId)}
+                  onClose={() => {
+                    setOpenId(null);
+                    setForm(null);
+                  }}
                   onFormChange={setForm}
                   onSave={handleSave}
                 />
@@ -341,7 +379,7 @@ function ExperimentPanel({
   experiment,
   form,
   onArchive,
-  onDeleteRun,
+  onClose,
   onFormChange,
   onSave,
 }: {
@@ -350,7 +388,7 @@ function ExperimentPanel({
   experiment: Experiment;
   form: EditForm;
   onArchive: () => void;
-  onDeleteRun: (runId: string) => void;
+  onClose: () => void;
   onFormChange: (form: EditForm) => void;
   onSave: (event: FormEvent) => void;
 }) {
@@ -367,20 +405,33 @@ function ExperimentPanel({
             <code>{experiment.config}</code>
           </p>
         </div>
-        <button
-          className="btn btn-danger"
-          disabled={busyAction !== null}
-          type="button"
-          onClick={onArchive}
-        >
-          {busyAction === "archive" ? "Archiving..." : "Archive"}
-        </button>
+        <div className="experiment-panel-actions">
+          <button
+            className="btn btn-secondary"
+            disabled={busyAction !== null}
+            type="button"
+            onClick={onClose}
+          >
+            Close
+          </button>
+          <button
+            className="btn btn-danger"
+            disabled={busyAction !== null}
+            type="button"
+            onClick={onArchive}
+          >
+            {busyAction === "archive" ? "Archiving..." : "Archive"}
+          </button>
+        </div>
       </div>
 
       {actionError && <div className="inline-error">{actionError}</div>}
 
       <div className="experiment-panel-body">
         <form className="experiment-edit-form" onSubmit={onSave}>
+          <div className="warnings experiment-edit-note">
+            More detailed configs can be edited in the <code>.yaml</code> file.
+          </div>
           <label>
             Label
             <input value={form.label} onChange={(e) => updateField("label", e.target.value)} />
@@ -456,12 +507,115 @@ function ExperimentPanel({
             <button className="btn btn-primary" disabled={busyAction !== null} type="submit">
               {busyAction === "save" ? "Saving..." : "Save"}
             </button>
+            <button className="btn btn-secondary pretend-run-button" type="button">
+              Run
+            </button>
           </div>
         </form>
 
-        <ExperimentRuns busyAction={busyAction} experiment={experiment} onDeleteRun={onDeleteRun} />
+        <BBoxEditor form={form} onChange={updateField} />
       </div>
     </section>
+  );
+}
+
+function FitBBoxBounds({ bounds }: { bounds: LatLngBoundsExpression }) {
+  const map = useMap();
+
+  useEffect(() => {
+    map.invalidateSize();
+    map.fitBounds(bounds, { animate: false, padding: [18, 18] });
+  }, [bounds, map]);
+
+  return null;
+}
+
+function BBoxEditor({
+  form,
+  onChange,
+}: {
+  form: EditForm;
+  onChange: <K extends keyof EditForm>(key: K, value: EditForm[K]) => void;
+}) {
+  const bbox = {
+    min_lat: Number(form.bbox_min_lat),
+    min_lng: Number(form.bbox_min_lng),
+    max_lat: Number(form.bbox_max_lat),
+    max_lng: Number(form.bbox_max_lng),
+  };
+  const hasBounds =
+    Object.values(bbox).every(Number.isFinite) &&
+    bbox.min_lat < bbox.max_lat &&
+    bbox.min_lng < bbox.max_lng;
+  const bounds: LatLngBoundsExpression = hasBounds
+    ? [
+        [bbox.min_lat, bbox.min_lng],
+        [bbox.max_lat, bbox.max_lng],
+      ]
+    : [
+        [48.5, 1.6],
+        [49.16, 2.975],
+      ];
+  const center: [number, number] = hasBounds
+    ? [(bbox.min_lat + bbox.max_lat) / 2, (bbox.min_lng + bbox.max_lng) / 2]
+    : [48.8566, 2.3522];
+
+  return (
+    <div className="experiment-bbox-editor">
+      <div className="experiment-runs-head">
+        <h3>Bbox</h3>
+        <span className="muted-small">Edit the bounding box used by the config.</span>
+      </div>
+      <MapContainer
+        bounds={bounds}
+        center={center}
+        className="experiment-bbox-map"
+        scrollWheelZoom
+        zoom={10}
+      >
+        <TileLayer
+          url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
+          attribution='&copy; OpenStreetMap &copy; CARTO'
+        />
+        <FitBBoxBounds bounds={bounds} />
+        {hasBounds && (
+          <Rectangle
+            bounds={bounds}
+            pathOptions={{ color: "#aa2d00", fillOpacity: 0.08, weight: 2 }}
+          />
+        )}
+      </MapContainer>
+      <div className="bbox-fields">
+        <label>
+          Min lat
+          <input
+            value={form.bbox_min_lat}
+            onChange={(e) => onChange("bbox_min_lat", e.target.value)}
+          />
+        </label>
+        <label>
+          Min lng
+          <input
+            value={form.bbox_min_lng}
+            onChange={(e) => onChange("bbox_min_lng", e.target.value)}
+          />
+        </label>
+        <label>
+          Max lat
+          <input
+            value={form.bbox_max_lat}
+            onChange={(e) => onChange("bbox_max_lat", e.target.value)}
+          />
+        </label>
+        <label>
+          Max lng
+          <input
+            value={form.bbox_max_lng}
+            onChange={(e) => onChange("bbox_max_lng", e.target.value)}
+          />
+        </label>
+      </div>
+    </div>
   );
 }
 

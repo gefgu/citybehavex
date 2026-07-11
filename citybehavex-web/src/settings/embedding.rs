@@ -52,7 +52,10 @@ impl EmbeddingConfig {
 
     pub fn resolved_cache_path(&self) -> String {
         self.cache_path.clone().unwrap_or_else(|| {
-            format!("{}/diary_embeddings.npz", self.cache_dir.trim_end_matches('/'))
+            format!(
+                "{}/diary_embeddings.npz",
+                self.cache_dir.trim_end_matches('/')
+            )
         })
     }
 }
