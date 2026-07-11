@@ -97,10 +97,14 @@ async function staticExperiments(): Promise<Experiment[]> {
   return staticExperimentsCache;
 }
 
-async function staticRunPath(id: string): Promise<string> {
+async function staticRunPathFor(id: string, requestedRun?: string): Promise<string> {
   const experiments = await staticExperiments();
   const experiment = experiments.find((item) => item.id === id);
-  const run = experiment?.runs?.[0]?.run_id;
+  const runs = experiment?.runs ?? [];
+  const run =
+    (requestedRun ? runs.find((item) => item.run_id === requestedRun)?.run_id : undefined) ??
+    (requestedRun && runs.length === 1 ? runs[0].run_id : undefined) ??
+    runs[0]?.run_id;
   if (!run) throw new Error(`Static demo run not found for ${id}`);
   return `${id}/${run}`;
 }
@@ -176,8 +180,7 @@ export function deleteExperimentRun(id: string, runId: string): Promise<{ delete
 
 export function fetchCharts(id: string, run?: string): Promise<ChartPayload> {
   if (STATIC_DEMO) {
-    if (!run) return staticRunPath(id).then((path) => getStaticJson<ChartPayload>(`${path}/charts/base.json`));
-    return getStaticJson<ChartPayload>(`${id}/${run}/charts/base.json`);
+    return staticRunPathFor(id, run).then((path) => getStaticJson<ChartPayload>(`${path}/charts/base.json`));
   }
   const q = run ? `?run=${encodeURIComponent(run)}` : "";
   return getJson<ChartPayload>(`/api/experiments/${encodeURIComponent(id)}/charts${q}`);
@@ -192,14 +195,8 @@ export function fetchChartSection(
 ): Promise<ChartPayload> {
   if (STATIC_DEMO) {
     const file = `${encodeURIComponent(section)}/${encodeURIComponent(filter)}.json`;
-    if (!run) {
-      return staticRunPath(id).then((path) =>
-        getStaticJson<ChartPayload>(`${path}/charts/sections/${file}`, { signal }),
-      );
-    }
-    return getStaticJson<ChartPayload>(
-      `${id}/${run}/charts/sections/${file}`,
-      { signal },
+    return staticRunPathFor(id, run).then((path) =>
+      getStaticJson<ChartPayload>(`${path}/charts/sections/${file}`, { signal }),
     );
   }
   const q = new URLSearchParams();
@@ -213,7 +210,7 @@ export function fetchChartSection(
 
 export async function downloadMetricsExport(id: string, run?: string): Promise<Blob> {
   if (STATIC_DEMO) {
-    const path = run ? `${id}/${run}` : await staticRunPath(id);
+    const path = await staticRunPathFor(id, run);
     const payload = await getStaticRawJson<unknown>(`${path}/metrics-export.json`);
     return new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
   }
@@ -301,8 +298,7 @@ export function fetchHomeWork(
         if (filterKey === "all") throw error;
         return getStaticJson<HomeWorkResponse>(`${path}/home-work/all.json`);
       });
-    if (!run) return staticRunPath(id).then(fetchStatic);
-    return fetchStatic(`${id}/${run}`);
+    return staticRunPathFor(id, run).then(fetchStatic);
   }
   const q = new URLSearchParams();
   if (run) q.set("run", run);
@@ -405,7 +401,7 @@ async function fetchStaticTimelineLegs(
     maxAgents?: number;
   },
 ): Promise<TimelineLegsPayload> {
-  const path = params.run ? `${id}/${params.run}` : await staticRunPath(id);
+  const path = await staticRunPathFor(id, params.run);
   const index = await getStaticJson<StaticTimelineChunkIndex>(`${path}/timeline/chunks.json`);
   const sinceMs = Date.parse(params.since);
   const untilMs = Date.parse(params.until);
@@ -513,8 +509,7 @@ export interface AgentProfilePayload {
 
 export function fetchTimelineMeta(id: string, run?: string): Promise<TimelineMeta> {
   if (STATIC_DEMO) {
-    if (!run) return staticRunPath(id).then((path) => getStaticJson<TimelineMeta>(`${path}/timeline/meta.json`));
-    return getStaticJson<TimelineMeta>(`${id}/${run}/timeline/meta.json`);
+    return staticRunPathFor(id, run).then((path) => getStaticJson<TimelineMeta>(`${path}/timeline/meta.json`));
   }
   const q = run ? `?run=${encodeURIComponent(run)}` : "";
   return getJson<TimelineMeta>(`/api/experiments/${encodeURIComponent(id)}/timeline/meta${q}`);
@@ -551,12 +546,9 @@ export function fetchTimelineLegs(
 
 export function fetchTimelineAgent(id: string, uid: number, run?: string): Promise<AgentProfilePayload> {
   if (STATIC_DEMO) {
-    if (!run) {
-      return staticRunPath(id).then((path) =>
-        getStaticJson<AgentProfilePayload>(`${path}/timeline/agents/${uid}/profile.json`),
-      );
-    }
-    return getStaticJson<AgentProfilePayload>(`${id}/${run}/timeline/agents/${uid}/profile.json`);
+    return staticRunPathFor(id, run).then((path) =>
+      getStaticJson<AgentProfilePayload>(`${path}/timeline/agents/${uid}/profile.json`),
+    );
   }
   const q = run ? `?run=${encodeURIComponent(run)}` : "";
   return getJson<AgentProfilePayload>(
@@ -584,12 +576,9 @@ export interface AgentCrpPayload {
 
 export function fetchTimelineAgentCrp(id: string, uid: number, run?: string): Promise<AgentCrpPayload> {
   if (STATIC_DEMO) {
-    if (!run) {
-      return staticRunPath(id).then((path) =>
-        getStaticJson<AgentCrpPayload>(`${path}/timeline/agents/${uid}/crp.json`),
-      );
-    }
-    return getStaticJson<AgentCrpPayload>(`${id}/${run}/timeline/agents/${uid}/crp.json`);
+    return staticRunPathFor(id, run).then((path) =>
+      getStaticJson<AgentCrpPayload>(`${path}/timeline/agents/${uid}/crp.json`),
+    );
   }
   const q = run ? `?run=${encodeURIComponent(run)}` : "";
   return getJson<AgentCrpPayload>(
@@ -635,12 +624,9 @@ export function fetchTimelineAgentSocial(
   run?: string,
 ): Promise<AgentSocialPayload> {
   if (STATIC_DEMO) {
-    if (!run) {
-      return staticRunPath(id).then((path) =>
-        getStaticJson<AgentSocialPayload>(`${path}/timeline/agents/${uid}/social.json`),
-      );
-    }
-    return getStaticJson<AgentSocialPayload>(`${id}/${run}/timeline/agents/${uid}/social.json`);
+    return staticRunPathFor(id, run).then((path) =>
+      getStaticJson<AgentSocialPayload>(`${path}/timeline/agents/${uid}/social.json`),
+    );
   }
   const q = run ? `?run=${encodeURIComponent(run)}` : "";
   return getJson<AgentSocialPayload>(
@@ -868,6 +854,11 @@ export interface NetworkValidationResponse {
 }
 
 export function fetchNetworkValidation(id: string, run?: string): Promise<NetworkValidationResponse> {
+  if (STATIC_DEMO) {
+    return staticRunPathFor(id, run).then((path) =>
+      getStaticJson<NetworkValidationResponse>(`${path}/network-validation.json`),
+    );
+  }
   const q = run ? `?run=${encodeURIComponent(run)}` : "";
   return getJson<NetworkValidationResponse>(
     `/api/experiments/${encodeURIComponent(id)}/network-validation${q}`,

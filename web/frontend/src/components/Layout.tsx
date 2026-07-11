@@ -1,12 +1,14 @@
 import { Link, NavLink, Outlet } from "react-router-dom";
 
+const assetBase = import.meta.env.BASE_URL.replace(/\/?$/, "/");
+
 export function Layout() {
   return (
     <>
       <header className="top-nav">
         <div className="container">
           <Link to="/" className="brand">
-            <img src="/citybx_logo.png" alt="CityBehavEx" className="brand-logo" />
+            <img src={`${assetBase}citybx_logo.png`} alt="CityBehavEx" className="brand-logo" />
           </Link>
           <nav>
             <NavLink to="/" end>

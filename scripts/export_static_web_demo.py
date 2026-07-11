@@ -745,7 +745,8 @@ async def export_static_demo(manifest_path: Path) -> None:
 
     for entry, experiment in prepared:
         exp_id = entry["id"]
-        run_id = entry["run_id"]
+        selected = experiment.runs[0]
+        run_id = selected.run_id
         exp_out = output_dir / exp_id / run_id
         detail = experiment.to_dict(with_summary=True)
         detail["static_demo"] = True
@@ -774,7 +775,12 @@ async def export_static_demo(manifest_path: Path) -> None:
             "timeline_chunk_hours": chunk_hours,
             "timeline_max_agents": max_agents,
             "experiments": [
-                {"id": e["id"], "run_id": e["run_id"], "allow_observed": bool(e.get("allow_observed", False))}
+                {
+                    "id": e["id"],
+                    "run_id": detail_payloads[e["id"]]["runs"][0]["run_id"],
+                    "source_run_id": e["run_id"],
+                    "allow_observed": bool(e.get("allow_observed", False)),
+                }
                 for e in manifest["experiments"]
             ],
         },
