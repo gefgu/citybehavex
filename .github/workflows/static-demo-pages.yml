@@ -21,6 +21,7 @@ concurrency:
 
 jobs:
   build:
+    environment: github-pages
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -37,7 +38,7 @@ jobs:
         env:
           VITE_STATIC_DEMO: "true"
           VITE_BASE_PATH: "/${{ github.event.repository.name }}/"
-          VITE_MAPBOX_TOKEN: ${{ secrets.VITE_MAPBOX_TOKEN }}
+          VITE_MAPBOX_TOKEN: ${{ vars.VITE_MAPBOX_TOKEN || secrets.VITE_MAPBOX_TOKEN }}
         run: npm run build
       - uses: actions/upload-pages-artifact@v3
         with:
