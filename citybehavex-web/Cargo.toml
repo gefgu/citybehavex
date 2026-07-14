@@ -9,7 +9,7 @@ path = "src/main.rs"
 
 [dependencies]
 citybehavex-core = { path = "../citybehavex-core" }
-fkmob-core = { path = "../../fkmob/fkmob-core" }
+fastmob-core = { path = "../../fastmob/fastmob-core" }
 # skmob-vis is NOT yet a dependency here: its `[lib] crate-type = ["cdylib",
 # "rlib"]` means any consumer needing the rlib output also forces a build of
 # the cdylib target in the same rustc invocation, which unconditionally links
@@ -20,7 +20,7 @@ fkmob-core = { path = "../../fkmob/fkmob-core" }
 # fix from the consumer side since crate-type is fixed by the producer, not
 # selectable per-dependency. Revisit when Phase 6 needs `ecdf_points`: either
 # a small upstream change to skmob-vis (split a pure-rlib core out, mirroring
-# the fkmob-core/fkmob-py split) or just reimplement the ~30-line function
+# the fastmob-core/fastmob-py split) or just reimplement the ~30-line function
 # directly here.
 
 axum = "0.8"
