@@ -18,7 +18,6 @@
 
 use serde_json::{Value, json};
 use std::collections::HashMap;
-use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -146,8 +145,20 @@ impl Cache {
     }
 
     /// Cache-or-build, coalescing concurrent callers for the same key.
+    ///
+    /// `build` is plain synchronous, CPU/IO-bound Rust code (Polars/DuckDB
+    /// work), run via `spawn_blocking` rather than awaited inline on the
+    /// calling task -- awaiting it directly on the tokio worker thread used
+    /// to panic under Polars' new-streaming engine: a lazy `scan_parquet`
+    /// collect internally calls `polars_io::pl_async::RuntimeManager::block_on`,
+    /// which itself tries to enter a runtime, and doing that from a thread
+    /// already driving the axum handler's own async task trips tokio's
+    /// "cannot start a runtime from within a runtime" panic. `spawn_blocking`
+    /// moves the work to a dedicated blocking-pool thread, which isn't
+    /// considered "inside" the async scheduler, so Polars' internal
+    /// `block_on` no longer conflicts.
     #[allow(clippy::too_many_arguments)]
-    pub async fn get_or_build<F, Fut>(
+    pub async fn get_or_build<F>(
         &self,
         exp_id: &str,
         run_id: &str,
@@ -159,8 +170,7 @@ impl Cache {
         build: F,
     ) -> Result<Value, CacheError>
     where
-        F: FnOnce() -> Fut,
-        Fut: Future<Output = anyhow::Result<Value>>,
+        F: FnOnce() -> anyhow::Result<Value> + Send + 'static,
     {
         std::fs::create_dir_all(&self.dir)?;
         let cache_key = self.key(exp_id, run_id, synthetic, observed, extra_paths, extra_key);
@@ -189,7 +199,10 @@ impl Cache {
         let result = cell
             .get_or_try_init(|| async move {
                 did_build_flag.store(true, Ordering::SeqCst);
-                build().await
+                match tokio::task::spawn_blocking(build).await {
+                    Ok(inner) => inner,
+                    Err(join_err) => Err(anyhow::anyhow!("build task panicked: {join_err}")),
+                }
             })
             .await
             .cloned();
@@ -274,7 +287,7 @@ mod tests {
                     &[],
                     None,
                     false,
-                    || async move {
+                    move || {
                         calls.fetch_add(1, Ordering::SeqCst);
                         Ok(json!({"n": 1}))
                     },
@@ -306,7 +319,7 @@ mod tests {
                 &[],
                 Some(&json!({"section": "a"})),
                 false,
-                || async { Ok(json!({"which": "a"})) },
+                || Ok(json!({"which": "a"})),
             )
             .await
             .unwrap();
@@ -319,7 +332,7 @@ mod tests {
                 &[],
                 Some(&json!({"section": "b"})),
                 false,
-                || async { Ok(json!({"which": "b"})) },
+                || Ok(json!({"which": "b"})),
             )
             .await
             .unwrap();
@@ -349,9 +362,9 @@ mod tests {
                         &[],
                         None,
                         false,
-                        || async move {
+                        move || {
                             calls.fetch_add(1, Ordering::SeqCst);
-                            tokio::time::sleep(Duration::from_millis(50)).await;
+                            std::thread::sleep(Duration::from_millis(50));
                             Ok(json!({"n": 1}))
                         },
                     )
@@ -388,7 +401,7 @@ mod tests {
                     &[],
                     None,
                     true,
-                    || async move {
+                    move || {
                         calls.fetch_add(1, Ordering::SeqCst);
                         Ok(json!({"n": 1}))
                     },
@@ -422,7 +435,7 @@ mod tests {
                 &[],
                 Some(&extra_key),
                 false,
-                || async { Ok(json!({"mobility_laws": null})) },
+                || Ok(json!({"mobility_laws": null})),
             )
             .await
             .unwrap();
@@ -438,7 +451,7 @@ mod tests {
                 &[],
                 Some(&extra_key),
                 false,
-                || async move {
+                move || {
                     calls2.fetch_add(1, Ordering::SeqCst);
                     Ok(json!({"mobility_laws": {"groups": []}}))
                 },
@@ -461,14 +474,14 @@ mod tests {
         let cache = Cache::new(dir.join("cache"));
 
         let err = cache
-            .get_or_build("exp", "run", &synthetic, None, &[], None, false, || async {
+            .get_or_build("exp", "run", &synthetic, None, &[], None, false, || {
                 anyhow::bail!("boom")
             })
             .await;
         assert!(err.is_err());
 
         let ok = cache
-            .get_or_build("exp", "run", &synthetic, None, &[], None, false, || async {
+            .get_or_build("exp", "run", &synthetic, None, &[], None, false, || {
                 Ok(json!({"n": 1}))
             })
             .await

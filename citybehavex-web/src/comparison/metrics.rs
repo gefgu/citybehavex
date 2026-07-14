@@ -1,16 +1,16 @@
-//! Numeric primitives comparison.py imports from `fkmob`: `wasserstein_distance`
-//! and `jensen_shannon_divergence` are pure-Python wrappers in fkmob's Python
+//! Numeric primitives comparison.py imports from `fastmob`: `wasserstein_distance`
+//! and `jensen_shannon_divergence` are pure-Python wrappers in fastmob's Python
 //! layer around a narrow Rust kernel (or, for JSD, no Rust at all) -- ported
-//! here to call `fkmob-core` directly where a kernel exists, and to
+//! here to call `fastmob-core` directly where a kernel exists, and to
 //! reimplement the plain numpy formula otherwise. `trajectory_common_part_of_commuters_multi`
-//! and `waiting_times` are fully Rust-backed in fkmob-core; called directly.
+//! and `waiting_times` are fully Rust-backed in fastmob-core; called directly.
 
 use polars::prelude::*;
 
-/// Mirrors `fkmob/measures/evaluation/metrics.py::_finite_array` +
+/// Mirrors `fastmob/measures/evaluation/metrics.py::_finite_array` +
 /// `wasserstein_distance`: drop non-finite values, return `NaN` if either
 /// side is empty, otherwise the Rust-backed empirical 1D Wasserstein
-/// distance (`fkmob-core`'s `empirical_wasserstein_1d`: mean absolute
+/// distance (`fastmob-core`'s `empirical_wasserstein_1d`: mean absolute
 /// order-statistic difference when sample sizes match, else the general
 /// merge-sweep CDF-area formula).
 pub fn wasserstein_distance(values1: &[f64], values2: &[f64]) -> f64 {
@@ -19,7 +19,7 @@ pub fn wasserstein_distance(values1: &[f64], values2: &[f64]) -> f64 {
     if v1.is_empty() || v2.is_empty() {
         return f64::NAN;
     }
-    fkmob_core::measures::evaluation::wasserstein::empirical_wasserstein_1d(&v1, &v2)
+    fastmob_core::measures::evaluation::wasserstein::empirical_wasserstein_1d(&v1, &v2)
         .unwrap_or(f64::NAN)
 }
 
@@ -37,12 +37,12 @@ fn normalize_distribution(values: &[f64]) -> Vec<f64> {
     out
 }
 
-/// Mirrors `fkmob/measures/evaluation/metrics.py::jensen_shannon_divergence`.
-/// fkmob's Python version tries a SIMD-accelerated path first and falls back
+/// Mirrors `fastmob/measures/evaluation/metrics.py::jensen_shannon_divergence`.
+/// fastmob's Python version tries a SIMD-accelerated path first and falls back
 /// to this same reference formula on mismatch; since the two only diverge
 /// under numerical-stability edge cases (and the reference formula IS the
 /// canonical JS-divergence definition), computing it directly here matches
-/// fkmob's result for the overwhelming common case.
+/// fastmob's result for the overwhelming common case.
 pub fn jensen_shannon_divergence(
     distribution1: &[f64],
     distribution2: &[f64],
@@ -73,7 +73,7 @@ pub fn jensen_shannon_divergence(
     Ok(0.5 * (left + right))
 }
 
-/// Mirrors `fkmob/measures/evaluation/metrics.py::time_bin_matrix_jensen_shannon_divergence`:
+/// Mirrors `fastmob/measures/evaluation/metrics.py::time_bin_matrix_jensen_shannon_divergence`:
 /// mean per-column (time-bin) JSD between two `[n_categories, n_bins]`
 /// matrices, skipping columns where both sides are entirely zero. Assumes
 /// callers have already aligned both matrices to the same category rows
@@ -108,7 +108,7 @@ pub fn time_bin_matrix_jsd(matrix1: &[Vec<f64>], matrix2: &[Vec<f64>]) -> anyhow
 /// Builds `(indices, ends)` for `trajectory_common_part_of_commuters_impl`:
 /// a stable permutation of row positions sorted by `(uid, timestamp)`, plus
 /// the cumulative per-user boundary offsets into that permutation -- mirrors
-/// fkmob's Python `_build_time_ordered_user_ranges` helper.
+/// fastmob's Python `_build_time_ordered_user_ranges` helper.
 fn time_ordered_user_ranges(uid: &[i64], timestamp_ms: &[i64]) -> (Vec<usize>, Vec<usize>) {
     let mut indices: Vec<usize> = (0..uid.len()).collect();
     indices.sort_by(|&a, &b| (uid[a], timestamp_ms[a]).cmp(&(uid[b], timestamp_ms[b])));
@@ -145,7 +145,7 @@ pub fn common_part_of_commuters(
     resolutions
         .iter()
         .map(|&res| {
-            let cpc = fkmob_core::measures::evaluation::trajectory_cpc::trajectory_common_part_of_commuters_impl(
+            let cpc = fastmob_core::measures::evaluation::trajectory_cpc::trajectory_common_part_of_commuters_impl(
                 lat_a, lng_a, &indices_a, &ends_a,
                 lat_b, lng_b, &indices_b, &ends_b,
                 res,
@@ -159,11 +159,11 @@ pub fn common_part_of_commuters(
 /// Mirrors `comparison.py::waiting_times_minutes`: per-user, time-sorted
 /// consecutive timestamp differences (in minutes), flattened across all
 /// users (`merge=True` in the Python version). Implemented directly via
-/// Polars group-by/sort/diff rather than calling fkmob-core's indexed-range
+/// Polars group-by/sort/diff rather than calling fastmob-core's indexed-range
 /// kernel (`waiting_times_indexed_impl`) -- same math (group by user, sort
 /// by timestamp, consecutive differences, drop groups with &lt;2 points),
-/// without needing to replicate fkmob's permutation-index plumbing (that
-/// exists there purely to avoid a physical dataframe sort at fkmob's much
+/// without needing to replicate fastmob's permutation-index plumbing (that
+/// exists there purely to avoid a physical dataframe sort at fastmob's much
 /// larger internal call volume; irrelevant for this one metric).
 pub fn waiting_times_minutes(
     df: &DataFrame,

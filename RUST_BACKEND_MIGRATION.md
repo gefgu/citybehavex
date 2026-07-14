@@ -178,13 +178,15 @@ Ported so far (`citybehavex-web/src/comparison/`):
 
 ### Phases 7–9 — standalone routes (native coverage in current worktree)
 
-- **Network validation**: `/network-validation` now returns a real
-  `synthetic_vs_random` block from the simulation social-network sidecar,
-  using `citybehavex-core::network_graph::compute_graph_metrics` for degree,
-  clustering, and topological-overlap distributions. For graphs above 5000
-  nodes the random baseline is skipped rather than doing an O(n²) generation
-  in-request. Observed co-presence validation is still the remaining parity
-  gap.
+- **Network validation**: `/network-validation` returns
+  `synthetic_vs_random`, `observed_vs_random`, and `synthetic_vs_observed`
+  blocks, using `citybehavex-core::network_graph::compute_graph_metrics` for
+  degree, clustering, and topological-overlap distributions, and
+  `build_co_presence_edges` for the observed daily co-presence graph
+  (`citybehavex-web/src/comparison/network_validation.rs`). For graphs above
+  5000 nodes the random baseline is skipped rather than doing an O(n²)
+  generation in-request. See "What's left" for the one known remaining gap
+  (synthetic graph edge completeness).
 - **Home/work density maps**: `/home-work` now builds synthetic and observed
   HOME/WORK panels with DuckDB table reduction plus Rust `h3o` bucketing and
   GeoJSON polygon output. This intentionally avoids DuckDB's community H3
@@ -194,7 +196,24 @@ Ported so far (`citybehavex-web/src/comparison/`):
   `/timeline/legs` uses cached derived `timeline_legs` and optional
   `timeline_moving` parquet indexes, matching the Python large-run browsing
   strategy while adding road waypoints and profile character fields when the
-  sidecars are available.
+  sidecars are available. `/timeline/agents/{uid}`'s `narrative` and
+  `encounters` (previously hardcoded `null`/`[]`) are now native too:
+  `profile_to_narrative` (`citybehavex-web/src/routes/timeline.rs`) mirrors
+  `citybehavex/profiles/agents.py`'s prose template exactly, and
+  `query_agent_encounters` mirrors `web/backend/app/timeline_data.py`'s
+  contact-profile/contact-narrative/activity-at-stop enrichment. One real fix
+  needed getting there: the encounters parquet's `ts` is raw epoch seconds,
+  and Python's `to_timestamp(ts)::TIMESTAMP` implicitly localizes it via the
+  duckdb session's OS-derived `TimeZone` before comparing against
+  `arrival`/`departure` -- an un-localized (UTC) conversion compared against
+  the wrong wall-clock time by however many hours the local offset is
+  (varying by historical DST for the date in question), silently matching
+  the wrong stop. Verified against real Shanghai-500-sample data: 12/12
+  encounters now match Python's contact_uid/ts/stop/activity/profile fields
+  exactly (using `chrono::Local`'s epoch->local-datetime conversion, since
+  DuckDB's own `AT TIME ZONE` needs the `icu` extension, which isn't in the
+  bundled build of the duckdb-rs version pinned here and would otherwise
+  need a live `INSTALL`/network fetch).
 
 ### Experiment loading performance (in progress)
 
@@ -227,19 +246,298 @@ closed-form formula suffices; no `proj` crate dependency needed.
 
 ## What's left
 
-- **Observed network validation parity**: the Rust endpoint now covers
-  synthetic social-network validation, but not the observed daily co-presence
-  graph path or `synthetic_vs_observed` metric comparison.
-- **MTUS source conversion**: the Rust backend does not read Stata `.dta`
-  directly at request time. Run
-  `python scripts/convert_mtus_time_use.py data/mtus/MTUS_haf.dta` once, or
-  provide a same-stem CSV/Parquet asset; Rust will use that converted table.
-- **HTTP parity harness expansion**: `scripts/compare_web_backends.py` exists,
-  but should be extended to cover all chart sections, home/work filters,
-  timeline endpoints, and metrics export. Continue to whitelist only
-  `transport_spatial.summary.*.mean_jump_km`.
+- **Synthetic network validation edge completeness**: `synthetic_vs_random`'s
+  synthetic graph currently only reads the social-network sidecar's edges
+  (`citybehavex-web/src/payload.rs::synthetic_social_graph`); Python's
+  `_synthetic_validation_block` additionally unions in edges from the
+  encounters sidecar (`_encounter_edges_and_persistence`) when present. This
+  was discovered doing a real-data comparison while building observed
+  network validation (below) -- Python's synthetic edge count is
+  consistently higher than Rust's on real runs with an encounters sidecar,
+  and it's also why `edge_persistence` has always been empty in Rust's
+  `synthetic_vs_random` metrics (no encounter data was ever threaded in to
+  compute it from). Not yet fixed.
 - **Performance validation**: benchmark `/charts/*`, `/home-work`,
   `/timeline/legs`, and `/network-validation` cold/warm on both servers.
+- **`stvd` chart's map layer diverges from Python**: discovered running the
+  full `--include-slow` harness after the fixes below -- `/charts/stvd`'s
+  H3-cell geometries, `properties.area`/`class`/`color`/`peak_shift_hours`/
+  `volume_diff_pct`, and the legend `colors` palette all differ from Python
+  on real `gparis_simulation` data. This is a *different* code path from
+  `metrics.stvd` (the STVD-EMD scalar metric, verified exact above) --
+  `sections::stvd`'s map-layer builder hasn't been touched or verified
+  against real data this session. Not yet investigated.
+- **Harness flakiness under `--include-slow`'s concurrent load**: a handful
+  of endpoints (`charts/metrics`'s `time_use_comparison`/`metrics.stvd`,
+  `charts/activity`'s `daily_activity_difference.limit`) intermittently show
+  up as failing in a full harness run, but consistently pass when the exact
+  same request is re-issued in isolation immediately after (cache cleared,
+  single request, no concurrent load) -- confirmed repeatedly while fixing
+  the items below. Root cause not yet identified (candidate: cache-write
+  contention or a DuckDB connection-pool limit under the harness's dense,
+  rapid request sequence across every section/filter/experiment
+  combination); flagging so a future full-harness "failure" isn't
+  automatically read as a regression without a quick isolated re-check
+  first.
+- **Fixed root cause of a systemic per-user grouping bug (affected `jump_lengths`
+  ECDF, `activity` transition matrix, and `mobility-laws`)**: `citybehavex-web/src/comparison/features.rs::jumps_rog`
+  and `comparison/activity.rs::activity_transition_matrix` both cast the
+  `uid` column to `Int64` for per-user boundary detection. Real observed
+  survey data can have composite string uids (confirmed on
+  `gparis_simulation`: values like `"10_2980"`); Polars silently nulls
+  unparseable values on cast, and the follow-up `.unwrap_or(i64::MIN)`
+  collapsed *every* such user into one fake shared ID -- confirmed this
+  merged all 504 distinct `gparis` observed users into a single contiguous
+  group, creating 503 spurious inter-user "jumps" at the false boundaries
+  between what should have been separate users (504 - 1 = 503, exactly
+  matching the observed discrepancy: Rust reported 10832 non-zero jumps vs
+  Python's 10329). `mobility_laws.rs` already had the correct fix
+  (`canonical_user_ids`: cast through directly for already-integer dtypes,
+  otherwise factorize by first appearance) -- promoted that helper to
+  `comparison::util` (`canonical_user_ids`/`canonical_user_ids_vec`) and
+  reused it in the two buggy call sites. Verified against real
+  `gparis_simulation` data: the `jump_lengths` ECDF now matches Python on
+  all 400 downsampled points (previously diverged starting around point 30);
+  `activity`'s `transition_difference.limit` now matches Python almost
+  exactly (previously off by more than 4x).
+- **Implemented `metrics.cpc` and `metrics.stvd` (previously always empty,
+  not merely buggy -- nothing called these kernels at all)**: both
+  underlying kernels already existed
+  (`comparison::metrics::common_part_of_commuters`,
+  `comparison::stvd::stvd_hourly_histogram` +
+  `fastmob_core::measures::evaluation::stvd_emd::stvd_emd_impl`) but nothing
+  wired them into `metrics_section_payload`. Added the wiring, including a
+  from-scratch port of `legacy.py::_stvd_emd_distribution` (flattening a
+  per-H3-cell hourly histogram into `(x, y, minutes-of-day, volume)` arrays,
+  reprojecting each cell's centroid from EPSG:4326 to EPSG:3857 via the
+  closed-form Web Mercator formula this doc already confirmed suffices).
+  Verified against real `gparis_simulation` data: both `metrics.cpc` (3
+  resolutions) and `metrics.stvd` (3 resolutions) now match Python
+  **exactly**, full float precision.
+- **Known accepted divergence: `profiles` cluster *assignment* on observed
+  data**: after the fix below, per-user `regularity`/`diversity`/
+  `stationarity`/`entropy` values are verified exact against Python. The
+  Routiner/Regular/Scouter *cluster labeling* can still disagree on the
+  `gparis` observed dataset specifically (synthetic-side clustering matched
+  exactly in the same test). Root cause: Rust's k-means
+  (`label_profile_clusters`, seeded from sorted n/6·n/2·5n/6 percentile
+  points) isn't the same algorithm as Python's `sklearn.cluster.KMeans(
+  random_state=0, n_init=10)` (k-means++ init, 10 restarts, numpy's own
+  PRNG) -- bit-exact replication of sklearn's clustering in a from-scratch
+  Rust implementation isn't practical, so this is treated the same as this
+  codebase's other accepted algorithm-level (not data-level) divergences
+  (e.g. the degree-preserving random-graph baseline's differing RNG). Every
+  underlying per-user metric is provably correct; only which of the 3 named
+  buckets a borderline user in a noisy real dataset lands in can differ.
+
+### Resolved: `profiles` chart section returned 500 on real data
+
+Root-caused and fixed -- two independent bugs, not the algorithmic gap
+originally suspected:
+1. **The real blocker**: `profile_visits_from_df` cast the `uid` column to
+   `Int64`, silently nulling *every* row when `uid` is a composite string
+   identifier (confirmed on `gparis_simulation`'s observed data: values like
+   `"10_2980"`), because Polars' cast produces null rather than erroring on
+   unparseable values. `ProfileVisit`/`ProfileRow`'s `uid` field is now
+   `String` (matching Python's `compute_profiles`, which never assumes `uid`
+   is numeric -- it's narwhals-generic throughout), fixing the crash for any
+   dataset with non-integer user IDs.
+2. `profile_visits_from_df` also excluded every row with
+   `end_timestamp <= start_timestamp` up front, which Python's
+   `compute_profiles` never does for its shared `df` (feeds every raw visit
+   into `regularity`/`diversity`/`entropy`/intermittency's location-token
+   derivation, unfiltered) -- only `_stationarity` filters
+   `duration_minutes > 0`, scoped to its own dwell/span computation. Fixed by
+   removing the blanket exclusion and re-scoping the positive-duration check
+   to just the stationarity dwell/span accumulation in
+   `compute_profiles_rows`.
+
+Verified against real `gparis_simulation` data: `regularity`, `diversity`,
+`stationarity`, and `entropy` box-plot quantiles for the synthetic side and
+for the `"Routiner"` profile bucket on the observed side match Python
+**exactly** (full float precision); see the item above for the one
+remaining, accepted divergence (cluster labeling on noisier observed data).
+
+### Resolved: the "cannot start a runtime from within a runtime" panic
+
+Root-caused and fixed. `cache.rs::get_or_build` was `.await`ing its synchronous,
+CPU/IO-bound `build` closure directly on the calling tokio worker thread. When
+that closure's Polars work hit the new-streaming engine's lazy `scan_parquet`
+path, `polars_stream::nodes::io_sources::multi_scan::MultiScan::update_state`
+internally calls `polars_io::pl_async::RuntimeManager::block_on`, which itself
+tries to enter a runtime -- doing that from a thread that's already driving
+the axum handler's own async task trips tokio's "cannot start a runtime from
+within a runtime" panic (confirmed via full backtrace:
+`polars_stream::async_executor::task_scope` -> `MultiScan::update_state` ->
+`RuntimeManager::block_on` -> `tokio::runtime::scheduler::multi_thread::MultiThread::block_on`).
+Fixed by changing `get_or_build`'s `build` parameter from an async closure to
+a plain synchronous one, run via `tokio::task::spawn_blocking` instead of
+awaited inline -- `spawn_blocking` threads aren't considered "inside" the
+async scheduler, so Polars' internal `block_on` no longer conflicts. All 5
+call sites (`routes/charts.rs`) updated accordingly; verified with 9 repeated
+cold-cache (`refresh=true`) requests against the previously-panicking
+`transport-spatial`/`activity`/`metrics` sections on real `gparis_simulation`
+data, zero panics.
+
+### Resolved since the table above was written
+
+- **Observed network validation** (`observed_vs_random` and
+  `synthetic_vs_observed`) is now native: `citybehavex-web/src/comparison/network_validation.rs`
+  builds the observed daily co-presence graph via
+  `citybehavex-core::network_graph::build_co_presence_edges` (the same kernel
+  the synthetic path already used), with `NetworkValidationConfig`'s
+  `observed_enabled`/`location_mode`/`location_col`/`h3_resolution`/
+  `max_group_size` all wired through `routes/charts.rs::network_validation_route`.
+  Verified against real `shanghai_simulation_500sample` data: node/edge counts
+  match Python exactly (500 nodes, 3534 edges); Wasserstein/clustering/
+  topological-overlap numbers are close but not identical, which is expected
+  since the degree-preserving random baseline uses a different RNG than
+  Python's (same accepted-divergence category as `synthetic_vs_random`'s
+  existing random baseline). `edge_persistence` is `null` for the observed
+  side too, for the same reason noted in the item above.
+- **MTUS source conversion**: not a Rust gap -- it's an accepted one-time
+  pre-step. Run `python scripts/convert_mtus_time_use.py data/mtus/MTUS_haf.dta`
+  once (or provide a same-stem CSV/Parquet asset); Rust resolves that
+  converted table at request time. See `web/README.md`'s Notes section.
+  **Updated**: the script used to aggregate MTUS's 25 raw harmonized activity
+  codes down into a simplified 9-bucket rollup (its own invention, not
+  Python's schema) so Rust had a small, easy-to-hardcode category list --
+  but that meant Rust's time-use comparison was built from a coarser
+  granularity than Python's (which reads the `.dta` directly via
+  `pandas.read_stata`, seeing all 25 raw codes), so the two could never
+  numerically agree even with matching category *names*. The script now
+  passes all 25 raw codes through unaggregated (see the "Resolved" entry
+  below); regenerate any existing converted sidecar after pulling this
+  change.
+- **HTTP parity harness expansion**: `scripts/compare_web_backends.py` now
+  covers all 11 chart sections, home/work filter combinations, and the full
+  timeline route surface (`meta`, `legs`, `agents/{uid}`, `/crp`, `/social`),
+  and survives a connection-dropped request (e.g. a panicking handler) as a
+  diffable failure instead of crashing the whole run. Its known-exception
+  whitelist also now exempts the whole `transport_spatial.jump_ecdf` subtree,
+  not just `mean_jump_km` -- running the expanded harness against real
+  `gparis_simulation` data surfaced that the same null-unsafe-clamp bug
+  documented below corrupts a *subset* of legs in a mode to ~20015 km (not a
+  uniform per-leg offset), which reshuffles that mode's sort order/rank and
+  shifts both coordinates of every downstream ECDF point, not just the
+  directly-corrupted ones -- so the whole subtree is incomparable
+  point-for-point wherever the bug bites, not just the corrupted values
+  themselves. Same accepted root cause, just a second, structurally
+  different place it leaks into the payload.
+- **Implemented the 3 missing `metrics.jsd` rows** (`"Activity distribution"`,
+  `"Activity transitions"`, `"Daily activity profile"` -- `"Daily motifs"`
+  was already there via `build_motifs_block`): wired
+  `sections::metrics::metrics_section_payload` to recompute these the same
+  way `legacy.py::_activity_group` does, reusing the exact
+  `prepared_visits_for_filter` visits already shared with the motifs JSD side
+  effect and the existing `activity_transition_matrix`/
+  `jensen_shannon_divergence`/`time_bin_matrix_jsd` kernels plus
+  `sections::activity`'s alignment helpers (`align_square`, `align_daily`,
+  `ordered_union`, `string_column`), promoted from private to `pub(crate)`
+  for this reuse. Only computed when both synthetic and observed visits are
+  present, matching Python's `if obs_v is not None and not obs_v.is_empty()`
+  guard on this specific side effect (looser than the outer section's
+  synthetic-only gate). One subtlety caught by real-data verification:
+  Python's `_activity_group` calls `daily_activity_distribution(syn_v)` with
+  no explicit bin size, which defaults to **10-minute** bins in
+  `fastmob`'s Python wrapper. `sections::activity`'s own `daily_tuple`
+  (shared by the `activity` chart's display matrix) was hardcoded to
+  **60-minute** bins instead -- initially assumed to be a deliberate, coarser
+  granularity for chart display, but a follow-up real-data harness run
+  (below) showed Python's chart matrix reuses this exact same 10-minute
+  tuple too (`_build_activity_block` takes `synth_daily`/`real_daily` as
+  already-computed arguments from the same call `_activity_group` makes),
+  so 60 minutes was simply wrong everywhere, not an intentional UI
+  simplification. Fixed by changing `daily_tuple` itself to bin_size 10 --
+  confirmed the frontend doesn't hardcode an assumed bin count
+  (`web/frontend/src/charts/builders.ts` computes `n_bins / 24` dynamically).
+  Verified against real `gparis_simulation` data across
+  `all`/`weekday`/`weekend` filters: all 4 `metrics.jsd` rows match Python
+  **exactly**, and `activity`'s `daily_activity_difference` chart matrix
+  (previously 24 bins vs Python's 144) now matches too.
+- **Fixed 3 more gaps found running the full `--include-slow` harness for
+  the first time end-to-end** (surfaced immediately after the two entries
+  above landed):
+  - **`activity`/`daily_activity_difference` and `transition_difference`
+    `"limit"` fields off in the 4th decimal place**: `legacy.py` computes
+    `"limit"` from the *already-`.round(3)`-ed* matrix, not the raw one;
+    `sections::activity::matrix_limit` took the max of the raw values. Fixed
+    by rounding to 3 decimals before taking the max, matching Python's
+    apparent behavior exactly (`50.4454680344345` → `50.445`, `Python`'s own
+    value).
+  - **`mobility-laws`' `travel_distance`/`radius_of_gyration`/
+    `daily_locations` fit/reference curves used 100 points, Python uses
+    200**: `legacy.py::_curve_x`'s `n: int = 200` default vs
+    `sections::mobility_laws::curve_x`'s hardcoded `let n = 100usize`. Fixed
+    by matching the default; verified `daily_locations`' curve now matches
+    exactly. `radius_of_gyration`/`travel_distance`'s *fit parameters* still
+    differ substantially, but that's the pre-existing, explicitly
+    out-of-scope, already-documented scipy-TRF-vs-Rust-grid-search
+    divergence noted above -- added a scoped exception to
+    `compare_web_backends.py` for exactly those two blocks' `fits`/`series`
+    fields (not `daily_locations`/`distance_frequency`, which use different,
+    non-fitted dataset builders and should still be compared normally).
+  - **`time_use` categories were a 9-item invented rollup, not MTUS's 25 raw
+    codes**: see the "MTUS source conversion" entry above and the dedicated
+    write-up below.
+- **`time_use`/`metrics-export` -- three compounding gaps, found and fixed
+  together**:
+  1. **Wrong category scheme**: `sections::time_use::TIME_USE_CATEGORIES`
+     hardcoded a 9-bucket rollup (`sleep`, `personal care`, `household`,
+     ...) that doesn't exist anywhere in Python -- Python's real
+     `TIME_USE_CATEGORIES` is the 25 raw MTUS harmonized activity codes
+     (`sleep`, `eatdrink`, `selfcare`, `paidwork`, `educatn`, ...),
+     conveniently identical to citybehavex's own native activity-catalog
+     names (`settings::catalog`), since the simulation's taxonomy was
+     modeled directly on MTUS. Fixing just the Rust constant wasn't enough,
+     though: `scripts/convert_mtus_time_use.py` (the accepted one-time
+     `.dta`-to-Parquet pre-step Rust reads instead of parsing Stata itself)
+     *itself* aggregated those 25 raw columns down into the same invented
+     9-bucket scheme before this fix, so Rust and Python were reading two
+     different granularities of the same source data and could never
+     numerically agree regardless of category names. Updated the script to
+     pass all 25 raw columns through unaggregated instead, and regenerated
+     `data/mtus/MTUS_haf.parquet` (git-ignored, regenerable, used by exactly
+     one config) -- confirmed via `pandas.read_stata` on the original
+     `.dta` that it genuinely has all 25 raw columns; Python's `_read_time_use_table`
+     reads that `.dta` directly for the real MTUS granularity, which the
+     regenerated Parquet now matches.
+  2. **`percent_difference` wasn't rounded to 6 decimals** like every other
+     field in the same row (`legacy.py` does `round(diff / obs * 100.0, 6)`);
+     fixed in `sections::time_use`'s row builder. After (1) and (2),
+     `/charts/time-use`'s `time_use_comparison` matches Python **exactly**,
+     field-for-field, category-for-category.
+  3. **`metrics-export` only ever computed a single filter**
+     (`chart_section_payload(&ctx, "metrics", "all")`), but Python's
+     `/metrics-export` route calls `_build_comparison_payload(filter_keys=None,
+     ...)`, which internally loops over filters and concatenates -- and,
+     confirmed against real data, over two *different* filter sets
+     depending on metric type: `wasserstein`/`stvd` span every
+     *distribution* filter (`all`/`weekday`/`weekend`/time-of-day buckets/
+     special days -- 7 for `gparis_simulation`), while `jsd`/`cpc`/
+     `time_use`/`time_use_comparison` only span the 3 *regular* filters
+     (`all`/`weekday`/`weekend` -- confirmed via `/charts/metrics?filter=morning`
+     on real data: Python already returns populated `wasserstein`/`stvd` for
+     a time-of-day filter, but empty `jsd`/`cpc` and a `null`
+     `time_use_comparison`). Added `payload::metrics_export_artifact`,
+     looping `chart_section_payload` over `available_filters` (regular) for
+     the jsd/cpc/time_use/time_use_comparison merge and separately over
+     `distribution_filters` (all 7) for wasserstein/stvd. Also matched
+     Python's *order* for the merged `jsd` array: `legacy.py` runs the
+     "activity" JSD side effect (Activity distribution/transitions/Daily
+     activity profile) to completion across every regular filter, *then*
+     runs the separate "Daily motifs" side effect across every regular
+     filter again -- so the merged order is metric-group-major, not
+     filter-major; split by `metric_name` rather than assuming a fixed
+     position, since either group can be legitimately empty for a given
+     filter. Also fixed `time_use_metric_rows`'s row shape to match every
+     other metric list's `{metric_name, name, ..., unit}` shape (it was
+     using a bespoke `"metric"` key) and its unit string (`legacy.py` uses
+     the literal `"pct points"`, not `"percentage points"`). Verified
+     against real `gparis_simulation` data: `/metrics-export`'s full
+     response (`metrics.wasserstein` 35 rows, `metrics.stvd` 21 rows,
+     `metrics.jsd` 12 rows in the correct grouped order, `metrics.time_use`
+     3 rows, `time_use_table` 75 rows) now matches Python **exactly**.
 
 ## How to build/test
 

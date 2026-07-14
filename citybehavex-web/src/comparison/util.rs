@@ -80,6 +80,67 @@ pub fn count_true(ca: &BooleanChunked) -> i64 {
     ca.into_iter().filter(|v| v.unwrap_or(false)).count() as i64
 }
 
+/// Canonicalizes a user-ID column to `Int64` codes suitable for boundary
+/// detection (e.g. `contiguous_user_ranges`) or grouping.
+///
+/// Already-integer dtypes cast straight through (no precision loss for real
+/// uid ranges). Anything else (typically `String`, since real observed
+/// survey data can use composite identifiers like `"10_2980"`) is factorized
+/// into dense codes by first-appearance order instead. **This distinction
+/// matters**: a naive `.cast(&DataType::Int64)` silently nulls every
+/// unparseable string value, and a common follow-up `.unwrap_or(i64::MIN)`
+/// then collapses *every* such user into one fake shared ID -- confirmed on
+/// real `gparis_simulation` observed data (string uids like `"10_2980"`):
+/// this collapsed all 504 distinct users into a single contiguous group,
+/// creating 503 spurious inter-user "jumps" at the 503 false boundaries
+/// between what should have been separate users (504 users - 1 = 503),
+/// inflating jump-length/radius-of-gyration/activity-transition counts.
+pub fn canonical_user_ids(uid: &Series) -> anyhow::Result<Series> {
+    if matches!(
+        uid.dtype(),
+        DataType::Int64
+            | DataType::Int32
+            | DataType::Int16
+            | DataType::Int8
+            | DataType::UInt64
+            | DataType::UInt32
+            | DataType::UInt16
+            | DataType::UInt8
+    ) {
+        return Ok(uid.cast(&DataType::Int64)?.with_name("user_id".into()));
+    }
+
+    let uid = uid.cast(&DataType::String)?;
+    let uid = uid.str()?;
+    let mut labels = std::collections::HashMap::<String, i64>::new();
+    let mut next = 0i64;
+    let values: Vec<Option<i64>> = uid
+        .into_iter()
+        .map(|value| {
+            value.map(|value| {
+                *labels.entry(value.to_string()).or_insert_with(|| {
+                    let current = next;
+                    next += 1;
+                    current
+                })
+            })
+        })
+        .collect();
+    Ok(Series::new("user_id".into(), values))
+}
+
+/// Convenience wrapper returning plain `i64`s (nulls as `i64::MIN`, matching
+/// how callers already treated unparseable/missing uids) for call sites that
+/// just need a `Vec<i64>` for boundary detection rather than a `Series`
+/// column.
+pub fn canonical_user_ids_vec(uid: &Series) -> anyhow::Result<Vec<i64>> {
+    Ok(canonical_user_ids(uid)?
+        .i64()?
+        .into_iter()
+        .map(|v| v.unwrap_or(i64::MIN))
+        .collect())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -1,8 +1,8 @@
 //! Mirrors `comparison.py::load_trajectory` and the small parts of
-//! `fkmob.TrajDataFrame` the web payload path actually touches (column-name
-//! bookkeeping) -- not fkmob's Python wrapper class itself, which also
+//! `fastmob.TrajDataFrame` the web payload path actually touches (column-name
+//! bookkeeping) -- not fastmob's Python wrapper class itself, which also
 //! carries convenience methods (`.jump_lengths()`, `.radius_of_gyration()`)
-//! the web port calls into `fkmob-core` for directly instead (see
+//! the web port calls into `fastmob-core` for directly instead (see
 //! `metrics.rs`).
 
 use crate::columns::{

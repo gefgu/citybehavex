@@ -1,13 +1,13 @@
-//! Mirrors fkmob's `activity_transition_matrix`, `daily_activity_distribution`,
+//! Mirrors fastmob's `activity_transition_matrix`, `daily_activity_distribution`,
 //! and `discover_daily_motifs_from_agents` -- the data-prep (factorization,
 //! indexed/sorted per-user row ranges) lives here in Rust; the actual
-//! counting/graph-canonicalization algorithms are `fkmob-core` kernels,
+//! counting/graph-canonicalization algorithms are `fastmob-core` kernels,
 //! called directly with no PyO3 in the loop.
 
 use polars::prelude::*;
 use std::collections::BTreeSet;
 
-/// Mirrors `fkmob`'s `_factorize_activities`: dense integer codes for each
+/// Mirrors `fastmob`'s `_factorize_activities`: dense integer codes for each
 /// distinct string value, categories sorted lexicographically (matching
 /// Python's `sorted(set(values), key=str)` for string-typed columns).
 pub struct Factorized {
@@ -34,7 +34,7 @@ pub fn factorize(values: &[String]) -> Factorized {
 /// Contiguous per-user `(start, end)` row ranges, assuming `uid` is already
 /// grouped (physically sorted by user, and by whatever secondary order the
 /// caller needs -- e.g. timestamp) -- the direct-index equivalent of
-/// fkmob's `indices`/`ends` permutation-based ranges, since this port
+/// fastmob's `indices`/`ends` permutation-based ranges, since this port
 /// physically sorts rather than computing a permutation over an unsorted
 /// frame.
 pub fn contiguous_user_ranges<T: PartialEq>(sorted_uid: &[T]) -> (Vec<usize>, Vec<usize>) {
@@ -52,9 +52,9 @@ pub fn contiguous_user_ranges<T: PartialEq>(sorted_uid: &[T]) -> (Vec<usize>, Ve
     (indices, ends)
 }
 
-/// Mirrors fkmob's `activity_transition_matrix`: `df` must already be
+/// Mirrors fastmob's `activity_transition_matrix`: `df` must already be
 /// sorted by `[uid_col, timestamp_col]` (the physical-sort equivalent of
-/// fkmob's `_build_indexed_user_ranges_fast` over an already-time-sorted
+/// fastmob's `_build_indexed_user_ranges_fast` over an already-time-sorted
 /// frame). Returns `(categories, matrix)` where `matrix[from][to]` is the
 /// percentage of all consecutive-visit transitions (summed across every
 /// user) that went from activity `categories[from]` to `categories[to]`.
@@ -77,16 +77,12 @@ pub fn activity_transition_matrix(
         return Ok((factorized.categories, Vec::new()));
     }
 
-    let uid: Vec<i64> = sorted_df
-        .column(uid_col)?
-        .cast(&DataType::Int64)?
-        .i64()?
-        .into_iter()
-        .map(|v| v.unwrap_or(i64::MIN))
-        .collect();
+    let uid: Vec<i64> = super::util::canonical_user_ids_vec(
+        sorted_df.column(uid_col)?.as_materialized_series(),
+    )?;
     let (indices, ends) = contiguous_user_ranges(&uid);
 
-    let counts = fkmob_core::measures::individual::activity::activity_transition_counts(
+    let counts = fastmob_core::measures::individual::activity::activity_transition_counts(
         &factorized.codes,
         &indices,
         &ends,
@@ -105,7 +101,7 @@ pub fn activity_transition_matrix(
     Ok((factorized.categories, matrix))
 }
 
-/// Mirrors fkmob's `daily_activity_distribution`. `start_minutes`/`end_minutes`
+/// Mirrors fastmob's `daily_activity_distribution`. `start_minutes`/`end_minutes`
 /// are minute-of-day (`0..1440`); a visit with no resolvable end time should
 /// pass the same value for both (matching that visit occupying only its
 /// start-minute's bin). Returns `(categories, matrix[n_categories][n_bins])`,
@@ -125,7 +121,7 @@ pub fn daily_activity_distribution(
         return Ok((factorized.categories, Vec::new()));
     }
 
-    let flat = fkmob_core::measures::individual::activity::daily_activity_percentages(
+    let flat = fastmob_core::measures::individual::activity::daily_activity_percentages(
         &factorized.codes,
         start_minutes,
         end_minutes,
@@ -157,12 +153,12 @@ pub struct MotifDistributionRow {
     pub percentage: f64,
 }
 
-/// Mirrors fkmob's `discover_daily_motifs_from_agents`: `visits` must have
+/// Mirrors fastmob's `discover_daily_motifs_from_agents`: `visits` must have
 /// `[uid, location_id, purpose, start_timestamp, end_timestamp]` (the shape
 /// `visits_for_comparison`/`motif_visits` produce), sorted by
 /// `[uid, start_timestamp]`. Builds the `location_id + "_" + purpose` node
 /// names, extracts hour-of-day and days-since-epoch, and calls
-/// `fkmob-core`'s `compute_daily_motifs` directly.
+/// `fastmob-core`'s `compute_daily_motifs` directly.
 pub fn discover_daily_motifs_from_agents(
     sorted_visits: &DataFrame,
 ) -> anyhow::Result<(Vec<DailyMotif>, Vec<MotifDistributionRow>)> {
@@ -219,7 +215,7 @@ pub fn discover_daily_motifs_from_agents(
     }
 
     let (out_user_ids, out_date_ids, out_motif_ids) =
-        fkmob_core::measures::individual::motifs::compute_daily_motifs(
+        fastmob_core::measures::individual::motifs::compute_daily_motifs(
             unique_ids,
             purposes,
             start_hours,
@@ -379,7 +375,7 @@ mod tests {
     /// Cross-checked against the live Python backend: built the exact same
     /// visits (via `_prepare_activity_visits` on the real gparis synthetic
     /// trajectory, `used_heuristic=False` since a real `purpose` column
-    /// exists) and ran `fkmob.activity_transition_matrix`/
+    /// exists) and ran `fastmob.activity_transition_matrix`/
     /// `daily_activity_distribution` on it directly. 39578 visit rows;
     /// transition matrix categories `[HOME, OTHER, WORK]` with
     /// `HOME->OTHER=16.513472`, `HOME->WORK=21.237985`,

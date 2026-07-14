@@ -5,7 +5,7 @@
 //! calls.
 //!
 //! Uses `polars` (Rust) for the dataframe pipelines (near-1:1 port of the
-//! Python `polars` code), `fkmob-core` directly (no PyO3) for the numeric
+//! Python `polars` code), `fastmob-core` directly (no PyO3) for the numeric
 //! primitives it implements natively (Wasserstein, activity transition
 //! counts, motif discovery, visitation-law distances, waiting times,
 //! trajectory CPC, STVD-EMD), and `citybehavex-core::h3_batch` for H3
@@ -20,6 +20,7 @@ pub mod metric_row;
 pub mod metrics;
 pub mod micro_activity;
 pub mod mobility_laws;
+pub mod network_validation;
 pub mod panel;
 pub mod sections;
 pub mod stvd;

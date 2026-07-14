@@ -113,7 +113,7 @@ pub async fn get_charts_route(
             &extra,
             Some(&extra_key),
             q.refresh,
-            || async move { Ok(payload::chart_base_payload(&ctx)) },
+            move || Ok(payload::chart_base_payload(&ctx)),
         )
         .await
         .map_err(|e| ApiError::internal(e.to_string()))?;
@@ -158,9 +158,7 @@ pub async fn get_chart_section_route(
             &extra,
             Some(&extra_key),
             q.refresh,
-            || async move {
-                payload::chart_section_payload(&ctx, &section_for_build, &filter_for_build)
-            },
+            move || payload::chart_section_payload(&ctx, &section_for_build, &filter_for_build),
         )
         .await
         .map_err(|e| match e {
@@ -213,7 +211,7 @@ pub async fn metrics_export_route(
             &extra,
             Some(&extra_key),
             q.refresh,
-            || async move { Ok(payload::chart_section_payload(&ctx, "metrics", "all")?) },
+            move || payload::metrics_export_artifact(&ctx),
         )
         .await
         .map_err(|e| ApiError::internal(e.to_string()))?;
@@ -251,8 +249,8 @@ pub async fn network_validation_route(
     let run_id = run.run_id.clone();
     let synthetic = run.path.clone();
     let social_path = run.social_network_path();
-    let nv_seed = exp.network_validation_config.random_seed;
-    let nv_enabled = exp.network_validation_config.enabled;
+    let nv_config = exp.network_validation_config.clone();
+    let observed_owned = observed.map(|p| p.to_path_buf());
     let value = cache()
         .get_or_build(
             &format!("{exp_id}__network_validation"),
@@ -262,11 +260,18 @@ pub async fn network_validation_route(
             &extra,
             None,
             q.refresh,
-            || async move {
+            move || {
+                let observed_graph = if nv_config.observed_enabled {
+                    Some(build_observed_graph(observed_owned.as_deref(), &nv_config))
+                } else {
+                    None
+                };
                 Ok(payload::network_validation_payload(
-                    nv_enabled,
+                    nv_config.enabled,
+                    nv_config.synthetic_enabled,
                     Some(&social_path),
-                    nv_seed,
+                    observed_graph.as_ref().map(|r| r.as_ref().map_err(|e| e.as_str())),
+                    nv_config.random_seed,
                 ))
             },
         )
@@ -275,6 +280,38 @@ pub async fn network_validation_route(
     let mut value = value;
     value["run_id"] = json!(run_id);
     Ok(ApiResponse::new(value))
+}
+
+/// Loads the observed dataset and builds the daily co-presence graph for
+/// `observed_vs_random`/`synthetic_vs_observed`. Mirrors
+/// `build_network_validation`'s `observed_df is None` check and
+/// `_observed_validation_block`'s "requires user and datetime columns"
+/// early-out -- both surface as `Err(reason)` here rather than a panic,
+/// since neither is fatal to the rest of the payload.
+fn build_observed_graph(
+    observed_path: Option<&std::path::Path>,
+    nv_config: &crate::settings::reports::NetworkValidationConfig,
+) -> Result<crate::comparison::network_validation::ObservedGraph, String> {
+    let Some(path) = observed_path else {
+        return Err("observed dataframe unavailable".to_string());
+    };
+    let df = crate::comparison::trajectory::read_parquet(path).map_err(|e| e.to_string())?;
+    let cols: Vec<&str> = df.get_column_names().iter().map(|s| s.as_str()).collect();
+    let uid_col = crate::columns::detect_in(&cols, crate::columns::UID_CANDIDATES);
+    let datetime_col = crate::columns::detect_in(&cols, crate::columns::DATETIME_CANDIDATES);
+    let (Some(uid_col), Some(datetime_col)) = (uid_col, datetime_col) else {
+        return Err("observed network validation requires user and datetime columns".to_string());
+    };
+    crate::comparison::network_validation::observed_edges_and_persistence(
+        &df,
+        &uid_col,
+        &datetime_col,
+        nv_config.location_mode,
+        nv_config.location_col.as_deref(),
+        nv_config.h3_resolution as u8,
+        nv_config.max_group_size as usize,
+    )
+    .map_err(|e| e.to_string())
 }
 
 pub async fn home_work_route(
@@ -315,7 +352,7 @@ pub async fn home_work_route(
             &extra,
             Some(&extra_key),
             q.refresh,
-            || async move {
+            move || {
                 crate::home_work::build_home_work(
                     &synthetic_for_build,
                     observed_for_build.as_deref(),
