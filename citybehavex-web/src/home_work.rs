@@ -16,25 +16,33 @@ const DISPLAY_RESOLUTIONS: [u8; 2] = [7, 9];
 const SEQ_BLUES: [&str; 5] = ["#eff3ff", "#bdd7e7", "#6baed6", "#3182bd", "#08519c"];
 const SEQ_ORANGES: [&str; 5] = ["#feedde", "#fdbe85", "#fd8d3c", "#e6550d", "#a63603"];
 
+// Labels use an en dash ("–", U+2013), matching
+// `web/backend/app/home_work_data.py::AGE_BRACKETS` literally, not a hyphen.
 const AGE_BRACKETS: [(&str, &str, i64, i64); 5] = [
-    ("16_24", "16-24", 16, 24),
-    ("25_34", "25-34", 25, 34),
-    ("35_44", "35-44", 35, 44),
-    ("45_59", "45-59", 45, 59),
-    ("60_80", "60-80", 60, 80),
+    ("16_24", "16–24", 16, 24),
+    ("25_34", "25–34", 25, 34),
+    ("35_44", "35–44", 35, 44),
+    ("45_59", "45–59", 45, 59),
+    ("60_80", "60–80", 60, 80),
 ];
 
-const JOBS: [&str; 10] = [
-    "Managers",
-    "Professionals",
-    "Technicians and associate professionals",
-    "Clerical support workers",
-    "Service and sales workers",
-    "Skilled agricultural, forestry and fishery workers",
-    "Craft and related trades workers",
-    "Plant and machine operators, and assemblers",
-    "Elementary occupations",
-    "Armed forces occupations",
+/// Mirrors `citybehavex/profiles/agents.py::ILOSTAT_JOBS` exactly -- these
+/// are the literal `job` field values stored on synthetic agent profiles
+/// (not display labels), so anything else here would never match a real
+/// agent and silently filter out everyone. A previous version of this list
+/// invented full ISCO-08 major-group labels instead ("Managers",
+/// "Professionals", ...), which look plausible but don't correspond to any
+/// value the simulation actually writes.
+const JOBS: [&str; 9] = [
+    "manager",
+    "professional",
+    "technician or associate professional",
+    "clerical support worker",
+    "service or sales worker",
+    "agricultural or fishery worker",
+    "craft or trades worker",
+    "machine operator or assembler",
+    "elementary worker",
 ];
 
 #[derive(Debug, Clone)]
@@ -113,6 +121,19 @@ fn profile_filter_sql(profiles_path: Option<&Path>, demo: &DemoFilter) -> String
     )
 }
 
+/// H3 resolution used to group a user's raw points before picking their
+/// modal (most-visited) location -- mirrors
+/// `web/backend/app/home_work_data.py::_FINE_RESOLUTION` (12, ~10m edge
+/// length). Grouping by fine H3 cell rather than rounding raw lat/lng to a
+/// fixed decimal precision matters: GPS-derived points revisiting "the same
+/// place" rarely land on the exact same coordinate, and rounding to 6
+/// decimals (~0.1m) is far tighter than that noise, so it was splitting a
+/// single real location into several near-duplicate candidate groups and
+/// picking the wrong (or a different) modal winner than Python -- confirmed
+/// on real `gparis_simulation` data: the resulting display-resolution
+/// feature count and per-cell agent counts both diverged.
+const FINE_RESOLUTION: u8 = 12;
+
 fn modal_points(
     path: &Path,
     cols: &HashMap<&str, Option<String>>,
@@ -131,34 +152,45 @@ fn modal_points(
     let join = profile_filter_sql(profiles_path, demo);
     let sql = format!(
         r#"
-        WITH rows AS (
-            SELECT t."{uid}" AS uid, t."{lat}" AS lat, t."{lng}" AS lng
-            FROM read_parquet('{path}') t
-            {join}
-            WHERE upper(trim(CAST(t."{purpose_col}" AS VARCHAR))) = '{purpose}'
-        ),
-        rounded AS (
-            SELECT uid, round(lat, 6) AS lat, round(lng, 6) AS lng, count(*) AS cnt
-            FROM rows
-            WHERE lat BETWEEN -90 AND 90 AND lng BETWEEN -180 AND 180
-            GROUP BY uid, round(lat, 6), round(lng, 6)
-        ),
-        modal AS (
-            SELECT uid, lat, lng,
-                   row_number() OVER (PARTITION BY uid ORDER BY cnt DESC, lat, lng) AS rn
-            FROM rounded
-        )
-        SELECT lat, lng FROM modal WHERE rn = 1
+        SELECT CAST(t."{uid}" AS VARCHAR) AS uid, t."{lat}" AS lat, t."{lng}" AS lng
+        FROM read_parquet('{path}') t
+        {join}
+        WHERE upper(trim(CAST(t."{purpose_col}" AS VARCHAR))) = '{purpose}'
+          AND t."{lat}" BETWEEN -90 AND 90 AND t."{lng}" BETWEEN -180 AND 180
         "#,
         path = quote_path(path),
         purpose = purpose.replace('\'', "''"),
     );
     let conn = duckdb::Connection::open_in_memory()?;
     let mut stmt = conn.prepare(&sql)?;
-    let rows = stmt.query_map([], |row| Ok((row.get::<_, f64>(0)?, row.get::<_, f64>(1)?)))?;
-    let mut out = Vec::new();
+    let rows = stmt.query_map([], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, f64>(1)?, row.get::<_, f64>(2)?))
+    })?;
+    let fine_res = Resolution::try_from(FINE_RESOLUTION)
+        .map_err(|e| anyhow::anyhow!("invalid H3 resolution {FINE_RESOLUTION}: {e}"))?;
+    // (uid) -> (fine_cell) -> (representative lat/lng, count)
+    let mut by_user: HashMap<String, HashMap<u64, ((f64, f64), i64)>> = HashMap::new();
     for row in rows {
-        out.push(row?);
+        let (uid, lat, lng) = row?;
+        let Ok(ll) = LatLng::new(lat, lng) else {
+            continue;
+        };
+        let cell = u64::from(ll.to_cell(fine_res));
+        let entry = by_user
+            .entry(uid)
+            .or_default()
+            .entry(cell)
+            .or_insert(((lat, lng), 0));
+        entry.1 += 1;
+    }
+    let mut out = Vec::new();
+    for cells in by_user.into_values() {
+        if let Some((_, (point, _))) = cells
+            .into_iter()
+            .max_by_key(|(cell, (_, cnt))| (*cnt, std::cmp::Reverse(*cell)))
+        {
+            out.push(point);
+        }
     }
     Ok(out)
 }

@@ -259,14 +259,6 @@ closed-form formula suffices; no `proj` crate dependency needed.
   compute it from). Not yet fixed.
 - **Performance validation**: benchmark `/charts/*`, `/home-work`,
   `/timeline/legs`, and `/network-validation` cold/warm on both servers.
-- **`stvd` chart's map layer diverges from Python**: discovered running the
-  full `--include-slow` harness after the fixes below -- `/charts/stvd`'s
-  H3-cell geometries, `properties.area`/`class`/`color`/`peak_shift_hours`/
-  `volume_diff_pct`, and the legend `colors` palette all differ from Python
-  on real `gparis_simulation` data. This is a *different* code path from
-  `metrics.stvd` (the STVD-EMD scalar metric, verified exact above) --
-  `sections::stvd`'s map-layer builder hasn't been touched or verified
-  against real data this session. Not yet investigated.
 - **Harness flakiness under `--include-slow`'s concurrent load**: a handful
   of endpoints (`charts/metrics`'s `time_use_comparison`/`metrics.stvd`,
   `charts/activity`'s `daily_activity_difference.limit`) intermittently show
@@ -538,6 +530,60 @@ data, zero panics.
      response (`metrics.wasserstein` 35 rows, `metrics.stvd` 21 rows,
      `metrics.jsd` 12 rows in the correct grouped order, `metrics.time_use`
      3 rows, `time_use_table` 75 rows) now matches Python **exactly**.
+- **`stvd` chart's map layer**: `sections::stvd::stvd_section_payload`
+  hardcoded its own `COLORS` palette and `threshold = 25.0`, both invented
+  rather than copied from `legacy.py`'s `STVD_COLORS`/
+  `STVD_VOLUME_THRESHOLD = 3.0` -- fixed to match exactly. The GeoJSON
+  `features` array order also differs from Python's, but verified (aligning
+  both sides by `properties.area`, the H3 cell hex ID) that it's the exact
+  same 840 cells with identical geometry and properties on real
+  `gparis_simulation` data, just in a different array position -- neither
+  side sorts, each reflects its own internal grouping/iteration order,
+  which GeoJSON rendering doesn't depend on. Added a targeted sort-before-
+  diff step to `compare_web_backends.py` for this one list (keyed by
+  `properties.area`) rather than a blanket exception, so a real future
+  content mismatch in this field would still be caught.
+- **`/home-work` -- three previously-untested gaps** (this route had never
+  been exercised by the harness with real data before a full
+  `--include-slow` run finally reached it):
+  1. **`filter_options.jobs` was an entirely invented list**:
+     `home_work.rs::JOBS` hardcoded 10 full ISCO-08 major-group labels
+     ("Managers", "Professionals", ...) that don't correspond to anything
+     the simulation actually writes. The real values (and Python's real
+     `JOBS` list, `citybehavex.profiles.ILOSTAT_JOBS`) are 9 short lowercase
+     codes ("manager", "professional", ...) -- the literal `job` field on
+     every synthetic agent profile. This meant `/home-work?job=...` almost
+     certainly never matched a single synthetic agent. Fixed by copying
+     `ILOSTAT_JOBS` exactly.
+  2. **`filter_options.age_brackets[].label` used a hyphen, Python uses an
+     en dash** (`"16-24"` vs `"16–24"`, U+2013) -- cosmetic only, the actual
+     filter keys/bounds already matched; fixed the display string.
+  3. **The real/observed density map's modal-point algorithm didn't match**:
+     `home_work.rs::modal_points` picked each user's single most-visited
+     point by rounding raw lat/lng to 6 decimals (~0.1m) and grouping on
+     that -- far tighter than GPS noise on repeat visits to "the same
+     place," so it was splitting one real location into several
+     near-duplicate candidate groups and could pick a different (or just
+     differently-tied) winner than Python.
+     `web/backend/app/home_work_data.py::_agent_density` instead groups by
+     H3 resolution-12 cell (`_FINE_RESOLUTION`, ~10m) before picking the
+     modal group. Rewrote `modal_points` to do the same fine-cell grouping
+     in Rust via `h3o` (DuckDB now only does the raw filter query; the
+     group-by-fine-cell-then-pick-the-mode step happens in Rust code,
+     mirroring the SQL's `cnt DESC, fine_cell` tiebreak with
+     `max_by_key((cnt, Reverse(cell)))`). Verified against real
+     `gparis_simulation` data: the synthetic-side density map now matches
+     Python **exactly** (386/386 H3 cells, identical `agent_count` per
+     cell). The observed/real side is very close but not bit-exact (260 of
+     261 cells match exactly, agent counts identical on every shared cell);
+     the one remaining mismatch is one user landing in a different display
+     cell, most likely because Python's `any_value(lat)`/`any_value(lng)`
+     (picking an arbitrary representative point within a tied fine cell) is
+     itself not deterministic in DuckDB -- there's no "more correct" answer
+     to replicate bit-for-bit here, just two different arbitrary choices.
+     Not chased further given the scale of improvement (from
+     systematically wrong on nearly every cell to one non-deterministic
+     edge case).
 
 ## How to build/test
 
