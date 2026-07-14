@@ -14,12 +14,12 @@ adapted to the stay-level schema produced by reports._visits_for_comparison
 from __future__ import annotations
 
 import polars as pl
-from fkmob.measures.individual.diversity import diversity as _diversity
-from fkmob.measures.individual.entropy import trajectory_entropy as _entropy
-from fkmob.measures.individual.mobility_profiling import (
+from fastmob.measures.individual.diversity import diversity as _diversity
+from fastmob.measures.individual.entropy import trajectory_entropy as _entropy
+from fastmob.measures.individual.mobility_profiling import (
     intermittance_and_degree_of_return as _intermittance_and_degree_of_return,
 )
-from fkmob.measures.individual.regularity import regularity as _regularity
+from fastmob.measures.individual.regularity import regularity as _regularity
 
 #: Metrics shown in the per-profile box plots.
 PROFILE_METRICS = ("regularity", "diversity", "stationarity", "entropy")

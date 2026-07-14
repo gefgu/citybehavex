@@ -31,7 +31,7 @@ dependencies = [
     "seaborn>=0.13.2",
     "shapely>=2.1.2",
     "skmob-vis",
-    "fkmob[data,generation,tessellation,diversity]",
+    "fastmob[data,generation,tessellation,diversity]",
     "tqdm>=4.67.3",
     "typer>=0.12.0",
 ]
@@ -83,5 +83,5 @@ markers = [
 ]
 
 [tool.uv.sources]
-fkmob = { path = "../fkmob", editable = true }
+fastmob = { path = "../fastmob", editable = true }
 skmob-vis = { path = "../skmob-vis", editable = true }
