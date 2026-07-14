@@ -726,7 +726,7 @@ version = "0.1.0"
 dependencies = [
  "citybehavex-core",
  "fast_paths",
- "fkmob-core",
+ "fastmob-core",
  "h3o 0.10.0",
  "numpy",
  "pyo3",
@@ -746,7 +746,7 @@ dependencies = [
  "chrono",
  "citybehavex-core",
  "duckdb",
- "fkmob-core",
+ "fastmob-core",
  "h3o 0.10.0",
  "hex",
  "lru",
@@ -1171,23 +1171,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "filetime"
-version = "0.2.29"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5c287a33c7f0a620c38e641e7f60827713987b3c0f26e8ddc9462cc69cf75759"
-dependencies = [
- "cfg-if",
- "libc",
-]
-
-[[package]]
-name = "find-msvc-tools"
-version = "0.1.9"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5baebc0774151f905a1a2cc41989300b1e6fbb29aff0ceffa1064fdd3088d582"
-
-[[package]]
-name = "fkmob-core"
+name = "fastmob-core"
 version = "0.1.0"
 dependencies = [
  "geo",
@@ -1205,6 +1189,22 @@ dependencies = [
  "rustc-hash",
  "wass",
 ]
+
+[[package]]
+name = "filetime"
+version = "0.2.29"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5c287a33c7f0a620c38e641e7f60827713987b3c0f26e8ddc9462cc69cf75759"
+dependencies = [
+ "cfg-if",
+ "libc",
+]
+
+[[package]]
+name = "find-msvc-tools"
+version = "0.1.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5baebc0774151f905a1a2cc41989300b1e6fbb29aff0ceffa1064fdd3088d582"
 
 [[package]]
 name = "flate2"
