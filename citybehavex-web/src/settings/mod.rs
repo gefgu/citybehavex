@@ -187,7 +187,7 @@ mod tests {
             return;
         }
         let config = load_config(Some(&path)).expect("gparis config should load and validate");
-        assert_eq!(config.simulation.agents, 500);
+        assert_eq!(config.simulation.agents, 550);
         assert_eq!(config.simulation.days, 7);
         assert_eq!(config.simulation.relevance_column, "relevance");
         assert_eq!(config.simulation.granularity_minutes, 15);

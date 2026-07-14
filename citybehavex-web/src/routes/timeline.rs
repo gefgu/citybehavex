@@ -6,7 +6,7 @@ use crate::datasource::{quote_path, run_summary};
 use crate::experiments::{self, get_experiment};
 use crate::models::{ApiError, ApiResponse, ApiResult};
 use axum::extract::{Path, Query};
-use chrono::{DateTime, NaiveDateTime};
+use chrono::{DateTime, NaiveDateTime, TimeZone};
 use serde::Deserialize;
 use serde_json::{Value, json};
 use std::collections::{BTreeSet, HashMap, HashSet};
@@ -539,6 +539,200 @@ fn duck_value_to_json(value: duckdb::types::Value) -> Value {
     }
 }
 
+/// Mirrors `citybehavex/profiles/agents.py::profile_to_narrative`: the same
+/// prose template ddCRP/social-graph/activity-CRP embeddings are built from.
+/// Takes the generic profile `Value` `query_profile` already returns rather
+/// than a typed struct, since that's the only representation this route has.
+fn profile_to_narrative(profile: &Value) -> Option<String> {
+    let get_str = |key: &str| profile.get(key).and_then(Value::as_str);
+    let name = get_str("name")?;
+    let age = profile.get("age").and_then(Value::as_i64)?;
+    let gender = get_str("gender")?;
+    let job = get_str("job")?;
+    let education = get_str("education")?;
+    let household = get_str("household")?;
+    let health = profile.get("health").and_then(Value::as_i64)?;
+    let health_label = match health {
+        1 => "very poor",
+        2 => "poor",
+        3 => "fair",
+        4 => "good",
+        5 => "very good",
+        _ => return None,
+    };
+    let has_car = profile.get("has_car").and_then(Value::as_bool).unwrap_or(false);
+    let has_bike = profile.get("has_bike").and_then(Value::as_bool).unwrap_or(false);
+    let transport = match (has_car, has_bike) {
+        (true, true) => "They own a car and a bike.".to_string(),
+        (true, false) => "They own a car.".to_string(),
+        (false, true) => "They own a bike.".to_string(),
+        (false, false) => "They rely on public transport or walking.".to_string(),
+    };
+    Some(format!(
+        "{name} is a {age}-year-old {gender} working as a {job}. \
+         They have {education} level education and {health_label} health. \
+         They live as: {household}. {transport}"
+    ))
+}
+
+/// Mirrors `web/backend/app/timeline_data.py::query_activity_at_stop`: the
+/// micro-activity active at `ts` within one specific stop, if any. Only
+/// `activity`/`dwell_minutes` are consumed by the caller, so those are the
+/// only fields returned (unlike Python's dict, which also carries `seq`/
+/// `arrival`/`departure` that nothing reads).
+fn query_activity_at_stop(
+    activities_path: &FsPath,
+    uid: i64,
+    stop_id: i64,
+    ts: &str,
+) -> anyhow::Result<Option<(Option<i64>, Option<f64>)>> {
+    let conn = duckdb::Connection::open_in_memory()?;
+    let sql = format!(
+        r#"SELECT activity, date_diff('second', arrival, departure) / 60.0 AS dwell_minutes
+           FROM read_parquet('{path}')
+           WHERE uid = $1 AND stop_id = $2
+             AND arrival <= CAST($3 AS TIMESTAMP) AND departure >= CAST($3 AS TIMESTAMP)
+           ORDER BY seq DESC LIMIT 1"#,
+        path = quote_path(activities_path)
+    );
+    let mut stmt = conn.prepare(&sql)?;
+    let mut rows = stmt.query(duckdb::params![uid, stop_id, ts])?;
+    let Some(row) = rows.next()? else {
+        return Ok(None);
+    };
+    Ok(Some((
+        row.get::<_, Option<i64>>(0)?,
+        row.get::<_, Option<f64>>(1)?,
+    )))
+}
+
+/// Mirrors `web/backend/app/timeline_data.py::query_agent_encounters`: the
+/// clicked agent's most recent encounters, each resolved to the contact's
+/// active stop (if any) at the encounter time.
+///
+/// The encounters parquet's `ts` is raw epoch seconds; Python's
+/// `to_timestamp(ts)::TIMESTAMP` implicitly localizes it via the duckdb
+/// session's OS-derived `TimeZone` setting before comparing against
+/// `arrival`/`departure` (naive local timestamps) -- an un-localized
+/// (straight UTC) conversion would compare against the wrong wall-clock time
+/// by however many hours the local offset is (which varies by historical
+/// DST for the date in question), silently matching the wrong stop. This
+/// port does the same epoch -> local-naive-datetime conversion via
+/// `chrono::Local` in Rust (verified to produce identical output to
+/// Python's duckdb session for real Jan-2016 encounter timestamps) instead
+/// of DuckDB's `AT TIME ZONE`, which needs the `icu` extension -- present in
+/// some duckdb-rs versions' bundled build but not the one pinned here,
+/// requiring a live `INSTALL` (network fetch) to use at all.
+fn query_agent_encounters(
+    encounters_path: &FsPath,
+    trajectory_path: &FsPath,
+    uid: i64,
+    limit: i64,
+) -> anyhow::Result<Vec<Value>> {
+    let columns = parquet_columns(trajectory_path)?;
+    let category_expr = if columns.contains("category") {
+        "category"
+    } else {
+        "NULL::VARCHAR AS category"
+    };
+    let activity_expr = if columns.contains("activity") {
+        "activity"
+    } else {
+        "NULL::BIGINT AS activity"
+    };
+    let stop_id_expr = if columns.contains("stop_id") {
+        "stop_id"
+    } else {
+        "NULL::BIGINT AS stop_id"
+    };
+
+    let recent_sql = format!(
+        r#"SELECT CASE WHEN agent = $1 THEN contact ELSE agent END AS contact_uid, ts, tile
+           FROM read_parquet('{encounters}')
+           WHERE agent = $1 OR contact = $1
+           ORDER BY ts DESC LIMIT $2"#,
+        encounters = quote_path(encounters_path),
+    );
+    let conn = duckdb::Connection::open_in_memory()?;
+    let mut recent: Vec<(i64, i64, Option<i64>)> = Vec::new();
+    {
+        let mut stmt = conn.prepare(&recent_sql)?;
+        let mut rows = stmt.query(duckdb::params![uid, limit])?;
+        while let Some(row) = rows.next()? {
+            recent.push((row.get(0)?, row.get(1)?, row.get(2)?));
+        }
+    }
+
+    let match_sql = format!(
+        r#"SELECT CAST(arrival AS VARCHAR), CAST(departure AS VARCHAR), lat, lng, purpose,
+                  {category_expr}, {activity_expr}, {stop_id_expr},
+                  trip_duration_minutes, dwell_minutes
+           FROM read_parquet('{trajectory}')
+           WHERE uid = $1 AND arrival <= CAST($2 AS TIMESTAMP) AND departure >= CAST($2 AS TIMESTAMP)
+           ORDER BY arrival DESC NULLS LAST LIMIT 1"#,
+        trajectory = quote_path(trajectory_path),
+    );
+    let mut match_stmt = conn.prepare(&match_sql)?;
+
+    let mut out = Vec::new();
+    for (contact_uid, ts_epoch, tile) in recent {
+        let ts_local = chrono::Local
+            .timestamp_opt(ts_epoch, 0)
+            .single()
+            .map(|dt| dt.naive_local())
+            .ok_or_else(|| anyhow::anyhow!("invalid encounter timestamp {ts_epoch}"))?;
+        let ts_str = ts_local.format("%Y-%m-%d %H:%M:%S").to_string();
+
+        let mut rows = match_stmt.query(duckdb::params![contact_uid, &ts_str])?;
+        let stop = rows.next()?.map(|row| {
+            Ok::<_, anyhow::Error>((
+                row.get::<_, Option<String>>(0)?,
+                row.get::<_, Option<String>>(1)?,
+                row.get::<_, Option<f64>>(2)?,
+                row.get::<_, Option<f64>>(3)?,
+                row.get::<_, Option<String>>(4)?,
+                row.get::<_, Option<String>>(5)?,
+                row.get::<_, Option<i64>>(6)?,
+                row.get::<_, Option<i64>>(7)?,
+                row.get::<_, Option<f64>>(8)?,
+                row.get::<_, Option<f64>>(9)?,
+            ))
+        });
+        let (
+            stop_arrival,
+            stop_departure,
+            lat,
+            lng,
+            purpose,
+            category,
+            activity,
+            stop_id,
+            trip_duration_minutes,
+            dwell_minutes,
+        ) = match stop {
+            Some(row) => row?,
+            None => (None, None, None, None, None, None, None, None, None, None),
+        };
+
+        out.push(json!({
+            "contact_uid": contact_uid,
+            "ts": ts_str,
+            "tile": tile,
+            "stop_arrival": stop_arrival,
+            "stop_departure": stop_departure,
+            "lat": lat,
+            "lng": lng,
+            "purpose": purpose,
+            "category": category,
+            "activity": activity,
+            "stop_id": stop_id,
+            "trip_duration_minutes": trip_duration_minutes,
+            "dwell_minutes": dwell_minutes,
+        }));
+    }
+    Ok(out)
+}
+
 fn activity_fields(activity_id: Option<i64>) -> Value {
     let Some(id) = activity_id else {
         return json!({"activity_name": null, "activity_description": null});
@@ -876,20 +1070,83 @@ pub async fn timeline_agent_route(
     if profile.is_none() {
         warnings.push("no agent profile available for this uid".to_string());
     }
+    let narrative = profile.as_ref().and_then(profile_to_narrative);
     let trips = query_agent_trips(&run.path, &run.activities_path(), uid)
         .map_err(|e| ApiError::internal(e.to_string()))?;
-    if !run.encounters_path().exists() {
+
+    let has_activities_table = run.activities_path().exists();
+    let mut encounters = Vec::new();
+    if run.encounters_path().exists() {
+        encounters = query_agent_encounters(&run.encounters_path(), &run.path, uid, 20)
+            .map_err(|e| ApiError::internal(e.to_string()))?;
+        for encounter in &mut encounters {
+            let stop_id = encounter
+                .as_object_mut()
+                .and_then(|obj| obj.remove("stop_id"))
+                .and_then(|v| v.as_i64());
+            let contact_uid = encounter.get("contact_uid").and_then(Value::as_i64).unwrap_or(0);
+            let stop_arrival_present = encounter.get("stop_arrival").is_some_and(|v| !v.is_null());
+
+            if has_activities_table && stop_arrival_present {
+                if let Some(stop_id) = stop_id {
+                    let ts = encounter.get("ts").and_then(Value::as_str).unwrap_or("").to_string();
+                    let activity_row =
+                        query_activity_at_stop(&run.activities_path(), contact_uid, stop_id, &ts)
+                            .map_err(|e| ApiError::internal(e.to_string()))?;
+                    let (activity_id, dwell_minutes) = activity_row.unwrap_or((None, None));
+                    merge_object(encounter, activity_fields(activity_id));
+                    if let Some(dwell_minutes) = dwell_minutes {
+                        encounter["dwell_minutes"] = json!(dwell_minutes);
+                    }
+                } else {
+                    let activity_id = encounter.get("activity").and_then(Value::as_i64);
+                    merge_object(encounter, activity_fields(activity_id));
+                }
+            } else {
+                let activity_id = encounter.get("activity").and_then(Value::as_i64);
+                merge_object(encounter, activity_fields(activity_id));
+            }
+
+            match query_profile(exp.profiles_path.as_deref(), contact_uid)
+                .map_err(|e| ApiError::internal(e.to_string()))?
+            {
+                Some(contact_profile) => {
+                    let contact_narrative = profile_to_narrative(&contact_profile);
+                    encounter["contact_narrative"] = contact_narrative.map(Value::from).unwrap_or(Value::Null);
+                    encounter["contact_profile"] = contact_profile;
+                }
+                None => {
+                    encounter["contact_profile"] = Value::Null;
+                    encounter["contact_narrative"] = Value::Null;
+                }
+            }
+            encounter["location_warning"] = if stop_arrival_present {
+                Value::Null
+            } else {
+                json!("no active stop found for contact at encounter time")
+            };
+        }
+    } else {
         warnings.push("no encounters data available for this experiment".to_string());
     }
+
     Ok(ApiResponse::new(json!({
         "uid": uid,
         "run_id": run.run_id,
         "profile": profile,
-        "narrative": null,
+        "narrative": narrative,
         "trips": trips,
-        "encounters": [],
+        "encounters": encounters,
         "warnings": warnings,
     })))
+}
+
+fn merge_object(target: &mut Value, patch: Value) {
+    if let (Some(target), Some(patch)) = (target.as_object_mut(), patch.as_object()) {
+        for (key, value) in patch {
+            target.insert(key.clone(), value.clone());
+        }
+    }
 }
 
 pub async fn timeline_agent_crp_route(

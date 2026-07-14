@@ -40,10 +40,10 @@ const LITERATURE_MOTIF_PERCENTAGES: &[(i64, f64)] = &[
     (17, 0.86),
 ];
 
-/// `(literature_motif_id, fkmob_motif_id)`, mirrors `LITERATURE_TO_FKMOB_MOTIF_ID`.
+/// `(literature_motif_id, fastmob_motif_id)`, mirrors `LITERATURE_TO_FASTMOB_MOTIF_ID`.
 /// Order matches the Python dict's insertion order (ordinals 1..17), which is
 /// also the canonical `categories` order for the chart.
-const LITERATURE_TO_FKMOB_MOTIF_ID: &[(i64, i64)] = &[
+const LITERATURE_TO_FASTMOB_MOTIF_ID: &[(i64, i64)] = &[
     (1, 0x1000000000),
     (2, 0x2000000006),
     (3, 0x30000000E4),
@@ -65,7 +65,7 @@ const LITERATURE_TO_FKMOB_MOTIF_ID: &[(i64, i64)] = &[
 
 /// Embedded SVG glyphs for each literature motif ID, copied from
 /// `skmob-vis`'s package assets so this crate doesn't need a runtime/build
-/// dependency on a sibling checkout. Keyed by `fkmob_motif_id`.
+/// dependency on a sibling checkout. Keyed by `fastmob_motif_id`.
 const MOTIF_SVG_BYTES: &[(i64, &[u8])] = &[
     (
         0x1000000000,
@@ -163,12 +163,12 @@ fn round2(value: f64) -> f64 {
 
 /// Mirrors `_empty_basis`.
 fn empty_basis() -> Vec<MotifBasisRow> {
-    let mut rows: Vec<MotifBasisRow> = LITERATURE_TO_FKMOB_MOTIF_ID
+    let mut rows: Vec<MotifBasisRow> = LITERATURE_TO_FASTMOB_MOTIF_ID
         .iter()
-        .map(|&(literature_motif_id, fkmob_motif_id)| MotifBasisRow {
+        .map(|&(literature_motif_id, fastmob_motif_id)| MotifBasisRow {
             literature_motif_id: json!(literature_motif_id),
-            motif_id: json!(fkmob_motif_id),
-            hex_id: format_motif_hex_id(fkmob_motif_id),
+            motif_id: json!(fastmob_motif_id),
+            hex_id: format_motif_hex_id(fastmob_motif_id),
             percentage: 0.0,
             count: 0,
         })
@@ -225,13 +225,13 @@ pub fn map_motif_distribution_to_literature_basis(
 pub fn motif_axis_label_styles() -> (BTreeMap<String, String>, BTreeMap<String, Value>) {
     let mut label_keys = BTreeMap::new();
     let mut rich_styles = BTreeMap::new();
-    for (ordinal, &(_, fkmob_motif_id)) in LITERATURE_TO_FKMOB_MOTIF_ID.iter().enumerate() {
+    for (ordinal, &(_, fastmob_motif_id)) in LITERATURE_TO_FASTMOB_MOTIF_ID.iter().enumerate() {
         let ordinal = ordinal + 1;
-        let hex_id = format_motif_hex_id(fkmob_motif_id);
+        let hex_id = format_motif_hex_id(fastmob_motif_id);
         let style_key = format!("motif_{ordinal}");
         let svg_bytes = MOTIF_SVG_BYTES
             .iter()
-            .find(|&&(id, _)| id == fkmob_motif_id)
+            .find(|&&(id, _)| id == fastmob_motif_id)
             .map(|&(_, bytes)| bytes)
             .unwrap_or(&[]);
         let data_uri = format!("data:image/svg+xml;base64,{}", BASE64.encode(svg_bytes));
@@ -371,6 +371,47 @@ pub fn build_motifs_block(
         "motif_label_keys": motif_label_keys,
         "motif_label_styles": motif_label_styles,
     }))
+}
+
+/// The `motifs` chart section itself, mirrors `payload/sections.py::build_section_motifs`.
+pub fn motifs_section_payload(
+    ctx: &crate::payload::ComparisonContext,
+    filter_key: &str,
+) -> anyhow::Result<Value> {
+    use crate::payload::{choose_regular_filter, empty_chart_payload, prepared_visits_for_filter};
+
+    let Some(filter) = choose_regular_filter(ctx, filter_key)? else {
+        return Ok(empty_chart_payload(ctx, vec![filter_key.to_string()]));
+    };
+    let mut payload = empty_chart_payload(ctx, vec![filter_key.to_string()]);
+    let visits = prepared_visits_for_filter(ctx, &filter)?;
+    if visits.synthetic.is_none() && visits.observed.is_none() {
+        if !visits.warnings.is_empty() {
+            payload["warnings"] = json!(visits.warnings);
+        }
+        return Ok(payload);
+    }
+
+    // `build_section_motifs` (payload/sections.py) never propagates the
+    // jsd side effect into this route's response -- only `metrics_section_payload`
+    // (mirroring `build_section_metrics`) surfaces it.
+    let mut unused_jsd = Vec::new();
+    let block = build_motifs_block(
+        &ctx.observed_label,
+        visits.observed.as_ref(),
+        visits.synthetic.as_ref(),
+        &filter,
+        &mut unused_jsd,
+    )?;
+    payload["motifs"] = json!({"groups": [{
+        "filter_key": filter.key,
+        "filter_label": filter.label,
+        "block": block,
+    }]});
+    if !visits.warnings.is_empty() {
+        payload["warnings"] = json!(visits.warnings);
+    }
+    Ok(payload)
 }
 
 #[cfg(test)]

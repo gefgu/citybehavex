@@ -1,9 +1,9 @@
 //! Mirrors the mobility-law dataset builders in `comparison.py`:
 //! `_mobility_law_visits`, `_daily_location_lognormal_dataset`,
-//! `_distance_frequency_dataset` (+ fkmob's `compute_visitation_law_data`,
+//! `_distance_frequency_dataset` (+ fastmob's `compute_visitation_law_data`,
 //! `bin_visitation_law_data`, `fit_visitation_law`).
 //!
-//! `_truncated_powerlaw_dataset` (fkmob's `fit_values_to_truncated_powerlaw`,
+//! `_truncated_powerlaw_dataset` (fastmob's `fit_values_to_truncated_powerlaw`,
 //! a *bounded* nonlinear least-squares fit via scipy's Trust-Region-Reflective
 //! solver) is intentionally NOT ported here yet -- it needs a bounded-NLLS
 //! solver decision (a Rust crate, or a hand-rolled Levenberg-Marquardt with a
@@ -11,11 +11,11 @@
 //! of this module's straightforward Polars/numpy-equivalent ports.
 
 use super::h3::h3_cells;
-use super::util::to_datetime_expr;
+use super::util::{canonical_user_ids, to_datetime_expr};
 use polars::prelude::*;
 use std::collections::HashMap;
 
-/// Bounded least-squares approximation of fkmob's
+/// Bounded least-squares approximation of fastmob's
 /// `fit_values_to_truncated_powerlaw`.
 ///
 /// Python uses scipy's Trust-Region-Reflective `curve_fit`. To keep the web
@@ -224,40 +224,6 @@ pub fn mobility_law_visits(
     Ok(visits)
 }
 
-fn canonical_user_ids(uid: &Series) -> anyhow::Result<Series> {
-    if matches!(
-        uid.dtype(),
-        DataType::Int64
-            | DataType::Int32
-            | DataType::Int16
-            | DataType::Int8
-            | DataType::UInt64
-            | DataType::UInt32
-            | DataType::UInt16
-            | DataType::UInt8
-    ) {
-        return Ok(uid.cast(&DataType::Int64)?.with_name("user_id".into()));
-    }
-
-    let uid = uid.cast(&DataType::String)?;
-    let uid = uid.str()?;
-    let mut labels = HashMap::<String, i64>::new();
-    let mut next = 0i64;
-    let values: Vec<Option<i64>> = uid
-        .into_iter()
-        .map(|value| {
-            value.map(|value| {
-                *labels.entry(value.to_string()).or_insert_with(|| {
-                    let current = next;
-                    next += 1;
-                    current
-                })
-            })
-        })
-        .collect();
-    Ok(Series::new("user_id".into(), values))
-}
-
 /// Mirrors `comparison.py::_daily_location_lognormal_dataset`.
 pub fn daily_location_lognormal_dataset(
     visits: &DataFrame,
@@ -329,11 +295,11 @@ fn top_location_per_user(df: &DataFrame, count_col: &str) -> anyhow::Result<Data
         .collect()?)
 }
 
-/// Mirrors fkmob's `compute_visitation_law_data`: per (user, location) visit
+/// Mirrors fastmob's `compute_visitation_law_data`: per (user, location) visit
 /// counts/frequencies, home-location inference (from an explicit `purpose`
 /// column when present, else the most-visited location), and the
-/// home-to-location Haversine distance `r_km` via `fkmob-core`'s
-/// `visitation_distances_km` kernel (bit-identical to fkmob's own Rust call).
+/// home-to-location Haversine distance `r_km` via `fastmob-core`'s
+/// `visitation_distances_km` kernel (bit-identical to fastmob's own Rust call).
 pub fn visitation_law_data(visits: &DataFrame) -> anyhow::Result<DataFrame> {
     let has_purpose = visits
         .get_column_names()
@@ -466,7 +432,7 @@ pub fn visitation_law_data(visits: &DataFrame) -> anyhow::Result<DataFrame> {
         .into_iter()
         .map(|v| v.unwrap_or(f64::NAN))
         .collect();
-    let r_km = fkmob_core::measures::collective::visitation_law::visitation_distances_km(
+    let r_km = fastmob_core::measures::collective::visitation_law::visitation_distances_km(
         home_lat, home_lng, loc_lat, loc_lng,
     )
     .map_err(|e| anyhow::anyhow!(e))?;
@@ -508,7 +474,7 @@ fn empty_law_data() -> anyhow::Result<DataFrame> {
     ]?)
 }
 
-/// Mirrors fkmob's `bin_visitation_law_data`: log-spaced binning of
+/// Mirrors fastmob's `bin_visitation_law_data`: log-spaced binning of
 /// `(rf, unique-user-density rho)` for the Schläpfer et al. visitation-law
 /// fit. `rho_i(r,f) = (distinct users in this (location, r-bin, f) cell) /
 /// (annulus area at radius r, width `distance_bin_width_km`)`.
@@ -611,7 +577,7 @@ pub fn bin_visitation_law_data(
     Ok((rf_out, rho_out))
 }
 
-/// Mirrors fkmob's `fit_visitation_law`: OLS fit of `log(rho)` on `log(rf)`
+/// Mirrors fastmob's `fit_visitation_law`: OLS fit of `log(rho)` on `log(rf)`
 /// (`rho(r,f) = mu * (rf)^-eta`), no bounds/scipy needed -- a closed-form
 /// degree-1 polynomial fit.
 pub fn fit_visitation_law(

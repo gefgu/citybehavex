@@ -1,12 +1,23 @@
 //! Mirrors `web/backend/app/features.py`'s per-file jump-length/radius-of-
 //! gyration computation (`get_jumps_rog`) -- the caching wrapper isn't
 //! ported yet (a performance optimization, not a correctness requirement:
-//! every call recomputes), but the core math is implemented directly here
-//! using this crate's own Haversine/user-grouping primitives rather than
-//! calling fkmob-core's batched jump-length/RoG kernels, since the math is
-//! identical (both ultimately reduce to consecutive-Haversine-distance and
-//! centroid-RMS-Haversine-distance per user) and this avoids the extra
-//! indexed/ends calling convention fkmob-core's batch API needs.
+//! every call recomputes), but the core per-pair distance calls straight into
+//! `fastmob_core::utils::haversine::haversine_km` (the `geo` crate's
+//! `Haversine::distance`) rather than this crate's own hand-rolled
+//! `comparison::util::haversine_km`.
+//!
+//! **This distinction matters, unlike most other "either formula works"
+//! spots**: Python's `fastmob.TrajDataFrame.jump_lengths(merge=True)` calls
+//! straight into this exact `fastmob_core` kernel via PyO3, so using a
+//! different (if mathematically equivalent) hand-rolled formula produces
+//! different floating-point rounding at the near-zero-distance boundary --
+//! confirmed on real `gparis_simulation` observed data: of 13293 raw
+//! consecutive-row pairs, this crate's own `util::haversine_km` classified
+//! 503 fewer of them as exactly zero-length than `fastmob_core`'s kernel
+//! does (10832 vs 10329 non-zero jumps), which is large enough to visibly
+//! shift the jump-length ECDF. Switching to `fastmob_core`'s kernel directly
+//! resolves it, matching Python's actual code path bit-for-bit rather than
+//! merely approximating the same formula.
 //!
 //! **Not yet ported**: the road-network-aware variant
 //! (`citybehavex.metrics.jump_lengths_km`/`radius_of_gyration_km`, used when
@@ -18,7 +29,7 @@
 
 use super::filters::{FilterMeta, filter_df};
 use super::panel::{AdaptationMode, adapt_evaluation_dataframe};
-use super::util::haversine_km;
+use fastmob_core::utils::haversine::haversine_km;
 use polars::prelude::*;
 use std::collections::HashMap;
 
@@ -81,7 +92,7 @@ pub fn jumps_rog_for_filters(
 /// `build()` closure for a single (already filtered/adapted) dataframe:
 /// per-user consecutive-row jump lengths (zero-length jumps excluded, they
 /// aren't movement) and per-user radius of gyration, matching
-/// `fkmob.TrajDataFrame.jump_lengths(merge=True)`/`.radius_of_gyration()`.
+/// `fastmob.TrajDataFrame.jump_lengths(merge=True)`/`.radius_of_gyration()`.
 pub fn jumps_rog(
     df: &DataFrame,
     uid_col: &str,
@@ -116,13 +127,8 @@ pub fn jumps_rog(
         });
     }
 
-    let uid: Vec<i64> = sorted
-        .column(uid_col)?
-        .cast(&DataType::Int64)?
-        .i64()?
-        .into_iter()
-        .map(|v| v.unwrap_or(i64::MIN))
-        .collect();
+    let uid: Vec<i64> =
+        super::util::canonical_user_ids_vec(sorted.column(uid_col)?.as_materialized_series())?;
     let lat: Vec<f64> = sorted
         .column(lat_col)?
         .f64()?
@@ -155,10 +161,10 @@ pub fn jumps_rog(
     Ok(JumpsRog { jumps, rog })
 }
 
-/// Mirrors fkmob-core's `rog_for_slice`: RMS Haversine distance from each
+/// Mirrors fastmob-core's `rog_for_slice`: RMS Haversine distance from each
 /// point to the user's centroid (mean lat/lng, i.e. an arithmetic-mean
 /// "center of mass" in degree-space, not a geodesic centroid -- matching
-/// fkmob-core's own approximation, which is exact enough at city scale).
+/// fastmob-core's own approximation, which is exact enough at city scale).
 fn radius_of_gyration(lat: &[f64], lng: &[f64]) -> f64 {
     let n = lat.len();
     if n == 0 {

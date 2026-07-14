@@ -9,47 +9,42 @@ from pathlib import Path
 import pandas as pd
 
 
+# Mirrors `web/backend/app/payload/legacy.py`'s `TIME_USE_CATEGORIES` exactly
+# -- the 25 raw MTUS harmonized activity codes. A prior version of this
+# script aggregated these into a 9-bucket rollup so the Rust backend (which
+# can't parse Stata) had a small, easy schema to read -- but that meant the
+# Rust and Python comparisons were built from two different granularities of
+# the same source data and could never numerically agree. Passing the raw
+# codes straight through (still no Stata parsing needed in Rust -- this
+# script remains the one-time Python-side pre-step) makes both backends read
+# the exact same categories.
 TIME_USE_CATEGORIES = (
     "sleep",
-    "personal care",
-    "household",
-    "work",
-    "study",
-    "shopping",
-    "leisure",
+    "eatdrink",
+    "selfcare",
+    "paidwork",
+    "educatn",
+    "foodprep",
+    "cleanetc",
+    "maintain",
+    "shopserv",
+    "garden",
+    "petcare",
+    "eldcare",
+    "pkidcare",
+    "ikidcare",
+    "religion",
+    "volorgwk",
+    "commute",
     "travel",
-    "other",
+    "sportex",
+    "tvradio",
+    "read",
+    "compint",
+    "goout",
+    "leisure",
+    "missing",
 )
-
-SOURCE_CATEGORY_MAP = {
-    "sleep": ("sleep",),
-    "personal care": ("eatdrink", "selfcare"),
-    "household": (
-        "foodprep",
-        "cleanetc",
-        "maintain",
-        "garden",
-        "petcare",
-        "eldcare",
-        "pkidcare",
-        "ikidcare",
-    ),
-    "work": ("paidwork",),
-    "study": ("educatn",),
-    "shopping": ("shopserv",),
-    "leisure": (
-        "religion",
-        "volorgwk",
-        "sportex",
-        "tvradio",
-        "read",
-        "compint",
-        "goout",
-        "leisure",
-    ),
-    "travel": ("commute", "travel"),
-    "other": ("missing",),
-}
 
 
 def main() -> None:
@@ -68,13 +63,12 @@ def main() -> None:
     args = parser.parse_args()
 
     output = args.output or args.input.with_suffix(".parquet")
-    source_columns = sorted({col for cols in SOURCE_CATEGORY_MAP.values() for col in cols})
     columns = [
         args.country_col,
         args.survey_col,
         args.day_col,
         args.weight_col,
-        *source_columns,
+        *TIME_USE_CATEGORIES,
     ]
     df = pd.read_stata(args.input, columns=columns)
     out = df[[args.country_col, args.survey_col, args.day_col, args.weight_col]].copy()
@@ -86,8 +80,8 @@ def main() -> None:
             args.weight_col: args.weight_col,
         }
     )
-    for category, source_cols in SOURCE_CATEGORY_MAP.items():
-        out[category] = df[list(source_cols)].apply(pd.to_numeric, errors="coerce").fillna(0).sum(axis=1)
+    for category in TIME_USE_CATEGORIES:
+        out[category] = pd.to_numeric(df[category], errors="coerce").fillna(0)
     output.parent.mkdir(parents=True, exist_ok=True)
     out.to_parquet(output, index=False)
     print(f"Wrote {len(out):,} rows -> {output}")
