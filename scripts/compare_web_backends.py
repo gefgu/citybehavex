@@ -76,6 +76,28 @@ def is_known_truncated_powerlaw_exception(path: tuple[str, ...]) -> bool:
         and path[5] in KNOWN_TRUNCATED_POWERLAW_BLOCKS
     )
 
+# Also documented in RUST_BACKEND_MIGRATION.md as an accepted, permanent
+# divergence: Rust's k-means (seeded from sorted percentile points) isn't
+# the same algorithm as Python's `sklearn.cluster.KMeans(random_state=0,
+# n_init=10)`, so a borderline user in noisy real observed data can land in
+# a different Routiner/Regular/Scouter bucket on the two backends -- every
+# underlying per-user metric (regularity/diversity/stationarity/entropy) is
+# separately unit-tested as exact, but `profiles.box`'s per-bucket quantiles
+# and `profiles.scatter`'s per-point cluster label are both downstream of
+# which bucket each user landed in, so they inherit the divergence.
+# Synthetic-side clustering has matched exactly in every check so far (only
+# observed data is noisy enough to have borderline cases), but there's no
+# per-label path segment to exempt just the observed side generically
+# across experiments, so the whole subtree is exempted.
+KNOWN_PROFILES_CLUSTER_EXCEPTION_PREFIXES = (
+    ("data", "profiles", "box"),
+    ("data", "profiles", "scatter"),
+)
+
+
+def is_known_profiles_cluster_exception(path: tuple[str, ...]) -> bool:
+    return any(path_has_prefix(prefix, path) for prefix in KNOWN_PROFILES_CLUSTER_EXCEPTION_PREFIXES)
+
 # Kept in sync with web/backend/app/home_work_data.py's constants. This
 # harness doesn't import that module (it talks HTTP-only, deliberately, so it
 # still works once the Python backend is retired) so the lists are
@@ -129,7 +151,31 @@ def is_known_exception(path: tuple[str, ...]) -> bool:
         path_matches(KNOWN_TRANSPORT_EXCEPTION, path)
         or path_has_prefix(KNOWN_JUMP_ECDF_EXCEPTION, path)
         or is_known_truncated_powerlaw_exception(path)
+        or is_known_profiles_cluster_exception(path)
     )
+
+
+# GeoJSON `features` lists that aren't emitted in a guaranteed order on
+# either side (neither backend sorts; each reflects its own internal
+# hashmap/grouping iteration order, which GeoJSON rendering doesn't depend
+# on) -- sort by `properties.area` (the H3 cell hex ID) before the normal
+# positional list diff so real content bugs are still caught.
+# - `stvd`'s per-resolution map layer: verified byte-for-byte identical once
+#   aligned by area.
+# - `/home-work`'s per-resolution density map: verified identical on every
+#   shared cell except one non-deterministic tie-break (see
+#   RUST_BACKEND_MIGRATION.md's "/home-work" entry -- Python's own
+#   `any_value(lat)`/`any_value(lng)` picking an arbitrary representative
+#   point within a tied fine H3 cell isn't itself deterministic in DuckDB,
+#   so there's no "more correct" answer to replicate bit-for-bit there).
+UNORDERED_FEATURES_PATHS = (
+    ("data", "stvd", "groups", "*", "block", "layers", "*", "features"),
+    ("data", "home", "*", "layers", "*", "features"),
+)
+
+
+def is_unordered_features_path(path: tuple[str, ...]) -> bool:
+    return any(path_matches(pattern, path) for pattern in UNORDERED_FEATURES_PATHS)
 
 
 def close_numbers(a: float, b: float) -> bool:
@@ -153,6 +199,9 @@ def diff(a: Any, b: Any, path: tuple[str, ...] = ()) -> list[str]:
         return out
     if isinstance(a, list) and isinstance(b, list):
         out = []
+        if is_unordered_features_path(path):
+            a = sorted(a, key=lambda f: f.get("properties", {}).get("area", ""))
+            b = sorted(b, key=lambda f: f.get("properties", {}).get("area", ""))
         if len(a) != len(b):
             out.append(f"{'.'.join(path)}: list length {len(a)} != {len(b)}")
         for i, (av, bv) in enumerate(zip(a, b)):

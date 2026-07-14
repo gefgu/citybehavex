@@ -53,11 +53,11 @@ pub fn stvd_section_payload(ctx: &ComparisonContext, filter_key: &str) -> anyhow
         &[7, 9],
     )?;
     const COLORS: [[&str; 3]; 3] = [
-        ["#2c7bb6", "#abd9e9", "#ffffbf"],
-        ["#74add1", "#f7f7f7", "#fdae61"],
-        ["#ffffbf", "#fdae61", "#d7191c"],
+        ["#91bfdb", "#f7f7f7", "#f4a582"],
+        ["#4393c3", "#bdbdbd", "#d6604d"],
+        ["#2166ac", "#6e6e6e", "#b2182b"],
     ];
-    let threshold = 25.0;
+    let threshold = 3.0;
     let mut out_layers = serde_json::Map::new();
     let mut lngs = Vec::new();
     let mut lats = Vec::new();
