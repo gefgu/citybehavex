@@ -61,7 +61,9 @@ modified versions of the simulator remain available to the research community.
 
 ```text
 citybehavex/                 Python package and report/evaluation logic
+citybehavex-core/            Shared Rust simulation core crate
 citybehavex-py/              Rust simulation core exposed as citybehavex._core
+citybehavex-web/             Rust/axum web backend (see web/README.md)
 configs/                     Reproducible scenario and ablation configurations
 scripts/                     Simulation, training, serving, and sweep utilities
 web/backend/                 FastAPI backend for experiment discovery and charts
@@ -72,6 +74,9 @@ models/                      Optional fine-tuned alignment models
 
 The simulator reads scenario settings from `configs/*.yaml`. The web UI discovers
 those configs, finds their generated runs, and builds validation views on demand.
+Two interchangeable web backends are available — a FastAPI server
+(`web/backend/`) and a byte-compatible Rust/axum server (`citybehavex-web/`) —
+see [`web/README.md`](web/README.md) for the full comparison.
 
 ## Requirements
 
@@ -89,10 +94,19 @@ Optional requirements:
 - An OpenAI-compatible LLM endpoint when regenerating diaries or training
   semantic aligners
 
-The Python package uses `maturin` to build the Rust extension. When installing
-from source, make sure the mobility dependencies `fkmob` and `skmob-vis` are
-available in the locations declared in `pyproject.toml`, or update those entries
-to point to installed/vendored copies included with the artifact.
+The Python package uses `maturin` to build the Rust extension. CityBehavEx builds
+on two companion mobility libraries, both now public:
+
+- [`fastmob`](https://github.com/gefgu/fastmob) — Rust-accelerated mobility
+  analysis, also installable standalone via `pip install fastmob`.
+- [`skmob-vis`](https://github.com/gefgu/skmob-vis) — Rust-backed ECharts
+  visualizations for scikit-mobility and `fastmob` results.
+
+During development, this repository consumes both as local editable path
+dependencies declared in `pyproject.toml`'s `[tool.uv.sources]`, so make sure
+`fastmob` and `skmob-vis` are checked out as sibling directories (`../fastmob`,
+`../skmob-vis`), or update those entries to point at installed/vendored copies
+included with the artifact.
 
 ## Quick Start
 
@@ -115,10 +129,18 @@ available.
 
 ## Web Demo
 
-Start the backend:
+CityBehavEx ships two interchangeable web backends — pick one:
+
+**Python (FastAPI), port 8000:**
 
 ```bash
 .venv/bin/python -m uvicorn app.main:app --app-dir web/backend --reload --port 8000
+```
+
+**Rust (axum), port 8001:**
+
+```bash
+cargo run -p citybehavex-web
 ```
 
 Start the frontend:
@@ -135,10 +157,17 @@ Open:
 http://localhost:5173
 ```
 
-The frontend proxies `/api` requests to the FastAPI backend on port `8000`.
-The Experiments page is populated from `configs/*.yaml`. Opening charts for a
-run builds the validation payload on first request and caches it under
+By default the frontend talks directly to the Rust backend on port `8001`; set
+`VITE_API_PROXY_TARGET=http://localhost:8000` to point it at the Python backend
+instead. The Experiments page is populated from `configs/*.yaml`. Opening charts
+for a run builds the validation payload on first request and caches it under
 `data/.web_cache/`.
+
+The Rust binary can also single-origin-serve the built frontend (`npm run build`
+in `web/frontend/`, then `cargo run -p citybehavex-web` serves both the API and
+the static SPA). See [`web/README.md`](web/README.md) for the full endpoint list,
+parity-testing scripts (`scripts/compare_web_backends.py`,
+`scripts/benchmark_web_backends.py`), and single-origin deployment notes.
 
 ### Timeline Map
 
@@ -287,10 +316,13 @@ timeline replay, metrics, and cached comparison payloads.
 ## Troubleshooting
 
 - **Rust extension not found:** rerun `./scripts/update_local_citybehavex.sh`.
-- **Editable `fkmob` or `skmob-vis` not found:** make sure the artifact includes
-  those dependencies or update `pyproject.toml` to point to installed versions.
-- **Frontend cannot reach the API:** confirm the backend is running on
-  `http://localhost:8000` and the frontend on `http://localhost:5173`.
+- **Editable `fastmob` or `skmob-vis` not found:** make sure `../fastmob` and
+  `../skmob-vis` are checked out as sibling directories, or update
+  `pyproject.toml` to point to installed versions.
+- **Frontend cannot reach the API:** confirm the backend is running (Python on
+  `http://localhost:8000` or Rust on `http://localhost:8001`) and the frontend on
+  `http://localhost:5173`, and that `VITE_API_PROXY_TARGET` matches the backend
+  you started.
 - **Timeline map is blank:** set `VITE_MAPBOX_TOKEN` in
   `web/frontend/.env.local` and restart Vite.
 - **Alignment endpoint errors:** either start the configured reranker/LLM service
