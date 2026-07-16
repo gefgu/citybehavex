@@ -228,6 +228,7 @@ pub struct BBoxJson {
     pub max_lng: f64,
 }
 
+#[derive(Debug, Clone)]
 pub struct Experiment {
     pub id: String,
     pub config_path: PathBuf,
