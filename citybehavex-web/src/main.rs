@@ -1,14 +1,5 @@
-mod cache;
-mod columns;
-mod comparison;
-mod config;
-mod datasource;
-mod experiments;
-mod home_work;
-mod models;
-mod payload;
-mod routes;
-mod settings;
+use citybehavex_web::config;
+use citybehavex_web::routes;
 
 use axum::Router;
 use axum::body::Body;

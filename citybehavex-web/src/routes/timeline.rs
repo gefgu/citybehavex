@@ -989,14 +989,14 @@ fn query_encounter_counts(path: &FsPath, uid: i64) -> anyhow::Result<HashMap<i64
     Ok(out)
 }
 
-pub async fn timeline_meta_route(
-    Path(exp_id): Path<String>,
-    Query(q): Query<TimelineRunQuery>,
-) -> ApiResult<Value> {
-    let (exp, run) = selected(&exp_id, q.run.as_deref())?;
-    let summary = run_summary(&run.path).map_err(|e| ApiError::internal(e.to_string()))?;
-    let bbox = run_bbox(&run.path).map_err(|e| ApiError::internal(e.to_string()))?;
-    let payload = json!({
+/// Mirrors `web/backend/app/api/timeline.py`'s `/timeline/meta` handler body
+/// -- pulled out to a standalone function so `scripts/export_static_web_demo`'s
+/// Rust successor (`src/bin/export_static_demo.rs`) can call the exact same
+/// logic outside axum/HTTP.
+pub fn build_timeline_meta(exp: &experiments::Experiment, run: &experiments::Run) -> anyhow::Result<Value> {
+    let summary = run_summary(&run.path)?;
+    let bbox = run_bbox(&run.path)?;
+    Ok(json!({
         "run_id": run.run_id,
         "date_start": summary.date_start,
         "date_end": summary.date_end,
@@ -1005,8 +1005,52 @@ pub async fn timeline_meta_route(
         "has_profiles": exp.profiles_path.as_ref().is_some_and(|p| p.exists()),
         "has_encounters": run.encounters_path().exists(),
         "car_speed_kmh": exp.params.car_speed_kmh,
-    });
+    }))
+}
+
+pub async fn timeline_meta_route(
+    Path(exp_id): Path<String>,
+    Query(q): Query<TimelineRunQuery>,
+) -> ApiResult<Value> {
+    let (exp, run) = selected(&exp_id, q.run.as_deref())?;
+    let payload = build_timeline_meta(&exp, &run).map_err(|e| ApiError::internal(e.to_string()))?;
     Ok(ApiResponse::new(payload))
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn build_timeline_legs(
+    exp_id: &str,
+    exp: &experiments::Experiment,
+    run: &experiments::Run,
+    since: chrono::NaiveDateTime,
+    until: chrono::NaiveDateTime,
+    bbox: (f64, f64, f64, f64),
+    max_agents: i64,
+) -> anyhow::Result<Value> {
+    let legs_path = legs_index_path(exp_id, run)?;
+    let moving_path = moving_index_path(exp_id, run)?;
+    let (segments, truncated) = query_active_legs(
+        &legs_path,
+        since,
+        until,
+        bbox,
+        max_agents,
+        moving_path.as_deref(),
+        exp.profiles_path.as_deref(),
+    )?;
+    let agent_count = segments
+        .iter()
+        .filter_map(|s| s.get("uid").and_then(Value::as_i64))
+        .collect::<HashSet<_>>()
+        .len();
+    Ok(json!({
+        "run_id": run.run_id,
+        "since": since.and_utc().to_rfc3339(),
+        "until": until.and_utc().to_rfc3339(),
+        "agent_count": agent_count,
+        "truncated": truncated,
+        "segments": segments,
+    }))
 }
 
 pub async fn timeline_legs_route(
@@ -1029,56 +1073,45 @@ pub async fn timeline_legs_route(
             "requested window too large (max 6h of sim time per request)",
         ));
     }
-    let legs_path =
-        legs_index_path(&exp_id, &run).map_err(|e| ApiError::internal(e.to_string()))?;
-    let moving_path =
-        moving_index_path(&exp_id, &run).map_err(|e| ApiError::internal(e.to_string()))?;
-    let (segments, truncated) = query_active_legs(
-        &legs_path,
+    let mut payload = build_timeline_legs(
+        &exp_id,
+        &exp,
+        &run,
         since,
         until,
         (q.min_lat, q.min_lng, q.max_lat, q.max_lng),
         q.max_agents,
-        moving_path.as_deref(),
-        exp.profiles_path.as_deref(),
     )
     .map_err(|e| ApiError::internal(e.to_string()))?;
-    let agent_count = segments
-        .iter()
-        .filter_map(|s| s.get("uid").and_then(Value::as_i64))
-        .collect::<HashSet<_>>()
-        .len();
-    let payload = json!({
-        "run_id": run.run_id,
-        "since": q.since,
-        "until": q.until,
-        "agent_count": agent_count,
-        "truncated": truncated,
-        "segments": segments,
-    });
+    // `build_timeline_legs` renders `since`/`until` in RFC 3339 form (needed
+    // when it's called with parsed `NaiveDateTime`s directly, e.g. from the
+    // static-demo exporter); the HTTP route already has the original query
+    // string values on hand, so echo those back unchanged instead, matching
+    // the exact prior behavior.
+    payload["since"] = json!(q.since);
+    payload["until"] = json!(q.until);
     Ok(ApiResponse::new(payload))
 }
 
-pub async fn timeline_agent_route(
-    Path((exp_id, uid)): Path<(String, i64)>,
-    Query(q): Query<TimelineRunQuery>,
-) -> ApiResult<Value> {
-    let (exp, run) = selected(&exp_id, q.run.as_deref())?;
+/// Mirrors `web/backend/app/api/timeline.py`'s `/timeline/agents/{uid}`
+/// handler body.
+pub fn build_agent_payload(
+    exp: &experiments::Experiment,
+    run: &experiments::Run,
+    uid: i64,
+) -> anyhow::Result<Value> {
     let mut warnings = Vec::new();
-    let profile = query_profile(exp.profiles_path.as_deref(), uid)
-        .map_err(|e| ApiError::internal(e.to_string()))?;
+    let profile = query_profile(exp.profiles_path.as_deref(), uid)?;
     if profile.is_none() {
         warnings.push("no agent profile available for this uid".to_string());
     }
     let narrative = profile.as_ref().and_then(profile_to_narrative);
-    let trips = query_agent_trips(&run.path, &run.activities_path(), uid)
-        .map_err(|e| ApiError::internal(e.to_string()))?;
+    let trips = query_agent_trips(&run.path, &run.activities_path(), uid)?;
 
     let has_activities_table = run.activities_path().exists();
     let mut encounters = Vec::new();
     if run.encounters_path().exists() {
-        encounters = query_agent_encounters(&run.encounters_path(), &run.path, uid, 20)
-            .map_err(|e| ApiError::internal(e.to_string()))?;
+        encounters = query_agent_encounters(&run.encounters_path(), &run.path, uid, 20)?;
         for encounter in &mut encounters {
             let stop_id = encounter
                 .as_object_mut()
@@ -1091,8 +1124,7 @@ pub async fn timeline_agent_route(
                 if let Some(stop_id) = stop_id {
                     let ts = encounter.get("ts").and_then(Value::as_str).unwrap_or("").to_string();
                     let activity_row =
-                        query_activity_at_stop(&run.activities_path(), contact_uid, stop_id, &ts)
-                            .map_err(|e| ApiError::internal(e.to_string()))?;
+                        query_activity_at_stop(&run.activities_path(), contact_uid, stop_id, &ts)?;
                     let (activity_id, dwell_minutes) = activity_row.unwrap_or((None, None));
                     merge_object(encounter, activity_fields(activity_id));
                     if let Some(dwell_minutes) = dwell_minutes {
@@ -1107,9 +1139,7 @@ pub async fn timeline_agent_route(
                 merge_object(encounter, activity_fields(activity_id));
             }
 
-            match query_profile(exp.profiles_path.as_deref(), contact_uid)
-                .map_err(|e| ApiError::internal(e.to_string()))?
-            {
+            match query_profile(exp.profiles_path.as_deref(), contact_uid)? {
                 Some(contact_profile) => {
                     let contact_narrative = profile_to_narrative(&contact_profile);
                     encounter["contact_narrative"] = contact_narrative.map(Value::from).unwrap_or(Value::Null);
@@ -1130,7 +1160,7 @@ pub async fn timeline_agent_route(
         warnings.push("no encounters data available for this experiment".to_string());
     }
 
-    Ok(ApiResponse::new(json!({
+    Ok(json!({
         "uid": uid,
         "run_id": run.run_id,
         "profile": profile,
@@ -1138,7 +1168,17 @@ pub async fn timeline_agent_route(
         "trips": trips,
         "encounters": encounters,
         "warnings": warnings,
-    })))
+    }))
+}
+
+pub async fn timeline_agent_route(
+    Path((exp_id, uid)): Path<(String, i64)>,
+    Query(q): Query<TimelineRunQuery>,
+) -> ApiResult<Value> {
+    let (exp, run) = selected(&exp_id, q.run.as_deref())?;
+    let payload =
+        build_agent_payload(&exp, &run, uid).map_err(|e| ApiError::internal(e.to_string()))?;
+    Ok(ApiResponse::new(payload))
 }
 
 fn merge_object(target: &mut Value, patch: Value) {
@@ -1149,35 +1189,48 @@ fn merge_object(target: &mut Value, patch: Value) {
     }
 }
 
-pub async fn timeline_agent_crp_route(
-    Path((exp_id, uid)): Path<(String, i64)>,
-    Query(q): Query<TimelineRunQuery>,
-) -> ApiResult<Value> {
-    let (exp, run) = selected(&exp_id, q.run.as_deref())?;
+/// Mirrors `web/backend/app/api/timeline.py`'s `/timeline/agents/{uid}/crp`
+/// handler body.
+pub fn build_agent_crp_payload(
+    exp: &experiments::Experiment,
+    run: &experiments::Run,
+    uid: i64,
+) -> anyhow::Result<Value> {
     let mut warnings = Vec::new();
     let (t_a, alpha_a, diaries) =
-        query_agent_crp_rows(&run.crp_path(), exp.diary_cache_path.as_deref(), uid)
-            .map_err(|e| ApiError::internal(e.to_string()))?;
+        query_agent_crp_rows(&run.crp_path(), exp.diary_cache_path.as_deref(), uid)?;
     if !run.crp_path().exists() {
         warnings.push("no ddCRP diary selection data available for this run".to_string());
     } else if diaries.is_empty() {
         warnings.push("uid not found in ddCRP diary selection data".to_string());
     }
-    Ok(ApiResponse::new(json!({
+    Ok(json!({
         "uid": uid,
         "run_id": run.run_id,
         "T_a": t_a,
         "alpha_a": alpha_a,
         "diaries": diaries,
         "warnings": warnings,
-    })))
+    }))
 }
 
-pub async fn timeline_agent_social_route(
+pub async fn timeline_agent_crp_route(
     Path((exp_id, uid)): Path<(String, i64)>,
     Query(q): Query<TimelineRunQuery>,
 ) -> ApiResult<Value> {
     let (exp, run) = selected(&exp_id, q.run.as_deref())?;
+    let payload = build_agent_crp_payload(&exp, &run, uid)
+        .map_err(|e| ApiError::internal(e.to_string()))?;
+    Ok(ApiResponse::new(payload))
+}
+
+/// Mirrors `web/backend/app/api/timeline.py`'s `/timeline/agents/{uid}/social`
+/// handler body.
+pub fn build_agent_social_payload(
+    exp: &experiments::Experiment,
+    run: &experiments::Run,
+    uid: i64,
+) -> anyhow::Result<Value> {
     let mut warnings = Vec::new();
     let mut parameters = json!({
         "degree": 0,
@@ -1194,11 +1247,7 @@ pub async fn timeline_agent_social_route(
     });
     let mut friends = Vec::new();
     if run.social_network_path().exists() {
-        let data: Value = serde_json::from_slice(
-            &std::fs::read(run.social_network_path())
-                .map_err(|e| ApiError::internal(e.to_string()))?,
-        )
-        .map_err(|e| ApiError::internal(e.to_string()))?;
+        let data: Value = serde_json::from_slice(&std::fs::read(run.social_network_path())?)?;
         if let Some(metadata) = data.get("metadata").and_then(Value::as_object) {
             for key in ["social_graph_k", "layout", "kind", "directed"] {
                 if let Some(value) = metadata.get(key) {
@@ -1266,25 +1315,32 @@ pub async fn timeline_agent_social_route(
     } else {
         warnings.push("no social network sidecar available for this run".to_string());
     }
-    let encounter_counts = query_encounter_counts(&run.encounters_path(), uid)
-        .map_err(|e| ApiError::internal(e.to_string()))?;
+    let encounter_counts = query_encounter_counts(&run.encounters_path(), uid)?;
     for friend in &mut friends {
         let friend_uid = friend.get("uid").and_then(Value::as_i64).unwrap_or(0);
         friend["encounter_count"] = json!(encounter_counts.get(&friend_uid).copied().unwrap_or(0));
-        if let Some(profile) = query_profile(exp.profiles_path.as_deref(), friend_uid)
-            .map_err(|e| ApiError::internal(e.to_string()))?
-        {
+        if let Some(profile) = query_profile(exp.profiles_path.as_deref(), friend_uid)? {
             friend["name"] = profile.get("name").cloned().unwrap_or(Value::Null);
             friend["profile"] = profile;
         }
     }
-    Ok(ApiResponse::new(json!({
+    Ok(json!({
         "uid": uid,
         "run_id": run.run_id,
         "parameters": parameters,
         "friends": friends,
         "warnings": warnings,
-    })))
+    }))
+}
+
+pub async fn timeline_agent_social_route(
+    Path((exp_id, uid)): Path<(String, i64)>,
+    Query(q): Query<TimelineRunQuery>,
+) -> ApiResult<Value> {
+    let (exp, run) = selected(&exp_id, q.run.as_deref())?;
+    let payload = build_agent_social_payload(&exp, &run, uid)
+        .map_err(|e| ApiError::internal(e.to_string()))?;
+    Ok(ApiResponse::new(payload))
 }
 
 #[cfg(test)]

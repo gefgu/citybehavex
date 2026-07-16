@@ -148,33 +148,38 @@ def aggregate(
 # --- LaTeX cell formatting ---------------------------------------------------
 
 
-def format_cell(
-    mean: float, std: float, n: int, decimals: int, bold: bool, flagged: bool = False
-) -> str:
+def format_cell(mean: float, std: float, n: int, decimals: int, bold: bool) -> str:
     if n <= 1:
         body = f"{mean:.{decimals}f}"
     else:
         body = f"{mean:.{decimals}f} \\pm {std:.{decimals}f}"
     if bold:
         body = f"\\mathbf{{{body}}}"
-    if flagged:
-        # Value looks real but the underlying metric is under suspicion
-        # (e.g. a known data-adaptation issue not yet root-caused) -- mark
-        # for manual review rather than silently presenting it as trusted.
-        body = f"\\gustavo{{{body}}}"
     return f"${body}$"
 
 
-# (dataset, metric_key) pairs whose computed values are suspect and should
-# be flagged with \gustavo{} in the table rather than presented as trusted.
-# See EVALUATION_NOTES.md for why each entry is here.
-NEEDS_CHECKING: set[tuple[str, str]] = {
-    ("yjmob2", "vf"),  # visits_per_user implausibly high (310-371); likely
-                       # the same raw-row-vs-collapsed-stays mismatch fixed
-                       # for Shanghai, not yet applying cleanly for yjmob2.
-    ("yjmob", "vf"),   # same anomaly, plain yjmob (407-496 across many
-                       # independent runs) -- not yjmob2-specific.
-}
+def format_ref_cell(ref_data: tuple[float, float, int] | None, decimals: int) -> str:
+    """The Ref. column is a single distance between two disjoint halves of
+    the same real dataset -- one comparison, never a mean-of-runs, so it
+    must never show a `\\pm std` (even if a manifest bug ever appends more
+    than one "ref" row) and never bold (Ref isn't a model variant competing
+    to be "best"). Missing data (e.g. a NaN-filtered metric) renders as an
+    explicit "$-$" rather than silently leaving whatever text was there."""
+    if ref_data is None:
+        return "$-$"
+    ref_mean, _ref_std, _ref_n = ref_data
+    return format_cell(ref_mean, 0.0, 1, decimals, bold=False)
+
+
+# VPD/ATM/DARD require genuine ground-truth purpose/activity labels on the
+# REAL side to mean anything. Only gparis's real data has an explicit
+# "purpose" column; shanghai/yjmob/yjmob2's real side has none, so their
+# semantic-metric numbers were always derived from a crude HOME/WORK/OTHER
+# time-of-day heuristic on the real side, not a genuine comparison --
+# dash them out rather than present a metric that isn't actually measuring
+# what its column header claims.
+SEMANTIC_METRIC_DATASETS = {"gparis"}
+SEMANTIC_METRICS = {"vpd", "atm", "dard"}
 
 
 _MATH_SPAN = re.compile(r"\$.*\$")
@@ -201,12 +206,19 @@ ABLATION_VARIANT_COLUMNS = [
     "no_micro_sched",
     "no_social",
     "no_transport",
-    "no_feedback",
 ]
+# no_feedback data is still computed/aggregated (manifest keeps it, in case
+# it's ever needed again), just no longer rendered as its own ablation.tex
+# column -- the user removed it from the table directly.
 # 1-indexed position of each variant's value cell within the `&`-split row
-# (0=dataset, 1=metric, 2=full, 3=no_profile, ... 7=no_feedback, 8=ref)
+# (0=dataset, 1=metric, 2=full, 3=no_profile, ... last=ref) -- derived from
+# ABLATION_VARIANT_COLUMNS's length so removing/adding a variant column
+# doesn't silently desync the Ref. column position (this happened once
+# already: REF_COLUMN_INDEX stayed hardcoded at 8 after no_feedback was
+# dropped, so Ref-column writes silently no-op'd out of bounds and the
+# column kept showing stale no_feedback data).
 ABLATION_COLUMN_INDEX = {v: i + 2 for i, v in enumerate(ABLATION_VARIANT_COLUMNS)}
-REF_COLUMN_INDEX = 8
+REF_COLUMN_INDEX = 2 + len(ABLATION_VARIANT_COLUMNS)
 
 ABLATION_METRIC_LABELS = {
     "delta_r": r"\$\\Delta r\$",
@@ -216,9 +228,9 @@ ABLATION_METRIC_LABELS = {
     "vf": r"Vf\.",
     "rt_minutes": r"RT\.",
     "mem_gb": r"Mem\.",
-    "vpd": r"\\textit\{VPD\}",
-    "atm": r"\\textit\{ATM\}",
-    "dard": r"\\textit\{DARD\}",
+    "vpd": r"\\textit\{VPD\b",
+    "atm": r"\\textit\{ATM\b",
+    "dard": r"\\textit\{DARD\b",
 }
 NEW_ROW_METRICS = [
     ("degree", "Degree"),
@@ -280,6 +292,11 @@ def patch_ablation_tex(
             if not re.search(label_pattern, line):
                 continue
             cells = line.split("&")
+            # VPD/ATM/DARD rows only exist in this table for gparis (the only
+            # dataset with genuine ground-truth purpose labels) -- shanghai/
+            # yjmob/yjmob2 never have a matching line for these metric_keys,
+            # so no dashing branch is needed here (unlike the comparison
+            # table, which keeps all datasets as rows and dashes cells).
             # Bold only the actual best (lowest, since every metric here is
             # a distance/divergence/runtime -- lower means closer to real or
             # cheaper) value in the row, not unconditionally "full".
@@ -297,24 +314,28 @@ def patch_ablation_tex(
                 if cell_data is None:
                     continue
                 mean, std, n = cell_data
-                new_cell = format_cell(
-                    mean, std, n, decimals, bold=(variant == best_variant),
-                    flagged=(dataset, metric_key) in NEEDS_CHECKING,
-                )
+                new_cell = format_cell(mean, std, n, decimals, bold=(variant == best_variant))
                 cells[col_idx] = replace_cell_value(cells[col_idx], new_cell)
                 changes.append(
                     f"{dataset}/{variant}/{metric_key}: n={n} mean={mean:.3f} std={std:.3f}"
                 )
             # Ref. column (index 8): real-vs-real half-A-vs-half-B comparison,
-            # a single point estimate (n=1); not applicable to RT./Mem. since
-            # no simulation runs for it.
-            if metric_key not in ("rt_minutes", "mem_gb") and REF_COLUMN_INDEX < len(cells):
-                ref_data = results.get((dataset, "ref"), {}).get(metric_key)
-                if ref_data is not None:
-                    ref_mean, ref_std, ref_n = ref_data
-                    ref_cell = format_cell(ref_mean, ref_std, ref_n, decimals, bold=False, flagged=False)
-                    cells[REF_COLUMN_INDEX] = replace_cell_value(cells[REF_COLUMN_INDEX], ref_cell)
-                    changes.append(f"{dataset}/ref/{metric_key}: n={ref_n} mean={ref_mean:.3f}")
+            # a single point estimate; not applicable to RT./Mem. since no
+            # simulation runs for it. Always written (never left stale),
+            # since a missing/NaN-filtered metric must render as "$-$", not
+            # whatever placeholder text happened to already be in the cell.
+            if REF_COLUMN_INDEX < len(cells):
+                if metric_key in ("rt_minutes", "mem_gb"):
+                    cells[REF_COLUMN_INDEX] = replace_cell_value(cells[REF_COLUMN_INDEX], "$-$")
+                else:
+                    ref_data = results.get((dataset, "ref"), {}).get(metric_key)
+                    cells[REF_COLUMN_INDEX] = replace_cell_value(
+                        cells[REF_COLUMN_INDEX], format_ref_cell(ref_data, decimals)
+                    )
+                    if ref_data is not None:
+                        changes.append(f"{dataset}/ref/{metric_key}: mean={ref_data[0]:.3f}")
+                    else:
+                        changes.append(f"{dataset}/ref/{metric_key}: no data, dashed")
             lines[i] = "&".join(cells)
             break
 
@@ -322,13 +343,15 @@ def patch_ablation_tex(
 
 
 def place_network_rows_at_block_end(text: str) -> str:
-    """Ensure each dataset block has exactly the 4 network-metric rows
-    (Degree, Clustering coeff., Edge persistence, Topological overlap) as
+    """Ensure each NETWORK_ROW_DATASETS block has exactly the 4 network-metric
+    rows (Degree, Clustering coeff., Edge persistence, Topological overlap) as
     its LAST rows, before the block's closing \\midrule (or end of table
     for the last block). Idempotent: if the rows don't exist yet, inserts
     them (fresh placeholders); if they exist but are positioned elsewhere
     (e.g. the original layout right after Mem.), moves them to the end
-    without touching their already-patched values.
+    without touching their already-patched values. gparis (and any other
+    dataset not in NETWORK_ROW_DATASETS) is never touched -- its network
+    rows were fully removed from the table and must not be reinserted.
     """
     lines = text.split("\n")
     out_lines: list[str] = []
@@ -357,16 +380,22 @@ def place_network_rows_at_block_end(text: str) -> str:
                 flush_pending()
             current_dataset = detected
 
-        if current_dataset and any(label in line for _key, label in NEW_ROW_METRICS):
+        active = current_dataset in NETWORK_ROW_DATASETS
+
+        if active and any(label in line for _key, label in NEW_ROW_METRICS):
             if block_indent is None:
                 block_indent = re.match(r"\s*", line).group(0)
             pending_network_lines.append(line)
             continue
 
-        if current_dataset and re.search(r"\\textit\{Mem\.", line) and block_indent is None:
+        if active and re.search(r"\\textit\{Mem\.", line) and block_indent is None:
             block_indent = re.match(r"\s*", line).group(0)
 
-        if current_dataset and (line.strip() == r"\midrule" or r"\end{tabular}" in line):
+        if current_dataset and (
+            line.strip() == r"\midrule"
+            or line.strip() == r"\bottomrule"
+            or r"\end{tabular}" in line
+        ):
             flush_pending()
             current_dataset = None
 
@@ -427,23 +456,23 @@ def patch_network_rows(
                 if cell_data is None:
                     continue
                 mean, std, n = cell_data
-                new_cell = format_cell(
-                    mean, std, n, decimals, bold=(variant == best_variant),
-                    flagged=(dataset, metric_key) in NEEDS_CHECKING,
-                )
+                new_cell = format_cell(mean, std, n, decimals, bold=(variant == best_variant))
                 cells[col_idx] = replace_cell_value(cells[col_idx], new_cell)
                 changes.append(
                     f"{dataset}/{variant}/{metric_key}: n={n} mean={mean:.3f} std={std:.3f}"
                 )
             # Ref. column: real-vs-real half-A-vs-half-B network comparison
             # (build_observed_pair_network_validation), single point estimate.
+            # Always written (never left stale) -- see format_ref_cell.
             if REF_COLUMN_INDEX < len(cells):
                 ref_data = results.get((dataset, "ref"), {}).get(metric_key)
+                cells[REF_COLUMN_INDEX] = replace_cell_value(
+                    cells[REF_COLUMN_INDEX], format_ref_cell(ref_data, decimals)
+                )
                 if ref_data is not None:
-                    ref_mean, ref_std, ref_n = ref_data
-                    ref_cell = format_cell(ref_mean, ref_std, ref_n, decimals, bold=False, flagged=False)
-                    cells[REF_COLUMN_INDEX] = replace_cell_value(cells[REF_COLUMN_INDEX], ref_cell)
-                    changes.append(f"{dataset}/ref/{metric_key}: n={ref_n} mean={ref_mean:.3f}")
+                    changes.append(f"{dataset}/ref/{metric_key}: mean={ref_data[0]:.3f}")
+                else:
+                    changes.append(f"{dataset}/ref/{metric_key}: no data, dashed")
             lines[i] = "&".join(cells)
             break
 
@@ -481,13 +510,16 @@ def patch_comparison_row(
         # cells[0]=dataset, cells[1]=source, cells[2:]=metric values
         for offset, (metric_key, decimals) in enumerate(metrics_in_order):
             col_idx = 2 + offset
-            if col_idx >= len(cells) or metric_key not in values:
+            if col_idx >= len(cells):
+                continue
+            if metric_key in SEMANTIC_METRICS and dataset not in SEMANTIC_METRIC_DATASETS:
+                cells[col_idx] = replace_cell_value(cells[col_idx], "--")
+                changes.append(f"{dataset}/{metric_key}: dashed (no ground-truth purpose labels)")
+                continue
+            if metric_key not in values:
                 continue
             mean, std, n = values[metric_key]
-            new_cell = format_cell(
-                mean, std, n, decimals, bold=True,
-                flagged=(dataset, metric_key) in NEEDS_CHECKING,
-            )
+            new_cell = format_cell(mean, std, n, decimals, bold=True)
             cells[col_idx] = replace_cell_value(cells[col_idx], new_cell)
             changes.append(f"{dataset}/{metric_key}: n={n} mean={mean:.3f} std={std:.3f}")
         lines[i] = "&".join(cells)

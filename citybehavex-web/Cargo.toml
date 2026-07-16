@@ -3,9 +3,17 @@ name = "citybehavex-web"
 version = "0.1.0"
 edition = "2024"
 
+[lib]
+name = "citybehavex_web"
+path = "src/lib.rs"
+
 [[bin]]
 name = "citybehavex-web"
 path = "src/main.rs"
+
+[[bin]]
+name = "export_static_demo"
+path = "src/bin/export_static_demo.rs"
 
 [dependencies]
 citybehavex-core = { path = "../citybehavex-core" }
