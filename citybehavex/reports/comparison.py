@@ -17,6 +17,7 @@ from fastmob import (
     bin_visitation_law_data,
     compute_visitation_law_data,
     daily_activity_distribution,
+    daily_location_lognormal_fit,
     discover_daily_motifs_from_agents,
     fit_values_to_truncated_powerlaw,
     fit_visitation_law,
@@ -1073,24 +1074,9 @@ def _daily_location_lognormal_dataset(
     visits: pl.DataFrame,
     label: str,
 ) -> tuple[np.ndarray, np.ndarray, float, float, str]:
-    daily = (
-        visits.with_columns(pl.col("timestamp").dt.truncate("1d").alias("date"))
-        .group_by(["user_id", "date"])
-        .agg(pl.col("location_id").n_unique().alias("_count"))
+    x_points, y_points, mu, sigma = daily_location_lognormal_fit(
+        visits, user_id_col="user_id", location_id_col="location_id", timestamp_col="timestamp"
     )
-    values = daily["_count"].cast(pl.Float64).to_numpy()
-    values = values[np.isfinite(values) & (values > 0)]
-    if values.size < 2:
-        raise ValueError("at least two daily location counts are required")
-
-    log_values = np.log(values)
-    mu = float(log_values.mean())
-    sigma = float(log_values.std())
-    if not np.isfinite(sigma) or sigma <= 1e-12:
-        raise ValueError("daily location counts must have positive log variance")
-
-    x_points, counts = np.unique(values, return_counts=True)
-    y_points = counts / counts.sum()
     return x_points, y_points, mu, sigma, label
 
 
