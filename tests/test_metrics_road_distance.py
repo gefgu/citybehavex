@@ -37,7 +37,7 @@ def _tiny_road_graph():
 
 def test_jump_lengths_km_uses_road_distance_not_haversine():
     nodes_df, edges_df = _tiny_road_graph()
-    handle = build_road_network_handle(edges_df)
+    network = build_road_network_handle(edges_df, nodes_df)
 
     df = pl.DataFrame(
         {
@@ -50,7 +50,7 @@ def test_jump_lengths_km_uses_road_distance_not_haversine():
 
     jumps_km = jump_lengths_km(
         df, uid_col="uid", lat_col="lat", lng_col="lng", datetime_col="datetime",
-        handle=handle, nodes_df=nodes_df, snap_max_distance_m=750.0,
+        network=network, snap_max_distance_m=750.0,
     )
     assert jumps_km.shape == (1,)
     # Routed along the time-optimal chain (3 * 2000m), not the direct-but-slower edge.
@@ -62,7 +62,7 @@ def test_jump_lengths_km_uses_road_distance_not_haversine():
 
 def test_jump_lengths_km_falls_back_to_haversine_when_unsnapped():
     nodes_df, edges_df = _tiny_road_graph()
-    handle = build_road_network_handle(edges_df)
+    network = build_road_network_handle(edges_df, nodes_df)
 
     # Both stops are far (>> snap_max_distance_m) from any graph node, so
     # both endpoints are unsnapped and the pair must fall back to Haversine.
@@ -76,7 +76,7 @@ def test_jump_lengths_km_falls_back_to_haversine_when_unsnapped():
     )
     jumps_km = jump_lengths_km(
         df, uid_col="uid", lat_col="lat", lng_col="lng", datetime_col="datetime",
-        handle=handle, nodes_df=nodes_df, snap_max_distance_m=750.0,
+        network=network, snap_max_distance_m=750.0,
     )
     expected_km = haversine_m(10.0, 10.0, 10.0, 10.1) / 1000.0
     assert jumps_km[0] == pytest.approx(expected_km)
@@ -84,7 +84,7 @@ def test_jump_lengths_km_falls_back_to_haversine_when_unsnapped():
 
 def test_radius_of_gyration_km_uses_road_distance():
     nodes_df, edges_df = _tiny_road_graph()
-    handle = build_road_network_handle(edges_df)
+    network = build_road_network_handle(edges_df, nodes_df)
 
     df = pl.DataFrame(
         {
@@ -95,7 +95,7 @@ def test_radius_of_gyration_km_uses_road_distance():
     )
     rog = radius_of_gyration_km(
         df, uid_col="uid", lat_col="lat", lng_col="lng",
-        handle=handle, nodes_df=nodes_df, snap_max_distance_m=750.0,
+        network=network, snap_max_distance_m=750.0,
     )
     assert rog.columns == ["uid", "radius_of_gyration"]
     assert len(rog) == 1

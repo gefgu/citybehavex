@@ -1287,20 +1287,19 @@ def generate_comparison_report(
     # gyration as road-network distance (instead of fastmob's straight-line
     # Haversine) for both synthetic and real trajectories -- otherwise fall
     # back to the plain fastmob calls unchanged.
-    road_handle = (
-        build_road_network_handle(road_edges_df)
+    road_network = (
+        build_road_network_handle(road_edges_df, road_nodes_df)
         if road_nodes_df is not None and road_edges_df is not None and len(road_nodes_df) and len(road_edges_df)
         else None
     )
-    if road_handle is not None:
+    if road_network is not None:
         synth_jumps = road_jump_lengths_km(
             traj.df,
             uid_col=traj.uid_col,
             lat_col=traj.lat_col,
             lng_col=traj.lng_col,
             datetime_col=traj.datetime_col,
-            handle=road_handle,
-            nodes_df=road_nodes_df,
+            network=road_network,
             snap_max_distance_m=road_snap_max_distance_m,
         )
         real_jumps = road_jump_lengths_km(
@@ -1309,8 +1308,7 @@ def generate_comparison_report(
             lat_col=real_metric_traj.lat_col,
             lng_col=real_metric_traj.lng_col,
             datetime_col=real_metric_traj.datetime_col,
-            handle=road_handle,
-            nodes_df=road_nodes_df,
+            network=road_network,
             snap_max_distance_m=road_snap_max_distance_m,
         )
     else:
@@ -1361,14 +1359,13 @@ def generate_comparison_report(
     )
     metrics["wasserstein"]["visits_per_user"] = w_visits
 
-    if road_handle is not None:
+    if road_network is not None:
         synth_rog = road_radius_of_gyration_km(
             traj.df,
             uid_col=traj.uid_col,
             lat_col=traj.lat_col,
             lng_col=traj.lng_col,
-            handle=road_handle,
-            nodes_df=road_nodes_df,
+            network=road_network,
             snap_max_distance_m=road_snap_max_distance_m,
         )["radius_of_gyration"].to_numpy()
         real_rog = road_radius_of_gyration_km(
@@ -1376,8 +1373,7 @@ def generate_comparison_report(
             uid_col=real_metric_traj.uid_col,
             lat_col=real_metric_traj.lat_col,
             lng_col=real_metric_traj.lng_col,
-            handle=road_handle,
-            nodes_df=road_nodes_df,
+            network=road_network,
             snap_max_distance_m=road_snap_max_distance_m,
         )["radius_of_gyration"].to_numpy()
     else:
