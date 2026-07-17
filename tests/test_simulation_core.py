@@ -214,6 +214,72 @@ def test_transport_mode_selection_uses_walk_car_bike_rail_and_fallback():
     assert set(_run_mode_case(has_car=False, has_bike=False, walk_threshold_km=0.0, bike_threshold_km=0.0)) == {1}
 
 
+def test_car_routing_over_road_graph_detours_through_intermediate_node():
+    """Regression test for the fastmob-core re-point (item 7 of the fastmob
+    migration): passes a real road_edge_from/to graph with a node that is
+    NOT on the straight line between origin and destination, and a slower
+    but shorter direct edge -- car routing must prefer the (faster,
+    time-optimal) two-hop path through the detour node, not a straight-line
+    shortcut, proving the live engine is actually consulting the
+    contraction-hierarchy road graph (not silently falling back to
+    Haversine) after the citybehavex-core -> fastmob-core re-point."""
+    # Node 0 (origin) -> node 2 (detour, off the direct line) -> node 1
+    # (destination): fast two-hop route. A slower direct 0 -> 1 edge exists
+    # too but with a much higher weight_ds, so the CH must route through 2.
+    trip, paths, _ = core.simulation_core_simulate_agents(
+        latitudes=np.array([48.8566, 48.8580], dtype=float),
+        longitudes=np.array([2.3522, 2.3540], dtype=float),
+        relevances=np.ones(2, dtype=float),
+        distances=np.empty(0, dtype=np.float64),
+        neighbor_starts=np.array([0, 0], dtype=np.int64),
+        neighbors=np.empty(0, dtype=np.int64),
+        diary_timestamps=np.array([0, 8 * 3600], dtype=np.int64),
+        diary_abs_locs=np.array([0, 1], dtype=np.int32),
+        diary_starts=np.array([0], dtype=np.int64),
+        diary_ends=np.array([2], dtype=np.int64),
+        rho=1.0,
+        gamma=0.0,
+        alpha=0.0,
+        start_ts=0,
+        end_ts=86400,
+        indipendency_window_s=1800,
+        dt_update_mob_sim_s=3600,
+        slot_seconds=_SLOT,
+        car_speed_kmh=_SPEED,
+        n_agents=1,
+        master_seed=42,
+        starting_locs=np.array([0], dtype=np.int64),
+        starting_locs_mode_relevance=False,
+        work_tiles=np.array([1], dtype=np.int64),
+        walking_speed_kmh=5.0,
+        bike_speed_kmh=15.0,
+        has_car=np.array([True], dtype=np.bool_),
+        has_bike=np.array([False], dtype=np.bool_),
+        walking_threshold_km=np.array([0.0], dtype=np.float64),
+        bike_threshold_km=np.array([0.0], dtype=np.float64),
+        road_edge_from=np.array([0, 2], dtype=np.int64),
+        road_edge_to=np.array([2, 1], dtype=np.int64),
+        road_edge_weight_ds=np.array([10, 10], dtype=np.int64),
+        road_node_lats=np.array([48.8566, 48.8580, 48.8700], dtype=np.float64),
+        road_node_lngs=np.array([2.3522, 2.3540, 2.3300], dtype=np.float64),
+        location_road_node=np.array([0, 1], dtype=np.int64),
+        max_leg_waypoints=8,
+    )
+    assert len(trip[0]) == 2
+    modes = np.asarray(paths[7], dtype=np.uint8)
+    assert set(modes) == {1}  # car
+
+    # Node 2's latitude (48.87) must appear among the routed waypoints --
+    # the only way to reach it is via the two-hop road-graph path, proving
+    # the engine actually queried the contraction-hierarchy graph rather
+    # than falling back to a straight line. path_lats is float32 (see
+    # `paths[4]`'s dtype), so 48.87 round-trips as ~48.86999893 -- a
+    # tolerance of 1e-3 comfortably covers that precision loss without
+    # being loose enough to match the origin/destination lats (48.8566/48.858).
+    path_lats = np.asarray(paths[4], dtype=np.float64)
+    assert any(abs(lat - 48.8700) < 1e-3 for lat in path_lats)
+
+
 def test_simulation_core_keeps_one_location_for_continuous_abstract_block():
     lats = [48.8566, 48.8580, 48.8610, 48.8640]
     lngs = [2.3522, 2.3540, 2.3580, 2.3620]

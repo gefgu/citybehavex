@@ -1,11 +1,9 @@
-//! Shared Rust core for CityBehavEx: contraction-hierarchy road routing.
-//!
-//! Extracted out of `citybehavex-py` (where it was only reachable via PyO3)
-//! so it can be linked directly, with no Python in the loop, by both
-//! `citybehavex-py` (thin PyO3 wrappers) and `citybehavex-web` (the axum
-//! backend). H3 batch conversion and co-presence/graph-metrics computation
-//! used to live here too (`h3_batch`/`network_graph`); both are now
-//! consumed directly from `fastmob-core` (both crates already depend on it)
-//! instead of maintaining a citybehavex-local duplicate.
-
-pub mod roads;
+//! Formerly the shared Rust core for CityBehavEx: H3 batch conversion,
+//! contraction-hierarchy road routing, and co-presence/graph-metrics
+//! computation all lived here (reachable directly, with no Python in the
+//! loop, by both `citybehavex-py` and `citybehavex-web`). All three have
+//! since been retired in favor of consuming the same kernels directly from
+//! `fastmob-core` (which both crates already depend on), leaving this crate
+//! empty. Kept as a placeholder in the workspace rather than removed
+//! outright -- a call the workspace's maintainers should make deliberately,
+//! not as a side effect of this migration.

@@ -713,17 +713,11 @@ dependencies = [
 [[package]]
 name = "citybehavex-core"
 version = "0.1.0"
-dependencies = [
- "fast_paths",
- "rayon",
- "rustc-hash",
-]
 
 [[package]]
 name = "citybehavex-py"
 version = "0.1.0"
 dependencies = [
- "citybehavex-core",
  "fast_paths",
  "fastmob-core",
  "h3o",
@@ -743,7 +737,6 @@ dependencies = [
  "axum",
  "base64",
  "chrono",
- "citybehavex-core",
  "duckdb",
  "fastmob-core",
  "h3o",

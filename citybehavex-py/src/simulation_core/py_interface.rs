@@ -11,7 +11,7 @@ use crate::simulation_core::inputs::{
 use crate::simulation_core::outputs::{
     ActivityOutputBuffers, RoadPathOutputBuffers, TripOutputBuffers,
 };
-use citybehavex_core::roads::{RoadGraph, batch_road_distances};
+use fastmob_core::network::road_graph::{RoadGraph, batch_road_distances};
 
 /// Borrowed slice from an optional numpy array, or an empty slice when absent.
 fn opt_slice<'a, T: numpy::Element>(v: &'a Option<PyReadonlyArray1<'_, T>>) -> PyResult<&'a [T]> {
