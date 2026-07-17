@@ -8,7 +8,6 @@ from typing import Any, Optional
 import h3
 import numpy as np
 import polars as pl
-from citybehavex import _core as _cbx_core
 import fastmob
 import typer
 from fastmob import (
@@ -416,38 +415,28 @@ def _trajectory_od_matrix(
     lng_col: str,
     resolution: int,
 ) -> pl.DataFrame:
+    """Wide-pivot OD matrix, origin/destination as canonical H3 hex strings
+    (matching ``h3.latlng_to_cell``'s string form). Thin wrapper around
+    fastmob's ``trajectory_to_od`` (Rust-accelerated H3 conversion + a
+    vectorized consecutive-fix pairing, replacing this function's original
+    per-row ``h3.latlng_to_cell`` Python loop), pivoted from its long-format
+    ``[origin, destination, count]`` (H3 cells as ``u64``) into the wide
+    shape this function has always returned.
+    """
     points = df.select([uid_col, datetime_col, lat_col, lng_col]).with_columns(
-        _to_datetime(df[datetime_col]).alias("_datetime"),
-        pl.col(lat_col).cast(pl.Float64, strict=False).alias("_lat"),
-        pl.col(lng_col).cast(pl.Float64, strict=False).alias("_lng"),
+        _to_datetime(df[datetime_col]).alias(datetime_col)
     )
-    points = points.drop_nulls(subset=[uid_col, "_datetime", "_lat", "_lng"])
-    points = points.filter(
-        pl.col("_lat").is_between(-90, 90) & pl.col("_lng").is_between(-180, 180)
+    result = fastmob.preprocessing.trajectory_to_od(
+        points, resolution, uid_col=uid_col, datetime_col=datetime_col, lat_col=lat_col, lng_col=lng_col
     )
-    points = points.sort([uid_col, "_datetime"])
-    points = points.with_columns(
-        pl.struct(["_lat", "_lng"])
-        .map_elements(
-            lambda row: h3.latlng_to_cell(row["_lat"], row["_lng"], resolution),
-            return_dtype=pl.Utf8,
-        )
-        .alias("origin")
-    )
-    points = points.with_columns(pl.col("origin").shift(-1).over(uid_col).alias("destination"))
-    trips = points.drop_nulls(subset=["destination"])
-    trips = trips.filter(pl.col("origin") != pl.col("destination"))
-
-    if trips.is_empty():
+    if result.is_empty():
         return pl.DataFrame()
 
-    flows = (
-        trips.group_by(["origin", "destination"])
-        .agg(pl.len().cast(pl.Float64).alias("count"))
-        .pivot(on="destination", index="origin", values="count")
-        .fill_null(0.0)
+    result = result.with_columns(
+        pl.col("origin").map_elements(lambda c: format(c, "015x"), return_dtype=pl.Utf8),
+        pl.col("destination").map_elements(lambda c: format(c, "015x"), return_dtype=pl.Utf8),
     )
-    return flows
+    return result.pivot(on="destination", index="origin", values="count").fill_null(0.0)
 
 
 def _common_part_of_commuters(
@@ -458,25 +447,17 @@ def _common_part_of_commuters(
     return trajectory_common_part_of_commuters_multi(traj, real_traj, resolutions=resolutions)
 
 
-_H3_INVALID_CELL = np.uint64(2**64 - 1)
-
-
 def _h3_cells(lat: pl.Series, lng: pl.Series, resolution: int) -> pl.Series:
-    """Vectorized lat/lng -> H3 cell index, via the Rust extension instead of
-    a per-row ``h3.latlng_to_cell`` Python loop -- the difference is
-    meaningful at real dataset scale (~100x measured on 100M+ rows). Returns
-    a nullable ``UInt64`` series (not the hex-string form ``h3.latlng_to_cell``
-    returns) since callers only group/compare locations, never display them;
-    invalid/non-finite coordinates map to null.
+    """Vectorized lat/lng -> H3 cell index, via fastmob's Rust-accelerated
+    ``latlng_to_h3`` instead of a per-row ``h3.latlng_to_cell`` Python loop --
+    the difference is meaningful at real dataset scale (~100x measured on
+    100M+ rows). Returns a nullable ``UInt64`` series (not the hex-string
+    form ``h3.latlng_to_cell`` returns) since callers only group/compare
+    locations, never display them; invalid/non-finite coordinates map to null.
     """
-    lat_arr = lat.cast(pl.Float64, strict=False).to_numpy()
-    lng_arr = lng.cast(pl.Float64, strict=False).to_numpy()
-    cells = _cbx_core.batch_latlng_to_cells(lat_arr, lng_arr, resolution)
-    result = pl.Series(cells, dtype=pl.UInt64)
-    invalid = pl.Series(cells == _H3_INVALID_CELL)
-    if invalid.any():
-        result = result.set(invalid, None)
-    return result
+    tmp = pl.DataFrame({"lat": lat, "lng": lng})
+    result = fastmob.preprocessing.latlng_to_h3(tmp, resolution, lat_col="lat", lng_col="lng", output_col="h3_cell")
+    return result["h3_cell"]
 
 
 def _visits_for_comparison(

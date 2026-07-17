@@ -578,8 +578,9 @@ fn network_block_from_edges(
     kind: &str,
 ) -> Value {
     const MAX_EDGES: usize = 20_000;
-    let metrics =
-        citybehavex_core::network_graph::compute_graph_metrics(node_count, edge_from, edge_to);
+    let metrics = fastmob_core::measures::collective::co_presence_network::compute_graph_metrics(
+        node_count, edge_from, edge_to,
+    );
     // O(node_count + edge_count) degree accumulation, matching
     // `NetworkGraph.degrees()`'s `np.bincount` on the Python side -- the
     // previous per-node `.filter().count()` scan was O(node_count *

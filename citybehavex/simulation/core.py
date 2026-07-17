@@ -13,6 +13,7 @@ import pandas as pd
 from sklearn.decomposition import TruncatedSVD
 
 import citybehavex._core as _cbx_core
+from fastmob._core import latlng_to_h3_numpy
 
 from citybehavex.math import sample_weighted_indices
 from citybehavex.schedules import DiaryArrays
@@ -447,8 +448,8 @@ def simulate_agents(
     )
 
     if profile_embeddings is not None and sl is not None:
-        home_cells = _cbx_core.batch_latlng_to_cells(lats[sl], lngs[sl], home_h3_resolution)
-        work_cells = _cbx_core.batch_latlng_to_cells(lats[wt], lngs[wt], work_h3_resolution)
+        home_cells = latlng_to_h3_numpy(lats[sl], lngs[sl], home_h3_resolution)
+        work_cells = latlng_to_h3_numpy(lats[wt], lngs[wt], work_h3_resolution)
         neighbor_starts, neighbors, edge_weights = build_colocation_social_graph(
             profile_embeddings,
             home_cells,

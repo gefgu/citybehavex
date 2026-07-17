@@ -715,7 +715,6 @@ name = "citybehavex-core"
 version = "0.1.0"
 dependencies = [
  "fast_paths",
- "h3o 0.10.0",
  "rayon",
  "rustc-hash",
 ]
@@ -727,7 +726,7 @@ dependencies = [
  "citybehavex-core",
  "fast_paths",
  "fastmob-core",
- "h3o 0.10.0",
+ "h3o",
  "numpy",
  "pyo3",
  "rand 0.8.6",
@@ -747,7 +746,7 @@ dependencies = [
  "citybehavex-core",
  "duckdb",
  "fastmob-core",
- "h3o 0.10.0",
+ "h3o",
  "hex",
  "lru",
  "polars",
@@ -1174,8 +1173,9 @@ dependencies = [
 name = "fastmob-core"
 version = "0.1.0"
 dependencies = [
+ "fast_paths",
  "geo",
- "h3o 0.9.5",
+ "h3o",
  "linfa",
  "linfa-clustering",
  "linfa-nn",
@@ -1485,19 +1485,6 @@ dependencies = [
  "tokio",
  "tokio-util",
  "tracing",
-]
-
-[[package]]
-name = "h3o"
-version = "0.9.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "eaed017cf85070a94c3426db925ea8de919abaa26f495da26a8f23ecd28335ec"
-dependencies = [
- "ahash 0.8.12",
- "either",
- "float_eq",
- "h3o-bit",
- "libm",
 ]
 
 [[package]]

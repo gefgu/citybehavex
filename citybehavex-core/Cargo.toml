@@ -8,7 +8,6 @@ name = "citybehavex_core"
 crate-type = ["lib"]
 
 [dependencies]
-h3o = "0.10.0"
 rayon = "1"
 rustc-hash = "2"
 fast_paths = "1"

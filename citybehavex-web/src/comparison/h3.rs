@@ -1,13 +1,14 @@
 //! Mirrors `comparison.py::_h3_cells` and `_location_resolution`.
 
-use citybehavex_core::h3_batch::{self, INVALID_CELL};
+use fastmob_core::preprocessing::h3::{INVALID_CELL, batch_latlng_to_cells};
 use h3o::{CellIndex, Resolution};
 use polars::prelude::*;
 
-/// Vectorized lat/lng -> H3 cell index, via `citybehavex-core` (the same
-/// Rust extraction `_h3_cells` calls through `citybehavex._core` on the
-/// Python side) instead of a per-row `h3.latlng_to_cell` loop. Returns a
-/// nullable `UInt64` series; invalid/non-finite coordinates map to null.
+/// Vectorized lat/lng -> H3 cell index, via `fastmob-core` (the same Rust
+/// kernel `fastmob.preprocessing.latlng_to_h3` calls through `fastmob._core`
+/// on the Python side) instead of a per-row `h3.latlng_to_cell` loop.
+/// Returns a nullable `UInt64` series; invalid/non-finite coordinates map to
+/// null.
 pub fn h3_cells(lat: &Series, lng: &Series, resolution: u8) -> anyhow::Result<Series> {
     let res = Resolution::try_from(resolution)
         .map_err(|e| anyhow::anyhow!("invalid H3 resolution {resolution}: {e}"))?;
@@ -22,7 +23,7 @@ pub fn h3_cells(lat: &Series, lng: &Series, resolution: u8) -> anyhow::Result<Se
     let lats: Vec<f64> = lat_ca.into_iter().map(|v| v.unwrap_or(f64::NAN)).collect();
     let lngs: Vec<f64> = lng_ca.into_iter().map(|v| v.unwrap_or(f64::NAN)).collect();
 
-    let cells = h3_batch::batch_latlng_to_cells(&lats, &lngs, res);
+    let cells = batch_latlng_to_cells(&lats, &lngs, res, None);
     let opt_cells: Vec<Option<u64>> = cells
         .into_iter()
         .map(|c| if c == INVALID_CELL { None } else { Some(c) })
