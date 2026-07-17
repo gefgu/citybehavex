@@ -16,7 +16,6 @@ name = "export_static_demo"
 path = "src/bin/export_static_demo.rs"
 
 [dependencies]
-citybehavex-core = { path = "../citybehavex-core" }
 fastmob-core = { path = "../../fastmob/fastmob-core" }
 # skmob-vis is NOT yet a dependency here: its `[lib] crate-type = ["cdylib",
 # "rlib"]` means any consumer needing the rlib output also forces a build of

@@ -4,6 +4,7 @@ use rayon::prelude::*;
 use rustc_hash::{FxHashMap, FxHashSet};
 use fastmob_core::models::od::{CachedGravityOdRows, validate_equal_lengths};
 use fastmob_core::models::shared::derive_agent_seed;
+use fastmob_core::network::road_graph::{RoadGraph, subsample_waypoints};
 use fastmob_core::utils::haversine::haversine_km;
 use std::collections::VecDeque;
 
@@ -17,7 +18,6 @@ use crate::simulation_core::inputs::{
 use crate::simulation_core::outputs::{
     ActivityOutputBuffers, RoadPathOutputBuffers, SimulationOutput, TripOutputBuffers,
 };
-use citybehavex_core::roads::{RoadGraph, subsample_waypoints};
 use crate::simulation_core::social::{
     LocationChoiceContext, choose_location_local, pick_starting_loc, update_edge_sim,
 };
