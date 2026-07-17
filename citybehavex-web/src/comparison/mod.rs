@@ -5,11 +5,11 @@
 //! calls.
 //!
 //! Uses `polars` (Rust) for the dataframe pipelines (near-1:1 port of the
-//! Python `polars` code), `fastmob-core` directly (no PyO3) for the numeric
-//! primitives it implements natively (Wasserstein, activity transition
-//! counts, motif discovery, visitation-law distances, waiting times,
-//! trajectory CPC, STVD-EMD), and `citybehavex-core::h3_batch` for H3
-//! binning (mirrors `_h3_cells`'s use of `citybehavex._core.batch_latlng_to_cells`).
+//! Python `polars` code) and `fastmob-core` directly (no PyO3) for the
+//! numeric primitives it implements natively (Wasserstein, activity
+//! transition counts, motif discovery, visitation-law distances, waiting
+//! times, trajectory CPC, STVD-EMD, H3 binning -- mirrors `_h3_cells`'s use
+//! of `fastmob.preprocessing.latlng_to_h3`).
 
 pub mod activity;
 pub mod ecdf;

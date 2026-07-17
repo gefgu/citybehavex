@@ -2,7 +2,7 @@
 //! Mirrors `citybehavex/reports/network_validation.py`'s
 //! `_resolve_observed_location`, `_to_day`, and `_observed_edges_and_persistence`
 //! -- the parts of the observed-validation path not already covered by
-//! `citybehavex-core::network_graph` (which supplies the actual
+//! `fastmob-core`'s `co_presence_network` module (which supplies the actual
 //! `build_co_presence_edges`/`compute_graph_metrics` kernels).
 //!
 //! Node/day/location identifiers are factorized via plain `HashMap`s rather
@@ -16,7 +16,7 @@ use crate::columns::{self, detect_in};
 use crate::comparison::h3::h3_cells;
 use crate::comparison::util::to_datetime_expr;
 use crate::settings::reports::LocationMode;
-use citybehavex_core::network_graph::build_co_presence_edges;
+use fastmob_core::measures::collective::co_presence_network::build_co_presence_edges;
 use polars::prelude::*;
 use std::collections::HashMap;
 
@@ -82,8 +82,8 @@ fn truncate_to_day(df: &DataFrame, datetime_col: &str) -> anyhow::Result<Series>
 
 /// Mirrors `_observed_edges_and_persistence`: builds the observed daily
 /// co-presence graph from `(uid, datetime, location)` rows via
-/// `citybehavex-core::network_graph::build_co_presence_edges`, the same
-/// kernel the Python port uses through `citybehavex._core`.
+/// `fastmob-core`'s `co_presence_network::build_co_presence_edges`, the same
+/// kernel the Python port uses through `fastmob._core`.
 pub fn observed_edges_and_persistence(
     df: &DataFrame,
     uid_col: &str,
