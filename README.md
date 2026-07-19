@@ -300,13 +300,14 @@ timeline replay, metrics, and cached comparison payloads.
 
 ## Citation
 
-In the future...
-
-<!-- ```bibtex
-@inproceedings{santos2026citybehavex,
-  title     = {CityBehavEx: A Scalable and Empirically Validated LLM-Assisted Urban Simulation Platform},
-  author    = {Santos, Gustavo H. and Viana, Aline Carneiro and Silva, Thiago H.},
-  booktitle = {Proceedings of the EMNLP Demo Track},
-  year      = {2026}
+```bibtex
+@misc{santos2026citybehavex,
+      title={CityBehavEx: A Scalable and Empirically Validated LLM-Assisted Urban Simulation Platform}, 
+      author={Gustavo H. Santos and Aline Viana and Thiago H Silva},
+      year={2026},
+      eprint={2607.12086},
+      archivePrefix={arXiv},
+      primaryClass={cs.CL},
+      url={https://arxiv.org/abs/2607.12086}, 
 }
-``` -->
+```
