@@ -19,17 +19,10 @@ so treat *this* file as the durable reference going forward, not that one.
 
 ## Architecture
 
-Cargo workspace, root `Cargo.toml` `members = ["citybehavex-py", "citybehavex-core", "citybehavex-web"]`:
+Cargo workspace, root `Cargo.toml` `members = ["citybehavex-py", "citybehavex-web"]`:
 
-- **`citybehavex-core/`** — plain Rust lib (no PyO3), extracted out of
-  `citybehavex-py`. Holds H3 batch conversion (`h3_batch.rs`),
-  contraction-hierarchy road routing (`roads.rs`, `fast_paths` crate), and
-  co-presence/graph-metrics for network validation (`network_graph.rs`).
-  `citybehavex-py`'s PyO3 bindings are now thin wrappers around this crate —
-  confirmed zero behavior change via the full Python test suite after the
-  extraction.
 - **`citybehavex-web/`** — the new axum binary. Depends on
-  `citybehavex-core`, `fkmob-core` (path dep to `/home/gustavo/fkmob/fkmob-core`,
+  `fastmob-core` (path dep to `/home/gustavo/fastmob/fastmob-core`,
   a plain Rust lib — same pattern `citybehavex-py` already uses), `polars`
   (Rust) for dataframe pipelines, `duckdb` (bundled) for parquet metadata,
   `axum`/`tokio`/`tower-http`. Binds `CBX_WEB_RS_PORT` (default 8001) so it
@@ -53,7 +46,8 @@ Cargo workspace, root `Cargo.toml` `members = ["citybehavex-py", "citybehavex-co
 - Axum server: CORS (matches `main.py`'s `localhost`/`127.0.0.1` regex +
   credentials), gzip, SPA static serving with the *exact* status-code
   semantics of `main.py`'s custom 404 handler (verified live).
-- `citybehavex-core` extraction (see above).
+- Shared kernels now come from `fastmob-core`; the old local core-crate
+  extraction has been removed.
 - Full config layer: every `citybehavex/config/**` Pydantic model ported to
   serde structs with `deny_unknown_fields` + hand-written validators.
   Verified: all 8 real config files in `configs/*.yaml` parse and validate
@@ -87,7 +81,7 @@ calls) is ported to `citybehavex-web/src/comparison/`:
 
 | Module | Mirrors | Notes |
 |---|---|---|
-| `h3.rs` | `_h3_cells`, `_location_resolution` | via `citybehavex-core::h3_batch` |
+| `h3.rs` | `_h3_cells`, `_location_resolution` | via `fastmob-core` H3 utilities |
 | `panel.rs` | `_looks_like_panel_observations`, `_adapt_evaluation_dataframe`, `_collapse_to_stays` | verified vs. real `gparis_visitation_df.parquet` |
 | `trajectory.rs` | `load_trajectory` | |
 | `metrics.rs` | `wasserstein_distance`, `jensen_shannon_divergence`, `_common_part_of_commuters`, `waiting_times_minutes` | calls `fkmob_core::measures::evaluation::wasserstein` directly |
@@ -180,7 +174,7 @@ Ported so far (`citybehavex-web/src/comparison/`):
 
 - **Network validation**: `/network-validation` returns
   `synthetic_vs_random`, `observed_vs_random`, and `synthetic_vs_observed`
-  blocks, using `citybehavex-core::network_graph::compute_graph_metrics` for
+  blocks, using `fastmob-core` graph utilities for
   degree, clustering, and topological-overlap distributions, and
   `build_co_presence_edges` for the observed daily co-presence graph
   (`citybehavex-web/src/comparison/network_validation.rs`). For graphs above
@@ -376,7 +370,7 @@ data, zero panics.
 - **Observed network validation** (`observed_vs_random` and
   `synthetic_vs_observed`) is now native: `citybehavex-web/src/comparison/network_validation.rs`
   builds the observed daily co-presence graph via
-  `citybehavex-core::network_graph::build_co_presence_edges` (the same kernel
+  `fastmob-core` co-presence graph utilities (the same kernel family
   the synthetic path already used), with `NetworkValidationConfig`'s
   `observed_enabled`/`location_mode`/`location_col`/`h3_resolution`/
   `max_group_size` all wired through `routes/charts.rs::network_validation_route`.
@@ -589,7 +583,7 @@ data, zero panics.
 
 ```
 # Build the new crates (no PYO3_PYTHON needed, unlike citybehavex-py):
-cargo build -p citybehavex-core -p citybehavex-web
+cargo build -p citybehavex-web
 
 # Run all fast unit tests:
 cargo test -p citybehavex-web --bin citybehavex-web
@@ -603,10 +597,9 @@ cargo run -p citybehavex-web
 .venv/bin/python -m uvicorn app.main:app --app-dir web/backend --port 8000
 ```
 
-After the Phase 1 extraction, rebuilding `citybehavex-py` still needs the
+Rebuilding `citybehavex-py` still needs the
 `PYO3_PYTHON` + `pyo3/extension-module` incantation documented in this
-repo's dev-environment notes — that's unchanged, `citybehavex-core` doesn't
-need it since it has no PyO3 dependency.
+repo's dev-environment notes.
 
 ## Git history
 

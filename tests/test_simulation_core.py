@@ -222,7 +222,7 @@ def test_car_routing_over_road_graph_detours_through_intermediate_node():
     time-optimal) two-hop path through the detour node, not a straight-line
     shortcut, proving the live engine is actually consulting the
     contraction-hierarchy road graph (not silently falling back to
-    Haversine) after the citybehavex-core -> fastmob-core re-point."""
+    Haversine) after the fastmob-core re-point."""
     # Node 0 (origin) -> node 2 (detour, off the direct line) -> node 1
     # (destination): fast two-hop route. A slower direct 0 -> 1 edge exists
     # too but with a much higher weight_ds, so the CH must route through 2.
