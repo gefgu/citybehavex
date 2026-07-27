@@ -1,4 +1,4 @@
-use fastmob_core::models::od::{CachedGravityOdRows, validate_equal_lengths};
+use fastmob_core::models::od::CachedGravityOdRows;
 use fastmob_core::models::shared::derive_agent_seed;
 use fastmob_core::network::road_graph::{RoadGraph, subsample_waypoints};
 use fastmob_core::utils::haversine::haversine_km;
@@ -12,8 +12,7 @@ use crate::simulation_core::activity::{
     COMMUTE_ACTIVITY_IDX, TRAVEL_ACTIVITY_IDX, sample_activity_and_duration,
 };
 use crate::simulation_core::inputs::{
-    ActivityInputs, CoreInputs, DiaryInputs, InitialLocationInputs, LocationInputs,
-    RoadNetworkInputs, SimulationParams, SocialGraphInputs,
+    ActivityInputs, CoreInputs, LocationInputs, RoadNetworkInputs, SimulationParams,
 };
 use crate::simulation_core::outputs::{
     ActivityOutputBuffers, RoadPathOutputBuffers, SimulationOutput, TripOutputBuffers,
@@ -76,22 +75,6 @@ fn resolve_departure(
         ts - dur_s / 2
     };
     departure.max(prev_arrival)
-}
-
-fn haversine_fallback_secs(
-    cur_loc: usize,
-    next_loc: usize,
-    lats: &[f64],
-    lngs: &[f64],
-    car_speed_kmh: f64,
-) -> i64 {
-    let d_km = haversine_km(lats[cur_loc], lngs[cur_loc], lats[next_loc], lngs[next_loc]);
-    let secs = (d_km / car_speed_kmh) * 3600.0;
-    if secs.is_finite() && secs > 0.0 {
-        secs.round() as i64
-    } else {
-        0
-    }
 }
 
 fn haversine_secs_for_speed(
@@ -190,7 +173,7 @@ fn route_leg(
             return routed;
         }
     }
-    let dur_s = haversine_fallback_secs(cur_loc, next_loc, lats, lngs, car_speed_kmh);
+    let dur_s = haversine_secs_for_speed(cur_loc, next_loc, lats, lngs, car_speed_kmh);
     (
         dur_s,
         vec![lats[cur_loc], lats[next_loc]],
@@ -410,218 +393,6 @@ fn append_trip_record(
     );
 
     (departure, arrival, stop_id)
-}
-
-fn validate_locations(locations: &LocationInputs<'_>) -> Result<usize, String> {
-    let n_locations = validate_equal_lengths(&[
-        ("latitudes", locations.lats.len()),
-        ("longitudes", locations.lngs.len()),
-        ("relevances", locations.relevances.len()),
-    ])?;
-    if n_locations < 2 {
-        return Err("need at least 2 locations".to_string());
-    }
-    if n_locations > u32::MAX as usize {
-        return Err(format!(
-            "n_locations={} exceeds u32::MAX; location indices are stored as u32",
-            n_locations
-        ));
-    }
-    if !locations.distances.is_empty() && locations.distances.len() != n_locations * n_locations {
-        return Err(format!(
-            "distances must be empty or have length n_locations*n_locations={}, got {}",
-            n_locations * n_locations,
-            locations.distances.len()
-        ));
-    }
-    if locations.poi_type_choice_enabled {
-        if locations.semantic_cluster_ids.len() != n_locations {
-            return Err(format!(
-                "location_semantic_cluster_ids must have length n_locations={}, got {}",
-                n_locations,
-                locations.semantic_cluster_ids.len()
-            ));
-        }
-        if locations.poi_type_n_blocks == 0 || locations.poi_type_n_clusters == 0 {
-            return Err("POI type alignment dimensions must be positive when enabled".to_string());
-        }
-        let expected = locations.poi_type_n_blocks * locations.poi_type_n_clusters;
-        if locations.poi_type_scores.len() % expected != 0 {
-            return Err(format!(
-                "poi_type_alignment_scores length must be a multiple of blocks*clusters={}, got {}",
-                expected,
-                locations.poi_type_scores.len()
-            ));
-        }
-        if !(locations.poi_type_temperature.is_finite() && locations.poi_type_temperature > 0.0) {
-            return Err("poi_type_choice_temperature must be positive".to_string());
-        }
-        if !(locations.poi_type_alpha.is_finite() && locations.poi_type_alpha >= 0.0) {
-            return Err("poi_type_choice_alpha must be non-negative".to_string());
-        }
-    }
-    Ok(n_locations)
-}
-
-fn validate_social_graph_lengths(
-    social_graph: &SocialGraphInputs<'_>,
-    n_agents: usize,
-) -> Result<(), String> {
-    if social_graph.neighbor_starts.len() != n_agents + 1 {
-        return Err(format!(
-            "neighbor_starts must have length n_agents+1={}, got {}",
-            n_agents + 1,
-            social_graph.neighbor_starts.len()
-        ));
-    }
-    Ok(())
-}
-
-fn validate_diary_lengths(diary: &DiaryInputs<'_>, n_agents: usize) -> Result<(), String> {
-    if diary.starts.len() < n_agents || diary.ends.len() < n_agents {
-        return Err(format!(
-            "diary_starts/diary_ends must have at least {} entries",
-            n_agents
-        ));
-    }
-    Ok(())
-}
-
-fn validate_params(params: &SimulationParams) -> Result<(), String> {
-    if params.slot_seconds <= 0 {
-        return Err("slot_seconds must be positive".to_string());
-    }
-    if params.indipendency_window_s <= 0 {
-        return Err("indipendency_window_s must be positive".to_string());
-    }
-    if params.dt_update_mob_sim_s <= 0 {
-        return Err("dt_update_mob_sim_s must be positive".to_string());
-    }
-    if params.friendship_update_interval_s <= 0 {
-        return Err("friendship_update_interval_s must be positive".to_string());
-    }
-    if params.encounter_window_s <= 0 {
-        return Err("encounter_window_s must be positive".to_string());
-    }
-    if !(params.regularity_threshold.is_finite()
-        && (0.0..=1.0).contains(&params.regularity_threshold))
-    {
-        return Err("regularity_threshold must be in [0, 1]".to_string());
-    }
-    if !(params.topological_overlap_threshold.is_finite()
-        && (0.0..=1.0).contains(&params.topological_overlap_threshold))
-    {
-        return Err("topological_overlap_threshold must be in [0, 1]".to_string());
-    }
-    if !(params.recast_random_chance_probability.is_finite()
-        && params.recast_random_chance_probability > 0.0
-        && params.recast_random_chance_probability <= 1.0)
-    {
-        return Err("recast_random_chance_probability must be in (0, 1]".to_string());
-    }
-    if !(params.strength_initial.is_finite() && params.strength_initial > 0.0) {
-        return Err("strength_initial must be positive".to_string());
-    }
-    if !(params.strength_growth_sigma_ln.is_finite() && params.strength_growth_sigma_ln > 0.0) {
-        return Err("strength_growth_sigma_ln must be positive".to_string());
-    }
-    if !(params.strength_decay_rate.is_finite()
-        && (0.0..=1.0).contains(&params.strength_decay_rate))
-    {
-        return Err("strength_decay_rate must be in [0, 1]".to_string());
-    }
-    if params.max_dynamic_degree == 0 {
-        return Err("max_dynamic_degree must be positive".to_string());
-    }
-    if params.max_colocation_group_size < 2 {
-        return Err("max_colocation_group_size must be at least 2".to_string());
-    }
-    if !(params.car_speed_kmh.is_finite() && params.car_speed_kmh > 0.0) {
-        return Err("car_speed_kmh must be positive".to_string());
-    }
-    if !(params.walking_speed_kmh.is_finite() && params.walking_speed_kmh > 0.0) {
-        return Err("walking_speed_kmh must be positive".to_string());
-    }
-    if !(params.bike_speed_kmh.is_finite() && params.bike_speed_kmh > 0.0) {
-        return Err("bike_speed_kmh must be positive".to_string());
-    }
-    Ok(())
-}
-
-fn validate_initial_locations(
-    initial_locations: &InitialLocationInputs<'_>,
-    n_agents: usize,
-) -> Result<(), String> {
-    if let Some(starts) = initial_locations.starting_locs
-        && starts.len() < n_agents
-    {
-        return Err(format!(
-            "starting_locs must have at least {} entries",
-            n_agents
-        ));
-    }
-    if initial_locations.work_tiles.len() < n_agents {
-        return Err(format!(
-            "work_tiles must have at least {} entries",
-            n_agents
-        ));
-    }
-    Ok(())
-}
-
-fn validate_transport(inputs: &CoreInputs<'_>, n_agents: usize) -> Result<(), String> {
-    let transport = &inputs.transport;
-    for (name, len) in [
-        ("has_car", transport.has_car.len()),
-        ("has_bike", transport.has_bike.len()),
-        ("walking_threshold_km", transport.walking_threshold_km.len()),
-        ("bike_threshold_km", transport.bike_threshold_km.len()),
-    ] {
-        if len < n_agents {
-            return Err(format!("{name} must have at least {n_agents} entries"));
-        }
-    }
-    Ok(())
-}
-
-fn validate_per_agent_ranges(inputs: &CoreInputs<'_>, n_agents: usize) -> Result<(), String> {
-    for agent in 0..n_agents {
-        if inputs.diary.starts[agent] > inputs.diary.ends[agent]
-            || inputs.diary.ends[agent] > inputs.diary.timestamps.len()
-        {
-            return Err("diary ranges must be ordered and within diary_timestamps".to_string());
-        }
-        if inputs.diary.ends[agent] > inputs.diary.abstract_locations.len() {
-            return Err("diary ranges must be within diary_abs_locs".to_string());
-        }
-        if inputs.diary.ends[agent] > inputs.diary.block_ids.len() {
-            return Err("diary ranges must be within diary_block_ids".to_string());
-        }
-        if inputs.social_graph.neighbor_starts[agent]
-            > inputs.social_graph.neighbor_starts[agent + 1]
-            || inputs.social_graph.neighbor_starts[agent + 1] > inputs.social_graph.neighbors.len()
-        {
-            return Err("neighbor_starts must be ordered and within neighbors".to_string());
-        }
-    }
-    Ok(())
-}
-
-fn validate_inputs(inputs: &CoreInputs<'_>) -> Result<usize, String> {
-    if inputs.params.n_agents > u32::MAX as usize {
-        return Err(format!(
-            "n_agents={} exceeds u32::MAX; agent ids are stored as u32",
-            inputs.params.n_agents
-        ));
-    }
-    let n_locations = validate_locations(&inputs.locations)?;
-    validate_social_graph_lengths(&inputs.social_graph, inputs.params.n_agents)?;
-    validate_diary_lengths(&inputs.diary, inputs.params.n_agents)?;
-    validate_params(&inputs.params)?;
-    validate_initial_locations(&inputs.initial_locations, inputs.params.n_agents)?;
-    validate_transport(inputs, inputs.params.n_agents)?;
-    validate_per_agent_ranges(inputs, inputs.params.n_agents)?;
-    Ok(n_locations)
 }
 
 fn build_od_rows<'a>(
@@ -1587,7 +1358,7 @@ pub(crate) fn simulate(
     mut on_trip_day_flush: Option<&mut dyn FnMut(TripOutputBuffers) -> Result<(), String>>,
     mut on_activity_day_flush: Option<&mut dyn FnMut(ActivityOutputBuffers) -> Result<(), String>>,
 ) -> Result<SimulationOutput, String> {
-    let n_locations = validate_inputs(&inputs)?;
+    let shape = inputs.validate()?;
     if inputs.params.n_agents == 0 {
         return Ok(SimulationOutput::empty());
     }
@@ -1597,7 +1368,7 @@ pub(crate) fn simulate(
 
     let mut agents = new_agent_states(inputs.params.n_agents);
     let mut par_data = new_agent_par_data(&inputs, master_seed);
-    init_agent_locations(&mut agents, &mut par_data, &inputs, n_locations);
+    init_agent_locations(&mut agents, &mut par_data, &inputs, shape.n_locations);
 
     // Monotonic stop id counter, decoupled from `TripOutputBuffers`'s array
     // length so day-boundary compaction (which physically removes closed
@@ -1634,7 +1405,7 @@ pub(crate) fn simulate(
 
     println!(
         "Starting simulation from {} to {} with {} agents and {} locations",
-        inputs.params.start_ts, inputs.params.end_ts, inputs.params.n_agents, n_locations
+        inputs.params.start_ts, inputs.params.end_ts, inputs.params.n_agents, shape.n_locations
     );
 
     while window_start < inputs.params.end_ts {
@@ -1687,7 +1458,7 @@ pub(crate) fn simulate(
             &mut par_data,
             &agents,
             &inputs,
-            n_locations,
+            shape.n_locations,
             od_rows.as_ref(),
             window_end,
         );
