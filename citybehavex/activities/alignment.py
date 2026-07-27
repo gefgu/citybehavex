@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Optional, Sequence
 
 import numpy as np
@@ -18,13 +17,9 @@ from citybehavex.activities.poi_semantic import (
 from citybehavex.llm_diaries import Diary
 from citybehavex.utils.alignment import (
     alignment_cache_key,
-    extract_rerank_scores,
-    post_pair_scores,
-    post_rerank_scores,
     score_cached_alignment_pairs,
     score_chunk_with_retries,
 )
-from citybehavex.utils.cache import load_score_cache, save_score_cache
 
 START_PREVIOUS_ACTIVITY = -1
 
@@ -263,15 +258,6 @@ def _poi_query_text(
     )
 
 
-def _poi_cache_key(
-    model: str | None,
-    profile_text: str,
-    semantic_cluster: str,
-    activity_text: str,
-) -> str:
-    return alignment_cache_key(model, profile_text, "POI", semantic_cluster, activity_text)
-
-
 def _poi_type_query_text(profile_text: str, block: ActivityBlock) -> str:
     return (
         f"{profile_text}\n"
@@ -302,54 +288,6 @@ def _poi_type_cache_key(
         block.start,
         block.end,
         semantic_cluster,
-    )
-
-
-def _load_cache(path: Path) -> dict[str, float]:
-    return load_score_cache(path)
-
-
-def _save_cache(path: Path, cache: dict[str, float]) -> None:
-    save_score_cache(path, cache)
-
-
-def _extract_scores(payload: object, expected: int) -> Optional[list[float]]:
-    return extract_rerank_scores(payload, expected)
-
-
-def _post_rerank(
-    base_url: str,
-    model: str | None,
-    query: str,
-    texts: Sequence[str],
-    *,
-    timeout: float,
-) -> Optional[list[float]]:
-    return post_rerank_scores(
-        base_url,
-        model,
-        query,
-        texts,
-        timeout=timeout,
-        retries=1,
-        requests_module=requests,
-    )
-
-
-def _post_pair_scores(
-    base_url: str,
-    model: str | None,
-    pairs: Sequence[tuple[str, str]],
-    *,
-    timeout: float,
-) -> Optional[list[float]]:
-    return post_pair_scores(
-        base_url,
-        model,
-        pairs,
-        timeout=timeout,
-        retries=1,
-        requests_module=requests,
     )
 
 
@@ -584,7 +522,13 @@ def score_poi_semantic_alignment(
                 )
                 for activity_idx in allowed:
                     text = _activity_text(catalog[int(activity_idx)])
-                    key = _poi_cache_key(config.alignment_model, profile_text, semantic_cluster, text)
+                    key = alignment_cache_key(
+                        config.alignment_model,
+                        profile_text,
+                        "POI",
+                        semantic_cluster,
+                        text,
+                    )
                     pairs.append((key, query, text))
 
         cache = score_cached_alignment_pairs(
@@ -608,7 +552,13 @@ def score_poi_semantic_alignment(
                 for activity_idx in poi_data.mask_activities[start:end]:
                     activity = catalog[int(activity_idx)]
                     text = _activity_text(activity)
-                    key = _poi_cache_key(config.alignment_model, profile_text, semantic_cluster, text)
+                    key = alignment_cache_key(
+                        config.alignment_model,
+                        profile_text,
+                        "POI",
+                        semantic_cluster,
+                        text,
+                    )
                     score = float(cache[key])
                     scores[cluster_id, semantic_cluster_id, int(activity_idx)] = score
                     rows.append(

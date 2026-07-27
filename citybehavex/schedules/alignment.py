@@ -14,45 +14,9 @@ from citybehavex.llm_diaries import Diary
 from citybehavex.schedules.config import ScheduleConfig
 from citybehavex.utils.alignment import (
     alignment_cache_key,
-    extract_rerank_scores,
     post_rerank_scores,
 )
 from citybehavex.utils.cache import load_score_cache, save_score_cache
-
-
-def _cache_key(model: str | None, profile_text: str, diary_text: str) -> str:
-    return alignment_cache_key(model, profile_text, diary_text)
-
-
-def _load_cache(path: Path) -> dict[str, float]:
-    return load_score_cache(path)
-
-
-def _save_cache(path: Path, cache: dict[str, float]) -> None:
-    save_score_cache(path, cache)
-
-
-def _extract_scores(payload: object, expected: int) -> Optional[list[float]]:
-    return extract_rerank_scores(payload, expected)
-
-
-def _post_rerank(
-    base_url: str,
-    model: str | None,
-    query: str,
-    texts: Sequence[str],
-    *,
-    timeout: float,
-) -> Optional[list[float]]:
-    return post_rerank_scores(
-        base_url,
-        model,
-        query,
-        texts,
-        timeout=timeout,
-        retries=1,
-        requests_module=requests,
-    )
 
 
 def _rerank_chunk_with_retries(
@@ -98,13 +62,13 @@ def score_alignment_matrix(
     cache: dict[str, float] = {}
     cache_path = Path(config.alignment_cache_path) if config.alignment_cache_path else None
     if cache_path is not None:
-        cache = _load_cache(cache_path)
+        cache = load_score_cache(cache_path)
 
     matrix = np.empty((len(profile_texts), len(diary_texts)), dtype=np.float64)
     start_time = time.perf_counter()
 
     row_keys = [
-        [_cache_key(config.alignment_model, profile_text, text) for text in diary_texts]
+        [alignment_cache_key(config.alignment_model, profile_text, text) for text in diary_texts]
         for profile_text in profile_texts
     ]
     work_items: list[tuple[int, list[int]]] = []
@@ -140,7 +104,7 @@ def score_alignment_matrix(
         if progress_callback is not None:
             progress_callback(done_rows, total_rows, time.perf_counter() - start_time)
         if cache_path is not None and checkpoint_every > 0 and done_rows % checkpoint_every == 0:
-            _save_cache(cache_path, cache)
+            save_score_cache(cache_path, cache)
 
     try:
         with ThreadPoolExecutor(max_workers=max(config.alignment_concurrency, 1)) as executor:
@@ -153,7 +117,7 @@ def score_alignment_matrix(
                 _apply(row, chunk_idx, scores)
     except Exception:  # noqa: BLE001 - callers intentionally fall back.
         if cache_path is not None:
-            _save_cache(cache_path, cache)
+            save_score_cache(cache_path, cache)
         return None
 
     if progress_callback is not None and done_rows < total_rows:
@@ -163,5 +127,5 @@ def score_alignment_matrix(
         matrix[row] = [cache[key] for key in keys]
 
     if cache_path is not None:
-        _save_cache(cache_path, cache)
+        save_score_cache(cache_path, cache)
     return np.clip(matrix, 0.0, 1.0)

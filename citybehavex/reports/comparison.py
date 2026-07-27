@@ -443,14 +443,6 @@ def _trajectory_od_matrix(
     return result.pivot(on="destination", index="origin", values="count").fill_null(0.0)
 
 
-def _common_part_of_commuters(
-    traj: fastmob.TrajDataFrame,
-    real_traj: fastmob.TrajDataFrame,
-    resolutions: tuple[int, ...] = CPC_H3_RESOLUTIONS,
-) -> list[tuple[int, float]]:
-    return trajectory_common_part_of_commuters_multi(traj, real_traj, resolutions=resolutions)
-
-
 def _h3_cells(lat: pl.Series, lng: pl.Series, resolution: int) -> pl.Series:
     """Vectorized lat/lng -> H3 cell index, via fastmob's Rust-accelerated
     ``latlng_to_h3`` instead of a per-row ``h3.latlng_to_cell`` Python loop --
@@ -1384,7 +1376,11 @@ def generate_comparison_report(
 
     if "cpc" in enabled_sections:
         typer.echo("Computing Common Part of Commuters ...")
-        cpc_rows = _common_part_of_commuters(traj, real_traj)
+        cpc_rows = trajectory_common_part_of_commuters_multi(
+            traj,
+            real_traj,
+            resolutions=CPC_H3_RESOLUTIONS,
+        )
     else:
         cpc_rows = []
     metrics["cpc"] = {f"h3_{resolution}": value for resolution, value in cpc_rows}

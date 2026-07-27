@@ -32,20 +32,6 @@ OWNERSHIP_QUERY_INSTRUCTION = (
 )
 
 
-def _query_text(profile_text: str, city_profile: str | None) -> str:
-    return alignment_query_text(profile_text, city_profile, OWNERSHIP_QUERY_INSTRUCTION)
-
-
-def _cache_key(
-    model: str | None,
-    profile_text: str,
-    city_profile: str | None,
-    vehicle: str,
-    candidate_text: str,
-) -> str:
-    return alignment_cache_key(model, profile_text, city_profile, vehicle, candidate_text)
-
-
 def score_vehicle_ownership_alignment(
     cluster_narratives: Sequence[str],
     config: AgentProfilesConfig,
@@ -70,9 +56,9 @@ def score_vehicle_ownership_alignment(
     try:
         pairs: list[tuple[str, str, str]] = []
         for profile_text in cluster_narratives:
-            query = _query_text(profile_text, city_profile)
+            query = alignment_query_text(profile_text, city_profile, OWNERSHIP_QUERY_INSTRUCTION)
             for vehicle, candidate_text in VEHICLE_CANDIDATES:
-                key = _cache_key(
+                key = alignment_cache_key(
                     config.ownership_alignment_model,
                     profile_text,
                     city_profile,
@@ -96,9 +82,9 @@ def score_vehicle_ownership_alignment(
         )
 
         for cluster_id, profile_text in enumerate(cluster_narratives):
-            query = _query_text(profile_text, city_profile)
+            query = alignment_query_text(profile_text, city_profile, OWNERSHIP_QUERY_INSTRUCTION)
             for vehicle_idx, (vehicle, candidate_text) in enumerate(VEHICLE_CANDIDATES):
-                key = _cache_key(
+                key = alignment_cache_key(
                     config.ownership_alignment_model,
                     profile_text,
                     city_profile,

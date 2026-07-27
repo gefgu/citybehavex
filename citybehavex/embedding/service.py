@@ -72,14 +72,6 @@ def _cache_key(text: str, model: str, dim: int) -> str:
     return digest
 
 
-def _load_cache(cache_path: Path) -> dict[str, np.ndarray]:
-    return load_vector_cache(cache_path)
-
-
-def _save_cache(cache_path: Path, cache: dict[str, np.ndarray]) -> None:
-    save_vector_cache(cache_path, cache)
-
-
 def _server_reachable(base_url: str, timeout: float) -> bool:
     for path in ("/health", "/v1/models"):
         try:
@@ -191,7 +183,7 @@ def embed_texts(
     keys = [_cache_key(t, config.model, config.dimensions) for t in prefixed]
 
     cache_path = Path(config.resolved_cache_path())
-    cache = _load_cache(cache_path)
+    cache = load_vector_cache(cache_path)
 
     missing_idx = [i for i, k in enumerate(keys) if k not in cache]
     if missing_idx:
@@ -229,7 +221,7 @@ def embed_texts(
         computed = _finalize(computed, config.dimensions)
         for slot, vec in zip(missing_idx, computed):
             cache[keys[slot]] = vec
-        _save_cache(cache_path, cache)
+        save_vector_cache(cache_path, cache)
 
     return np.stack([cache[k] for k in keys]).astype(np.float32)
 

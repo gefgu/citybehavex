@@ -24,19 +24,6 @@ COHERENCE_QUERY_INSTRUCTION = (
 )
 
 
-def _query_text(profile_text: str, city_profile: str | None) -> str:
-    return alignment_query_text(profile_text, city_profile, COHERENCE_QUERY_INSTRUCTION)
-
-
-def _cache_key(
-    model: str | None,
-    profile_text: str,
-    city_profile: str | None,
-    candidate_text: str,
-) -> str:
-    return alignment_cache_key(model, profile_text, city_profile, candidate_text)
-
-
 def score_profile_coherence_alignment(
     cluster_narratives: Sequence[str],
     config: AgentProfilesConfig,
@@ -57,8 +44,8 @@ def score_profile_coherence_alignment(
     try:
         pairs: list[tuple[str, str, str]] = []
         for profile_text in cluster_narratives:
-            query = _query_text(profile_text, city_profile)
-            key = _cache_key(
+            query = alignment_query_text(profile_text, city_profile, COHERENCE_QUERY_INSTRUCTION)
+            key = alignment_cache_key(
                 config.coherence_alignment_model,
                 profile_text,
                 city_profile,
@@ -81,8 +68,8 @@ def score_profile_coherence_alignment(
         )
 
         for cluster_id, profile_text in enumerate(cluster_narratives):
-            query = _query_text(profile_text, city_profile)
-            key = _cache_key(
+            query = alignment_query_text(profile_text, city_profile, COHERENCE_QUERY_INSTRUCTION)
+            key = alignment_cache_key(
                 config.coherence_alignment_model,
                 profile_text,
                 city_profile,
