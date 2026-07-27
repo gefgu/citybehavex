@@ -1,11 +1,11 @@
-use rand::{Rng, SeedableRng};
-use rand_xoshiro::Xoshiro256PlusPlus;
-use rayon::prelude::*;
-use rustc_hash::{FxHashMap, FxHashSet};
 use fastmob_core::models::od::{CachedGravityOdRows, validate_equal_lengths};
 use fastmob_core::models::shared::derive_agent_seed;
 use fastmob_core::network::road_graph::{RoadGraph, subsample_waypoints};
 use fastmob_core::utils::haversine::haversine_km;
+use rand::{Rng, SeedableRng};
+use rand_xoshiro::Xoshiro256PlusPlus;
+use rayon::prelude::*;
+use rustc_hash::{FxHashMap, FxHashSet};
 use std::collections::VecDeque;
 
 use crate::simulation_core::activity::{

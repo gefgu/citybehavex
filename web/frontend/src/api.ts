@@ -1,6 +1,6 @@
 // Thin fetch wrapper. Every backend response is `{ data: ... }`; we return `data`.
 // In static-demo builds, selected API calls are resolved from JSON files emitted
-// by scripts/export_static_web_demo.py instead of a live FastAPI backend.
+// by cargo run -p citybehavex-web --bin export_static_demo instead of a live legacy FastAPI backend.
 
 const STATIC_DEMO = import.meta.env.VITE_STATIC_DEMO === "true";
 const STATIC_ROOT = `${import.meta.env.BASE_URL.replace(/\/?$/, "/")}demo-data`;
@@ -634,7 +634,7 @@ export function fetchTimelineAgentSocial(
   );
 }
 
-// ---- payload types (mirrors web/backend/app/payload.py) ----
+// ---- payload types (mirrors legacy Python backend/payload.py) ----
 export interface SeriesPoints {
   name: string;
   role: string;
@@ -845,7 +845,7 @@ export interface ChartPayload {
 
 // network_validation is fetched separately (its own endpoint/cache entry)
 // so its build time doesn't block first paint of the rest of the charts --
-// see fetchNetworkValidation below and web/backend/app/api/charts.py's
+// see fetchNetworkValidation below and legacy Python backend/api/charts.py's
 // /network-validation route.
 export interface NetworkValidationResponse {
   run_id: string;

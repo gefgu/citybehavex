@@ -6,8 +6,8 @@ on:
     branches: [main]
     paths:
       - "web/frontend/**"
+      - "web/backend/**"
       - "web/demo_export.yaml"
-      - "scripts/export_static_web_demo.py"
       - ".github/workflows/static-demo-pages.yml"
 
 permissions:
