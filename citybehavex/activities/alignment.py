@@ -1,11 +1,8 @@
 from __future__ import annotations
 
-import hashlib
-import os
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Optional, Sequence
+from typing import Optional, Sequence
 
 import numpy as np
 import pandas as pd
@@ -19,7 +16,15 @@ from citybehavex.activities.poi_semantic import (
     example_categories_by_semantic_cluster,
 )
 from citybehavex.llm_diaries import Diary
-from citybehavex.utils import ProgressReporter
+from citybehavex.utils.alignment import (
+    alignment_cache_key,
+    extract_rerank_scores,
+    post_pair_scores,
+    post_rerank_scores,
+    score_cached_alignment_pairs,
+    score_chunk_with_retries,
+)
+from citybehavex.utils.cache import load_score_cache, save_score_cache
 
 START_PREVIOUS_ACTIVITY = -1
 
@@ -212,12 +217,17 @@ def _cache_key(
     previous: int,
     activity_text: str,
 ) -> str:
-    raw = (
-        f"{model or ''}\x00{profile_text}\x00{block.diary_id}\x00"
-        f"{block.episode_index}\x00{block.purpose}\x00{block.start}\x00"
-        f"{block.end}\x00{previous}\x00{activity_text}"
+    return alignment_cache_key(
+        model,
+        profile_text,
+        block.diary_id,
+        str(block.episode_index),
+        block.purpose,
+        block.start,
+        block.end,
+        str(previous),
+        activity_text,
     )
-    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
 def _period_cache_key(
@@ -228,11 +238,15 @@ def _period_cache_key(
     previous: int,
     activity_text: str,
 ) -> str:
-    raw = (
-        f"{model or ''}\x00{profile_text}\x00PERIOD_BLOCK\x00{purpose}\x00"
-        f"{period_index}\x00{previous}\x00{activity_text}"
+    return alignment_cache_key(
+        model,
+        profile_text,
+        "PERIOD_BLOCK",
+        purpose,
+        str(period_index),
+        str(previous),
+        activity_text,
     )
-    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
 def _poi_query_text(
@@ -255,8 +269,7 @@ def _poi_cache_key(
     semantic_cluster: str,
     activity_text: str,
 ) -> str:
-    raw = f"{model or ''}\x00{profile_text}\x00POI\x00{semantic_cluster}\x00{activity_text}"
-    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+    return alignment_cache_key(model, profile_text, "POI", semantic_cluster, activity_text)
 
 
 def _poi_type_query_text(profile_text: str, block: ActivityBlock) -> str:
@@ -279,79 +292,29 @@ def _poi_type_cache_key(
     block: ActivityBlock,
     semantic_cluster: str,
 ) -> str:
-    raw = (
-        f"{model or ''}\x00{profile_text}\x00POI_TYPE\x00{block.diary_id}\x00"
-        f"{block.episode_index}\x00{block.purpose}\x00{block.start}\x00"
-        f"{block.end}\x00{semantic_cluster}"
+    return alignment_cache_key(
+        model,
+        profile_text,
+        "POI_TYPE",
+        block.diary_id,
+        str(block.episode_index),
+        block.purpose,
+        block.start,
+        block.end,
+        semantic_cluster,
     )
-    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
 def _load_cache(path: Path) -> dict[str, float]:
-    if not path.exists():
-        return {}
-    try:
-        data = np.load(path, allow_pickle=False)
-        keys = data["keys"]
-        scores = data["scores"]
-    except Exception:  # noqa: BLE001 - corrupt cache should not break a run.
-        return {}
-    return {str(k): float(scores[i]) for i, k in enumerate(keys)}
+    return load_score_cache(path)
 
 
 def _save_cache(path: Path, cache: dict[str, float]) -> None:
-    """Write the cache atomically: a crash or interrupt mid-write must never
-    leave `path` holding a truncated/corrupt ``.npz``, since it's reused
-    across runs."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    keys = np.array(list(cache.keys()))
-    scores = np.array([cache[k] for k in cache], dtype=np.float32)
-    # Write via an explicit file handle (rather than a bare path) so numpy
-    # doesn't append its own ".npz" suffix to the temp name, which would
-    # break the atomic rename below.
-    tmp_path = path.parent / (path.name + ".tmp")
-    try:
-        with open(tmp_path, "wb") as fh:
-            np.savez(fh, keys=keys, scores=scores)
-        os.replace(tmp_path, path)
-    except BaseException:
-        tmp_path.unlink(missing_ok=True)
-        raise
+    save_score_cache(path, cache)
 
 
-def _extract_scores(payload: Any, expected: int) -> Optional[list[float]]:
-    rows: Any
-    if isinstance(payload, dict):
-        rows = (
-            payload.get("data")
-            or payload.get("results")
-            or payload.get("scores")
-            or payload.get("rerank")
-        )
-    else:
-        rows = payload
-    if rows is None:
-        return None
-    if isinstance(rows, list) and all(isinstance(x, (int, float)) for x in rows):
-        if len(rows) != expected:
-            return None
-        return [float(x) for x in rows]
-    if isinstance(rows, list) and all(isinstance(x, dict) for x in rows):
-        scores = [0.0] * expected
-        seen = set()
-        for pos, row in enumerate(rows):
-            idx = int(row.get("index", row.get("corpus_id", pos)))
-            if idx < 0 or idx >= expected:
-                return None
-            raw_score = row.get("score", row.get("relevance_score"))
-            if raw_score is None:
-                return None
-            scores[idx] = float(raw_score)
-            seen.add(idx)
-        if len(seen) != expected:
-            return None
-        return scores
-    return None
+def _extract_scores(payload: object, expected: int) -> Optional[list[float]]:
+    return extract_rerank_scores(payload, expected)
 
 
 def _post_rerank(
@@ -362,22 +325,15 @@ def _post_rerank(
     *,
     timeout: float,
 ) -> Optional[list[float]]:
-    payload: dict[str, Any] = {
-        "query": query,
-        "texts": list(texts),
-        "raw_scores": False,
-        "truncate": True,
-    }
-    if model:
-        payload["model"] = model
-    resp = requests.post(
-        base_url.rstrip("/") + "/rerank",
-        headers={"Content-Type": "application/json"},
-        json=payload,
+    return post_rerank_scores(
+        base_url,
+        model,
+        query,
+        texts,
         timeout=timeout,
+        retries=1,
+        requests_module=requests,
     )
-    resp.raise_for_status()
-    return _extract_scores(resp.json(), len(texts))
 
 
 def _post_pair_scores(
@@ -387,21 +343,14 @@ def _post_pair_scores(
     *,
     timeout: float,
 ) -> Optional[list[float]]:
-    payload: dict[str, Any] = {
-        "pairs": [[query, text] for query, text in pairs],
-        "raw_scores": False,
-        "truncate": True,
-    }
-    if model:
-        payload["model"] = model
-    resp = requests.post(
-        base_url.rstrip("/") + "/score_pairs",
-        headers={"Content-Type": "application/json"},
-        json=payload,
+    return post_pair_scores(
+        base_url,
+        model,
+        pairs,
         timeout=timeout,
+        retries=1,
+        requests_module=requests,
     )
-    resp.raise_for_status()
-    return _extract_scores(resp.json(), len(pairs))
 
 
 def _score_chunk_with_retries(
@@ -412,21 +361,14 @@ def _score_chunk_with_retries(
     timeout: float,
     retries: int,
 ) -> list[float]:
-    """Score one batch, retrying transient failures. Raises (rather than
-    returning ``None``) once retries are exhausted, so callers' existing
-    broad ``except Exception: return None`` fallback still applies."""
-    last_error: Exception | None = None
-    for _attempt in range(max(1, retries)):
-        try:
-            scores = _post_pair_scores(base_url, model, pairs, timeout=timeout)
-        except Exception as exc:  # noqa: BLE001 - retry, raise on exhaustion.
-            last_error = exc
-            continue
-        if scores is None:
-            last_error = ValueError("reranker response could not be parsed")
-            continue
-        return scores
-    raise RuntimeError(f"failed to score a batch of {len(pairs)} pairs") from last_error
+    return score_chunk_with_retries(
+        base_url,
+        model,
+        pairs,
+        timeout=timeout,
+        retries=retries,
+        requests_module=requests,
+    )
 
 
 def score_activity_alignment(
@@ -462,11 +404,6 @@ def score_activity_alignment(
         dtype=np.float64,
     )
     rows: list[dict[str, object]] = []
-
-    cache: dict[str, float] = {}
-    cache_path = Path(config.alignment_cache_path) if config.alignment_cache_path else None
-    if cache_path is not None:
-        cache = _load_cache(cache_path)
 
     # A block's true previous activity is whichever activity the agent last
     # performed, which is always either START (nothing simulated yet) or an
@@ -521,9 +458,8 @@ def score_activity_alignment(
     }
 
     try:
-        pending: list[tuple[str, str, str]] = []
-        pending_seen: set[str] = set()
-        for cluster_id, profile_text in enumerate(cluster_narratives):
+        pairs: list[tuple[str, str, str]] = []
+        for profile_text in cluster_narratives:
             for purpose, period_index in sorted(group_previous_candidates):
                 eligible = [
                     activity.idx
@@ -542,76 +478,21 @@ def score_activity_alignment(
                             previous,
                             text,
                         )
-                        if key in cache or key in pending_seen:
-                            continue
-                        pending_seen.add(key)
-                        pending.append((key, query, text))
+                        pairs.append((key, query, text))
 
-        chunks = [
-            pending[start : start + config.alignment_batch_size]
-            for start in range(0, len(pending), config.alignment_batch_size)
-        ]
-        total_chunks = len(chunks)
-        total_pairs = len(pending)
-        checkpoint_every = config.alignment_checkpoint_every
-
-        def _apply_chunk_scores(chunk: list[tuple[str, str, str]], chunk_scores: list[float]) -> None:
-            for (key, _query, _text), score in zip(chunk, chunk_scores):
-                cache[key] = float(np.clip(score, 0.0, 1.0))
-
-        progress = ProgressReporter(
-            "Activity alignment",
-            total_pairs,
-            "pairs",
-            rate_precision=0,
-            checkpoint_every=checkpoint_every,
-            emit=lambda message: print(message, flush=True),
-            on_report=(lambda: _save_cache(cache_path, cache)) if cache_path is not None else None,
+        cache = score_cached_alignment_pairs(
+            pairs,
+            base_url=config.alignment_base_url,
+            model=config.alignment_model,
+            batch_size=config.alignment_batch_size,
+            cache_path=config.alignment_cache_path,
+            concurrency=config.alignment_concurrency,
+            timeout_seconds=config.alignment_timeout_seconds,
+            retries=config.alignment_retries,
+            checkpoint_every=config.alignment_checkpoint_every,
+            progress_label="Activity alignment",
+            score_chunk=_score_chunk_with_retries,
         )
-
-        if config.alignment_concurrency <= 1:
-            done_pairs = 0
-            for done_chunks, chunk in enumerate(chunks, start=1):
-                chunk_scores = _score_chunk_with_retries(
-                    config.alignment_base_url,
-                    config.alignment_model,
-                    [(query, text) for _key, query, text in chunk],
-                    timeout=config.alignment_timeout_seconds,
-                    retries=config.alignment_retries,
-                )
-                _apply_chunk_scores(chunk, chunk_scores)
-                done_pairs += len(chunk)
-                progress.report(
-                    done_pairs,
-                    checkpoint_count=done_chunks,
-                    done_batches=done_chunks,
-                    total_batches=total_chunks,
-                )
-        else:
-            done_pairs = 0
-            with ThreadPoolExecutor(max_workers=config.alignment_concurrency) as executor:
-                futures = {
-                    executor.submit(
-                        _score_chunk_with_retries,
-                        config.alignment_base_url,
-                        config.alignment_model,
-                        [(query, text) for _key, query, text in chunk],
-                        timeout=config.alignment_timeout_seconds,
-                        retries=config.alignment_retries,
-                    ): chunk
-                    for chunk in chunks
-                }
-                for done_chunks, future in enumerate(as_completed(futures), start=1):
-                    chunk = futures[future]
-                    chunk_scores = future.result()
-                    _apply_chunk_scores(chunk, chunk_scores)
-                    done_pairs += len(chunk)
-                    progress.report(
-                        done_pairs,
-                        checkpoint_count=done_chunks,
-                        done_batches=done_chunks,
-                        total_batches=total_chunks,
-                    )
 
         for cluster_id, profile_text in enumerate(cluster_narratives):
             for block, eligible, previous_candidates, period_index in zip(
@@ -653,8 +534,6 @@ def score_activity_alignment(
     except Exception:  # noqa: BLE001 - callers intentionally fall back.
         return None
 
-    if cache_path is not None:
-        _save_cache(cache_path, cache)
     return np.clip(scores, 0.0, 1.0), blocks, pd.DataFrame(rows)
 
 
@@ -689,14 +568,8 @@ def score_poi_semantic_alignment(
         if cluster in examples_by_cluster and len(examples_by_cluster[cluster]) < 12:
             examples_by_cluster[cluster].append(category)
 
-    cache: dict[str, float] = {}
-    cache_path = Path(config.alignment_cache_path) if config.alignment_cache_path else None
-    if cache_path is not None:
-        cache = _load_cache(cache_path)
-
     try:
-        pending: list[tuple[str, str, str]] = []
-        pending_seen: set[str] = set()
+        pairs: list[tuple[str, str, str]] = []
         for profile_text in cluster_narratives:
             for semantic_cluster_id, semantic_cluster in enumerate(poi_data.semantic_clusters):
                 start = int(poi_data.mask_starts[semantic_cluster_id])
@@ -712,76 +585,21 @@ def score_poi_semantic_alignment(
                 for activity_idx in allowed:
                     text = _activity_text(catalog[int(activity_idx)])
                     key = _poi_cache_key(config.alignment_model, profile_text, semantic_cluster, text)
-                    if key in cache or key in pending_seen:
-                        continue
-                    pending_seen.add(key)
-                    pending.append((key, query, text))
+                    pairs.append((key, query, text))
 
-        chunks = [
-            pending[start : start + config.alignment_batch_size]
-            for start in range(0, len(pending), config.alignment_batch_size)
-        ]
-        total_chunks = len(chunks)
-        total_pairs = len(pending)
-        checkpoint_every = config.alignment_checkpoint_every
-
-        def _apply_chunk_scores(chunk: list[tuple[str, str, str]], chunk_scores: list[float]) -> None:
-            for (key, _query, _text), score in zip(chunk, chunk_scores):
-                cache[key] = float(np.clip(score, 0.0, 1.0))
-
-        progress = ProgressReporter(
-            "POI activity alignment",
-            total_pairs,
-            "pairs",
-            rate_precision=0,
-            checkpoint_every=checkpoint_every,
-            emit=lambda message: print(message, flush=True),
-            on_report=(lambda: _save_cache(cache_path, cache)) if cache_path is not None else None,
+        cache = score_cached_alignment_pairs(
+            pairs,
+            base_url=config.alignment_base_url,
+            model=config.alignment_model,
+            batch_size=config.alignment_batch_size,
+            cache_path=config.alignment_cache_path,
+            concurrency=config.alignment_concurrency,
+            timeout_seconds=config.alignment_timeout_seconds,
+            retries=config.alignment_retries,
+            checkpoint_every=config.alignment_checkpoint_every,
+            progress_label="POI activity alignment",
+            score_chunk=_score_chunk_with_retries,
         )
-
-        if config.alignment_concurrency <= 1:
-            done_pairs = 0
-            for done_chunks, chunk in enumerate(chunks, start=1):
-                chunk_scores = _score_chunk_with_retries(
-                    config.alignment_base_url,
-                    config.alignment_model,
-                    [(query, text) for _key, query, text in chunk],
-                    timeout=config.alignment_timeout_seconds,
-                    retries=config.alignment_retries,
-                )
-                _apply_chunk_scores(chunk, chunk_scores)
-                done_pairs += len(chunk)
-                progress.report(
-                    done_pairs,
-                    checkpoint_count=done_chunks,
-                    done_batches=done_chunks,
-                    total_batches=total_chunks,
-                )
-        else:
-            done_pairs = 0
-            with ThreadPoolExecutor(max_workers=config.alignment_concurrency) as executor:
-                futures = {
-                    executor.submit(
-                        _score_chunk_with_retries,
-                        config.alignment_base_url,
-                        config.alignment_model,
-                        [(query, text) for _key, query, text in chunk],
-                        timeout=config.alignment_timeout_seconds,
-                        retries=config.alignment_retries,
-                    ): chunk
-                    for chunk in chunks
-                }
-                for done_chunks, future in enumerate(as_completed(futures), start=1):
-                    chunk = futures[future]
-                    chunk_scores = future.result()
-                    _apply_chunk_scores(chunk, chunk_scores)
-                    done_pairs += len(chunk)
-                    progress.report(
-                        done_pairs,
-                        checkpoint_count=done_chunks,
-                        done_batches=done_chunks,
-                        total_batches=total_chunks,
-                    )
 
         for cluster_id, profile_text in enumerate(cluster_narratives):
             for semantic_cluster_id, semantic_cluster in enumerate(poi_data.semantic_clusters):
@@ -806,8 +624,6 @@ def score_poi_semantic_alignment(
     except Exception:  # noqa: BLE001 - callers intentionally fall back.
         return None
 
-    if cache_path is not None:
-        _save_cache(cache_path, cache)
     return np.clip(scores, 0.0, 1.0), pd.DataFrame(rows)
 
 
@@ -851,14 +667,8 @@ def score_poi_type_alignment(
     if not cluster_ids:
         return None
 
-    cache: dict[str, float] = {}
-    cache_path = Path(config.alignment_cache_path) if config.alignment_cache_path else None
-    if cache_path is not None:
-        cache = _load_cache(cache_path)
-
     try:
-        pending: list[tuple[str, str, str]] = []
-        pending_seen: set[str] = set()
+        pairs: list[tuple[str, str, str]] = []
         for profile_text in cluster_narratives:
             for block in blocks:
                 if block.purpose != "OTHER":
@@ -876,76 +686,21 @@ def score_poi_type_alignment(
                         block,
                         semantic_cluster,
                     )
-                    if key in cache or key in pending_seen:
-                        continue
-                    pending_seen.add(key)
-                    pending.append((key, query, text))
+                    pairs.append((key, query, text))
 
-        chunks = [
-            pending[start : start + config.alignment_batch_size]
-            for start in range(0, len(pending), config.alignment_batch_size)
-        ]
-        total_chunks = len(chunks)
-        total_pairs = len(pending)
-        checkpoint_every = config.alignment_checkpoint_every
-
-        def _apply_chunk_scores(chunk: list[tuple[str, str, str]], chunk_scores: list[float]) -> None:
-            for (key, _query, _text), score in zip(chunk, chunk_scores):
-                cache[key] = float(np.clip(score, 0.0, 1.0))
-
-        progress = ProgressReporter(
-            "POI type alignment",
-            total_pairs,
-            "pairs",
-            rate_precision=0,
-            checkpoint_every=checkpoint_every,
-            emit=lambda message: print(message, flush=True),
-            on_report=(lambda: _save_cache(cache_path, cache)) if cache_path is not None else None,
+        cache = score_cached_alignment_pairs(
+            pairs,
+            base_url=config.alignment_base_url,
+            model=config.alignment_model,
+            batch_size=config.alignment_batch_size,
+            cache_path=config.alignment_cache_path,
+            concurrency=config.alignment_concurrency,
+            timeout_seconds=config.alignment_timeout_seconds,
+            retries=config.alignment_retries,
+            checkpoint_every=config.alignment_checkpoint_every,
+            progress_label="POI type alignment",
+            score_chunk=_score_chunk_with_retries,
         )
-
-        if config.alignment_concurrency <= 1:
-            done_pairs = 0
-            for done_chunks, chunk in enumerate(chunks, start=1):
-                chunk_scores = _score_chunk_with_retries(
-                    config.alignment_base_url,
-                    config.alignment_model,
-                    [(query, text) for _key, query, text in chunk],
-                    timeout=config.alignment_timeout_seconds,
-                    retries=config.alignment_retries,
-                )
-                _apply_chunk_scores(chunk, chunk_scores)
-                done_pairs += len(chunk)
-                progress.report(
-                    done_pairs,
-                    checkpoint_count=done_chunks,
-                    done_batches=done_chunks,
-                    total_batches=total_chunks,
-                )
-        else:
-            done_pairs = 0
-            with ThreadPoolExecutor(max_workers=config.alignment_concurrency) as executor:
-                futures = {
-                    executor.submit(
-                        _score_chunk_with_retries,
-                        config.alignment_base_url,
-                        config.alignment_model,
-                        [(query, text) for _key, query, text in chunk],
-                        timeout=config.alignment_timeout_seconds,
-                        retries=config.alignment_retries,
-                    ): chunk
-                    for chunk in chunks
-                }
-                for done_chunks, future in enumerate(as_completed(futures), start=1):
-                    chunk = futures[future]
-                    chunk_scores = future.result()
-                    _apply_chunk_scores(chunk, chunk_scores)
-                    done_pairs += len(chunk)
-                    progress.report(
-                        done_pairs,
-                        checkpoint_count=done_chunks,
-                        done_batches=done_chunks,
-                        total_batches=total_chunks,
-                    )
 
         for cluster_id, profile_text in enumerate(cluster_narratives):
             for block in blocks:
@@ -978,6 +733,4 @@ def score_poi_type_alignment(
     except Exception:  # noqa: BLE001 - callers intentionally fall back.
         return None
 
-    if cache_path is not None:
-        _save_cache(cache_path, cache)
     return np.clip(scores, 0.0, 1.0), blocks, pd.DataFrame(rows)
