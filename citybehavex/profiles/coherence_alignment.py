@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import hashlib
-import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Sequence
@@ -11,12 +10,12 @@ import pandas as pd
 
 from citybehavex.activities.alignment import (
     ProfileClusters,
-    _format_duration,
     _load_cache,
     _save_cache,
     _score_chunk_with_retries,
 )
 from citybehavex.profiles.config import AgentProfilesConfig
+from citybehavex.utils import ProgressReporter
 
 COHERENCE_CANDIDATE_TEXT = "demographically coherent and valid synthetic agent profile"
 
@@ -88,28 +87,21 @@ def score_profile_coherence_alignment(
         ]
         total_chunks = len(chunks)
         total_pairs = len(pending)
-        start_time = time.perf_counter()
         checkpoint_every = config.coherence_alignment_checkpoint_every
 
         def _apply_chunk_scores(chunk: list[tuple[str, str, str]], chunk_scores: list[float]) -> None:
             for (key, _query, _text), score in zip(chunk, chunk_scores):
                 cache[key] = float(np.clip(score, 0.0, 1.0))
 
-        def _report_progress(done_chunks: int, done_pairs: int) -> None:
-            if checkpoint_every <= 0 or done_chunks % checkpoint_every != 0:
-                return
-            elapsed = time.perf_counter() - start_time
-            rate = done_pairs / elapsed if elapsed > 0 else 0.0
-            remaining_pairs = total_pairs - done_pairs
-            eta = remaining_pairs / rate if rate > 0 else float("nan")
-            print(
-                f"Profile coherence alignment: {done_chunks}/{total_chunks} batches, "
-                f"{done_pairs}/{total_pairs} pairs, {rate:.0f} pairs/sec, "
-                f"{elapsed:.1f}s elapsed, ETA {_format_duration(eta)}",
-                flush=True,
-            )
-            if cache_path is not None:
-                _save_cache(cache_path, cache)
+        progress = ProgressReporter(
+            "Profile coherence alignment",
+            total_pairs,
+            "pairs",
+            rate_precision=0,
+            checkpoint_every=checkpoint_every,
+            emit=lambda message: print(message, flush=True),
+            on_report=(lambda: _save_cache(cache_path, cache)) if cache_path is not None else None,
+        )
 
         if config.coherence_alignment_concurrency <= 1:
             done_pairs = 0
@@ -123,7 +115,12 @@ def score_profile_coherence_alignment(
                 )
                 _apply_chunk_scores(chunk, chunk_scores)
                 done_pairs += len(chunk)
-                _report_progress(done_chunks, done_pairs)
+                progress.report(
+                    done_pairs,
+                    checkpoint_count=done_chunks,
+                    done_batches=done_chunks,
+                    total_batches=total_chunks,
+                )
         else:
             done_pairs = 0
             with ThreadPoolExecutor(max_workers=config.coherence_alignment_concurrency) as executor:
@@ -143,7 +140,12 @@ def score_profile_coherence_alignment(
                     chunk_scores = future.result()
                     _apply_chunk_scores(chunk, chunk_scores)
                     done_pairs += len(chunk)
-                    _report_progress(done_chunks, done_pairs)
+                    progress.report(
+                        done_pairs,
+                        checkpoint_count=done_chunks,
+                        done_batches=done_chunks,
+                        total_batches=total_chunks,
+                    )
 
         for cluster_id, profile_text in enumerate(cluster_narratives):
             query = _query_text(profile_text, city_profile)
