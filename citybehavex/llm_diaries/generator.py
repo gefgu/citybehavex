@@ -153,14 +153,23 @@ def fetch_diary_batch(
                 for diary_number, location_count in wave
             }
             wave_results: dict[int, tuple[int, Diary]] = {}
-            if config.concurrency <= 1:
-                for diary_number, location_count in wave:
+            with ThreadPoolExecutor(max_workers=max(config.concurrency, 1)) as executor:
+                futures = {
+                    executor.submit(
+                        generate_one,
+                        diary_number,
+                        location_count,
+                        snapshots[diary_number],
+                    ): (diary_number, location_count)
+                    for diary_number, location_count in wave
+                }
+                for future in as_completed(futures):
+                    diary_number, location_count = futures[future]
                     try:
-                        diary = generate_one(diary_number, location_count, snapshots[diary_number])
+                        wave_results[diary_number] = (location_count, future.result())
                     except Exception as exc:  # noqa: BLE001
                         last_error = exc
                         break
-                    wave_results[diary_number] = (location_count, diary)
                     if progress_callback is not None:
                         progress_callback(
                             variant,
@@ -168,31 +177,6 @@ def fetch_diary_batch(
                             config.diary_count,
                             stats or LLMStats(),
                         )
-            else:
-                with ThreadPoolExecutor(max_workers=config.concurrency) as executor:
-                    futures = {
-                        executor.submit(
-                            generate_one,
-                            diary_number,
-                            location_count,
-                            snapshots[diary_number],
-                        ): (diary_number, location_count)
-                        for diary_number, location_count in wave
-                    }
-                    for future in as_completed(futures):
-                        diary_number, location_count = futures[future]
-                        try:
-                            wave_results[diary_number] = (location_count, future.result())
-                        except Exception as exc:  # noqa: BLE001
-                            last_error = exc
-                            break
-                        if progress_callback is not None:
-                            progress_callback(
-                                variant,
-                                len(diaries) + len(wave_results),
-                                config.diary_count,
-                                stats or LLMStats(),
-                            )
             if last_error is not None:
                 break
             for diary_number in sorted(wave_results):

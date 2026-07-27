@@ -242,17 +242,9 @@ def label_pairs(
             f"failed to label profile={pair.profile_uid} diary={pair.diary_id}: {last_error}"
         ) from last_error
 
-    if concurrency <= 1:
-        rows = []
-        for idx, pair in enumerate(pairs, start=1):
-            rows.append(score_pair(pair))
-            if progress_interval > 0 and idx % progress_interval == 0:
-                print(f"Labeled {idx}/{len(pairs)} pairs", flush=True)
-        return pd.DataFrame(rows)
-
     rows: list[dict[str, Any] | None] = [None] * len(pairs)
     completed = 0
-    with ThreadPoolExecutor(max_workers=concurrency) as executor:
+    with ThreadPoolExecutor(max_workers=max(concurrency, 1)) as executor:
         futures = {
             executor.submit(score_pair, pair): idx
             for idx, pair in enumerate(pairs)
