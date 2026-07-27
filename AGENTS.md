@@ -1,5 +1,9 @@
 # AGENTS.md
 
+## Distance Calculations
+
+- Do not add custom Haversine implementations in citybehavex. Use fastmob's distance utilities directly, normally `fastmob.network.haversine_m_batch`, and convert metres to kilometres at the call site when needed.
+
 ## Serving the diary-generation LLM
 
 The diary-generation model (`Qwen/Qwen2.5-32B-Instruct-AWQ`, port 8081) is served from the
