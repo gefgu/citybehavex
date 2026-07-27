@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from .alignment import score_alignment_matrix
 from .config import ScheduleConfig
-from .ddcrp import (
+from .crp import (
     DdcrpAgentInfo,
     DiaryArrays,
     DiaryBank,
