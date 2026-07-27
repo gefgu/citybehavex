@@ -528,7 +528,7 @@ def _modal_location_per_user(candidates: pl.DataFrame) -> pl.DataFrame:
     Ties (equal visit counts) are broken by ascending ``location_id`` for a
     deterministic result, matching the ``ORDER BY cnt DESC, fine_cell``
     convention already used by the equivalent DuckDB heuristic in
-    ``web/backend/app/home_work_data.py`` (``_observed_density_heuristic``).
+    ``legacy Python backend/home_work_data.py`` (``_observed_density_heuristic``).
     Returns a ``[uid, location_id]`` lookup table; users with no candidate
     rows are absent from the result (callers should treat a missing ``uid``
     as "no home/work location found", not as a match against null).

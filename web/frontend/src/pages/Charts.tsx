@@ -666,7 +666,7 @@ export function Charts() {
       }
 
       // network_validation is the single largest section to build for
-      // shanghai/yjmob-scale simulations (see web/backend/app/api/charts.py's
+      // shanghai/yjmob-scale simulations (see legacy Python backend/api/charts.py's
       // /network-validation route) -- still fetched last, independent of
       // whether home-work succeeded, so one failing section doesn't block
       // the other.

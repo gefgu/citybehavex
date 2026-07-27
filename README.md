@@ -62,10 +62,9 @@ modified versions of the simulator remain available to the research community.
 ```text
 citybehavex/                 Python package and report/evaluation logic
 citybehavex-py/              Rust simulation core exposed as citybehavex._core
-citybehavex-web/             Rust/axum web backend (see web/README.md)
 configs/                     Reproducible scenario and ablation configurations
 scripts/                     Simulation, training, serving, and sweep utilities
-web/backend/                 FastAPI backend for experiment discovery and charts
+web/backend/                 Rust/axum backend for experiment discovery and charts
 web/frontend/                React/Vite validation and trajectory-replay UI
 data/                        Input/output location for scenarios and runs
 models/                      Optional fine-tuned alignment models
@@ -73,9 +72,8 @@ models/                      Optional fine-tuned alignment models
 
 The simulator reads scenario settings from `configs/*.yaml`. The web UI discovers
 those configs, finds their generated runs, and builds validation views on demand.
-Two interchangeable web backends are available — a FastAPI server
-(`web/backend/`) and a byte-compatible Rust/axum server (`citybehavex-web/`) —
-see [`web/README.md`](web/README.md) for the full comparison.
+The web backend is the Rust/axum crate in `web/backend`; see
+[`web/README.md`](web/README.md) for development and deployment commands.
 
 ## Requirements
 
@@ -112,7 +110,7 @@ included with the artifact.
 From the repository root:
 
 ```bash
-uv sync --extra web
+uv sync
 ./scripts/update_local_citybehavex.sh
 ```
 
@@ -128,15 +126,7 @@ available.
 
 ## Web Demo
 
-CityBehavEx ships two interchangeable web backends — pick one:
-
-**Python (FastAPI), port 8000:**
-
-```bash
-.venv/bin/python -m uvicorn app.main:app --app-dir web/backend --reload --port 8000
-```
-
-**Rust (axum), port 8001:**
+Start the Rust/axum backend:
 
 ```bash
 cargo run -p citybehavex-web
@@ -156,17 +146,15 @@ Open:
 http://localhost:5173
 ```
 
-By default the frontend talks directly to the Rust backend on port `8001`; set
-`VITE_API_PROXY_TARGET=http://localhost:8000` to point it at the Python backend
-instead. The Experiments page is populated from `configs/*.yaml`. Opening charts
-for a run builds the validation payload on first request and caches it under
+By default the frontend talks directly to the Rust backend on port `8001`. The
+Experiments page is populated from `configs/*.yaml`. Opening charts for a run
+builds the validation payload on first request and caches it under
 `data/.web_cache/`.
 
 The Rust binary can also single-origin-serve the built frontend (`npm run build`
 in `web/frontend/`, then `cargo run -p citybehavex-web` serves both the API and
 the static SPA). See [`web/README.md`](web/README.md) for the full endpoint list,
-parity-testing scripts (`scripts/compare_web_backends.py`,
-`scripts/benchmark_web_backends.py`), and single-origin deployment notes.
+static-demo export command, and single-origin deployment notes.
 
 ### Timeline Map
 

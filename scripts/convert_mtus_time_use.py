@@ -9,7 +9,7 @@ from pathlib import Path
 import pandas as pd
 
 
-# Mirrors `web/backend/app/payload/legacy.py`'s `TIME_USE_CATEGORIES` exactly
+# Mirrors the Rust backend's time-use categories exactly
 # -- the 25 raw MTUS harmonized activity codes. A prior version of this
 # script aggregated these into a 9-bucket rollup so the Rust backend (which
 # can't parse Stata) had a small, easy schema to read -- but that meant the

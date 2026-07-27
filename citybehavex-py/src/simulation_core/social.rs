@@ -1,7 +1,7 @@
-use rand::Rng;
-use rustc_hash::FxHashMap;
 use fastmob_core::models::od::CachedGravityOdRows;
 use fastmob_core::models::shared::cdf_choice;
+use rand::Rng;
+use rustc_hash::FxHashMap;
 
 use crate::simulation_core::inputs::{ActivityInputs, LocationInputs, SimulationParams};
 use crate::simulation_core::types::{
