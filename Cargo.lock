@@ -711,10 +711,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "citybehavex-core"
-version = "0.1.0"
-
-[[package]]
 name = "citybehavex-py"
 version = "0.1.0"
 dependencies = [

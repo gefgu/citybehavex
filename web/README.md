@@ -69,7 +69,7 @@ synthetic social-network validation. Remaining parity gaps are documented in
 `../RUST_BACKEND_MIGRATION.md`.
 
 ```bash
-cargo build -p citybehavex-core -p citybehavex-web
+cargo build -p citybehavex-web
 cargo test -p citybehavex-web --bin citybehavex-web
 cargo test -p citybehavex-web --bin citybehavex-web -- --ignored
 ```

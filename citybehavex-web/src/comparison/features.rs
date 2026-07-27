@@ -24,8 +24,8 @@
 //! `comparison.road_network_distance` is enabled and a road graph exists) --
 //! most experiments in this repo don't have a road graph built yet
 //! (`road_network_available: false`), so straight-line Haversine (this
-//! module) covers the common case; the road-aware path can reuse
-//! `citybehavex-core::roads::RoadGraph::batch_road_distances` when needed.
+//! module) covers the common case; the road-aware path should use the
+//! `fastmob-core` routing primitives when needed.
 
 use super::filters::{FilterMeta, filter_df};
 use super::panel::{AdaptationMode, adapt_evaluation_dataframe};

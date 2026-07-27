@@ -61,7 +61,6 @@ modified versions of the simulator remain available to the research community.
 
 ```text
 citybehavex/                 Python package and report/evaluation logic
-citybehavex-core/            Shared Rust simulation core crate
 citybehavex-py/              Rust simulation core exposed as citybehavex._core
 citybehavex-web/             Rust/axum web backend (see web/README.md)
 configs/                     Reproducible scenario and ablation configurations
