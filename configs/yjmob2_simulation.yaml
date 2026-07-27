@@ -169,7 +169,7 @@ comparison:
     h3_resolution: 9
     max_group_size: 200
   # WIP: road-network-based jump_lengths/radius_of_gyration is implemented
-  # (citybehavex/metrics/road_distance.py) but disabled by default pending
+  # (fastmob.measures.individual.network_distance) but disabled by default pending
   # further performance validation on large real datasets. Set true to use
   # road-network distance instead of straight-line Haversine.
   road_network_distance: false

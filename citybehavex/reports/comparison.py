@@ -28,18 +28,15 @@ from fastmob import (
     waiting_times,
     wasserstein_distance,
 )
-from fastmob.network import haversine_m_batch
-
-from citybehavex.activities import build_catalog
-from citybehavex.metrics import (
-    build_road_network_handle,
-)
-from citybehavex.metrics import (
+from fastmob.measures.individual.network_distance import (
     jump_lengths_km as road_jump_lengths_km,
 )
-from citybehavex.metrics import (
+from fastmob.measures.individual.network_distance import (
     radius_of_gyration_km as road_radius_of_gyration_km,
 )
+from fastmob.network import RoadNetwork, haversine_m_batch
+
+from citybehavex.activities import build_catalog
 from citybehavex.reports.network_validation import build_network_validation
 
 _DATETIME_CANDIDATES = [
@@ -1293,7 +1290,7 @@ def generate_comparison_report(
     # Haversine) for both synthetic and real trajectories -- otherwise fall
     # back to the plain fastmob calls unchanged.
     road_network = (
-        build_road_network_handle(road_edges_df, road_nodes_df)
+        RoadNetwork.build(road_edges_df, road_nodes_df)
         if road_nodes_df is not None and road_edges_df is not None and len(road_nodes_df) and len(road_edges_df)
         else None
     )
