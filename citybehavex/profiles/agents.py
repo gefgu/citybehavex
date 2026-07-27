@@ -17,12 +17,11 @@ from typing import Optional
 
 import numpy as np
 import pandas as pd
+from fastmob.network import haversine_m_batch
 from pydantic import BaseModel, ConfigDict, Field
 
 from citybehavex.math import sample_beta_scaled_ints, sample_multinomial_index, sample_weighted_indices
 from citybehavex.profiles.config import AgentProfilesConfig
-
-EARTH_RADIUS_KM = 6371.0088
 
 # ---------------------------------------------------------------------------
 # Category labels (ordered to match config weight lists)
@@ -131,22 +130,6 @@ def profile_to_narrative(profile: AgentProfile, *, include_transport: bool = Tru
 # ---------------------------------------------------------------------------
 
 
-def _haversine_km(
-    lat1: np.ndarray | float,
-    lng1: np.ndarray | float,
-    lat2: np.ndarray | float,
-    lng2: np.ndarray | float,
-) -> np.ndarray:
-    lat1_rad = np.radians(np.asarray(lat1, dtype=float))
-    lng1_rad = np.radians(np.asarray(lng1, dtype=float))
-    lat2_rad = np.radians(np.asarray(lat2, dtype=float))
-    lng2_rad = np.radians(np.asarray(lng2, dtype=float))
-    dlat = lat2_rad - lat1_rad
-    dlng = lng2_rad - lng1_rad
-    a = np.sin(dlat / 2) ** 2 + np.cos(lat1_rad) * np.cos(lat2_rad) * np.sin(dlng / 2) ** 2
-    return EARTH_RADIUS_KM * 2 * np.arcsin(np.sqrt(a))
-
-
 def _work_attractiveness_weights(work_weights: np.ndarray, config: AgentProfilesConfig) -> np.ndarray:
     weights = np.asarray(work_weights, dtype=float)
     return np.log1p(np.maximum(weights, 0.0))
@@ -197,7 +180,7 @@ def _sample_conditional_work_tiles(
             sampled[i] = global_fallback[i]
             continue
 
-        dist_km = _haversine_km(home_lat, home_lng, work_lat, work_lng)
+        dist_km = haversine_m_batch(home_lat, home_lng, work_lat, work_lng) / 1000.0
         finite = np.isfinite(dist_km)
         within = finite & (dist_km <= config.work_distance_max_km)
         candidate_mask = within if within.any() else finite

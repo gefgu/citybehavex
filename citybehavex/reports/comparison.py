@@ -28,6 +28,7 @@ from fastmob import (
     waiting_times,
     wasserstein_distance,
 )
+from fastmob.network import haversine_m_batch
 from citybehavex.activities import build_catalog
 from citybehavex.metrics import (
     build_road_network_handle,
@@ -112,34 +113,34 @@ def _to_datetime(col: pl.Series) -> pl.Series:
     return col.cast(pl.Datetime, strict=False)
 
 
-def _haversine_km_np(lat1, lng1, lat2, lng2) -> np.ndarray:
-    lat1_arr = np.radians(np.asarray(lat1, dtype=float))
-    lng1_arr = np.radians(np.asarray(lng1, dtype=float))
-    lat2_arr = np.radians(np.asarray(lat2, dtype=float))
-    lng2_arr = np.radians(np.asarray(lng2, dtype=float))
-    dlat = lat2_arr - lat1_arr
-    dlng = lng2_arr - lng1_arr
-    a = (
-        np.sin(dlat / 2.0) ** 2
-        + np.cos(lat1_arr) * np.cos(lat2_arr) * np.sin(dlng / 2.0) ** 2
+def _fastmob_haversine_km_expr(
+    lat1: pl.Expr,
+    lng1: pl.Expr,
+    lat2: pl.Expr,
+    lng2: pl.Expr,
+) -> pl.Expr:
+    """Batch fastmob Haversine calls while staying in Polars' lazy pipeline."""
+
+    def compute(cols: list[pl.Series]) -> pl.Series:
+        lat1_s, lng1_s, lat2_s, lng2_s = cols
+        return pl.Series(
+            haversine_m_batch(
+                lat1_s.to_numpy(),
+                lng1_s.to_numpy(),
+                lat2_s.to_numpy(),
+                lng2_s.to_numpy(),
+            )
+            / 1000.0
+        )
+
+    all_present = (
+        lat1.is_not_null()
+        & lng1.is_not_null()
+        & lat2.is_not_null()
+        & lng2.is_not_null()
     )
-    return 6371.0088 * 2.0 * np.arcsin(np.minimum(1.0, np.sqrt(a)))
-
-
-def _haversine_km_expr(lat1: pl.Expr, lng1: pl.Expr, lat2: pl.Expr, lng2: pl.Expr) -> pl.Expr:
-    """Polars-expression equivalent of ``_haversine_km_np`` -- stays inside
-    the lazy/streaming engine instead of forcing a ``.to_numpy()`` eager
-    materialization, which matters when the input is 100M+ rows (see
-    ``_synthetic_transport_leg_records``).
-    """
-    lat1_r = lat1.radians()
-    lng1_r = lng1.radians()
-    lat2_r = lat2.radians()
-    lng2_r = lng2.radians()
-    dlat = lat2_r - lat1_r
-    dlng = lng2_r - lng1_r
-    a = (dlat / 2.0).sin() ** 2 + lat1_r.cos() * lat2_r.cos() * (dlng / 2.0).sin() ** 2
-    return 6371.0088 * 2.0 * pl.min_horizontal(a.sqrt(), pl.lit(1.0)).arcsin()
+    distance = pl.map_batches([lat1, lng1, lat2, lng2], compute, return_dtype=pl.Float64)
+    return pl.when(all_present).then(distance).otherwise(None)
 
 
 def _default_synthetic_moving_path(synthetic_path: Optional[str]) -> Optional[Path]:
@@ -183,11 +184,11 @@ def _synthetic_transport_leg_records(
     mode_map: dict[str, str],
 ) -> pl.DataFrame:
     """One row per (uid, stop_id) transport leg: total path length and time
-    span. Fully lazy/streaming (scan_parquet + polars-expression haversine)
+    span. Fully lazy/streaming (scan_parquet + batched fastmob Haversine)
     instead of an eager ``pl.read_parquet`` -- this sidecar is 100M-700M+
     rows at yjmob/yjmob2 scale (370M measured for a single yjmob2 ablation
     run), so materializing it eagerly plus the follow-on ``.to_numpy()``
-    haversine call peaked at 40GB+ RSS and intermittently OOM-killed the
+    Haversine call peaked at 40GB+ RSS and intermittently OOM-killed the
     report step. The lazy engine streams the scan/filter/join/group_by
     pipeline in chunks and only the small per-leg aggregate ever reaches
     Python.
@@ -229,18 +230,18 @@ def _synthetic_transport_leg_records(
     # Consecutive-point distance within each leg, restricted to finite
     # coordinates (lat/lng are already non-null from the drop_nulls above;
     # this guards against stray inf values, same as the old np.isfinite mask).
-    # Computed as a polars expression (not numpy) so it stays inside the
-    # streaming engine instead of forcing eager materialization.
+    # Computed with Polars batch UDFs so fastmob handles the distance math
+    # without forcing eager materialization of the whole sidecar.
     finite = work.filter(pl.col("lat").is_finite() & pl.col("lng").is_finite())
     finite = finite.with_columns(
         pl.col("lat").shift(1).over(["uid", "stop_id"]).alias("_prev_lat"),
         pl.col("lng").shift(1).over(["uid", "stop_id"]).alias("_prev_lng"),
     )
     # A leg's first point has no predecessor (shift produces null) -- the
-    # haversine expression on a null input yields null, which the group sum
+    # distance expression on a null input yields null, which the group sum
     # below already skips, matching the old code's np.nansum behavior.
     finite = finite.with_columns(
-        _haversine_km_expr(
+        _fastmob_haversine_km_expr(
             pl.col("_prev_lat"), pl.col("_prev_lng"), pl.col("lat"), pl.col("lng")
         ).alias("_step_km")
     )
@@ -338,12 +339,12 @@ def _observed_transport_leg_records(
     if work.is_empty():
         return _empty_transport_records()
 
-    jump_km = _haversine_km_np(
+    jump_km = haversine_m_batch(
         work["_prev_lat"].to_numpy(),
         work["_prev_lng"].to_numpy(),
         work[lat].to_numpy(),
         work[lng].to_numpy(),
-    )
+    ) / 1000.0
     work = work.with_columns(pl.Series("jump_km", jump_km)).filter(pl.col("jump_km").is_finite())
     if work.is_empty():
         return _empty_transport_records()

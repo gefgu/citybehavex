@@ -5,8 +5,12 @@ from pathlib import Path
 import duckdb
 import pandas as pd
 import typer
+from fastmob.network import haversine_m_batch
 
 _CATEGORY_CSV = Path(__file__).parents[1] / "category" / "unique_categories.csv"
+_POI_RELEVANCE_RADIUS_M = 500.0
+_POI_RELEVANCE_DEGREE_WINDOW = 0.0045
+_POI_RELEVANCE_DISTANCE_BATCH_SIZE = 1_000_000
 
 
 def normalize_purpose_label(value: object) -> str:
@@ -109,51 +113,65 @@ def build_poi_tessellation(
         f"Fetching individual POIs from Overture Maps {overture_release} "
         "and computing 500 m relevance ..."
     )
-    df = duckdb.sql(f"""
+    raw_pois = duckdb.sql(f"""
         INSTALL spatial;  LOAD spatial;
         SET s3_region = 'us-west-2';
 
-        WITH raw_pois AS (
-            SELECT
-                id                        AS poi_id,
-                ST_Y(geometry)            AS lat,
-                ST_X(geometry)            AS lng,
-                categories.primary        AS category
-            FROM read_parquet(
-                's3://overturemaps-us-west-2/release/{overture_release}/theme=places/type=place/*',
-                filename=true, hive_partitioning=1
-            )
-            WHERE bbox.xmin BETWEEN {min_lon} AND {max_lon}
-              AND bbox.ymin BETWEEN {min_lat} AND {max_lat}
-        ),
-        relevance_counts AS (
-            SELECT
-                p1.poi_id,
-                p1.lat,
-                p1.lng,
-                p1.category,
-                COUNT(p2.poi_id) AS relevance
-            FROM raw_pois p1
-            LEFT JOIN raw_pois p2
-                ON  p1.poi_id != p2.poi_id
-                AND ABS(p2.lat - p1.lat) <= 0.0045
-                AND ABS(p2.lng - p1.lng) <= 0.0045
-                AND 2 * 6371000 * ASIN(SQRT(
-                        POWER(SIN(RADIANS((p2.lat - p1.lat) / 2)), 2) +
-                        COS(RADIANS(p1.lat)) * COS(RADIANS(p2.lat)) *
-                        POWER(SIN(RADIANS((p2.lng - p1.lng) / 2)), 2)
-                    )) <= 500
-            GROUP BY p1.poi_id, p1.lat, p1.lng, p1.category
-        )
         SELECT
-            poi_id      AS tile_id,
-            lat,
-            lng,
-            category,
-            relevance
-        FROM relevance_counts
-        ORDER BY relevance DESC
+            id                        AS poi_id,
+            ST_Y(geometry)            AS lat,
+            ST_X(geometry)            AS lng,
+            categories.primary        AS category
+        FROM read_parquet(
+            's3://overturemaps-us-west-2/release/{overture_release}/theme=places/type=place/*',
+            filename=true, hive_partitioning=1
+        )
+        WHERE bbox.xmin BETWEEN {min_lon} AND {max_lon}
+          AND bbox.ymin BETWEEN {min_lat} AND {max_lat}
     """).df()
+
+    if raw_pois.empty:
+        df = pd.DataFrame(columns=["tile_id", "lat", "lng", "category", "relevance"])
+        df["purpose"] = pd.Series(dtype=object)
+        return df
+
+    con = duckdb.connect()
+    try:
+        con.register("raw_pois", raw_pois)
+        candidate_pairs = con.sql(f"""
+            SELECT
+                p1.poi_id AS source_id,
+                p1.lat    AS source_lat,
+                p1.lng    AS source_lng,
+                p2.lat    AS candidate_lat,
+                p2.lng    AS candidate_lng
+            FROM raw_pois p1
+            JOIN raw_pois p2
+                ON  p1.poi_id != p2.poi_id
+                AND ABS(p2.lat - p1.lat) <= {_POI_RELEVANCE_DEGREE_WINDOW}
+                AND ABS(p2.lng - p1.lng) <= {_POI_RELEVANCE_DEGREE_WINDOW}
+        """).df()
+    finally:
+        con.close()
+
+    relevance = pd.Series(0, index=raw_pois["poi_id"], dtype="int64")
+    for start in range(0, len(candidate_pairs), _POI_RELEVANCE_DISTANCE_BATCH_SIZE):
+        batch = candidate_pairs.iloc[start : start + _POI_RELEVANCE_DISTANCE_BATCH_SIZE]
+        within_radius = (
+            haversine_m_batch(
+                batch["source_lat"].to_numpy(),
+                batch["source_lng"].to_numpy(),
+                batch["candidate_lat"].to_numpy(),
+                batch["candidate_lng"].to_numpy(),
+            )
+            <= _POI_RELEVANCE_RADIUS_M
+        )
+        counts = batch.loc[within_radius, "source_id"].value_counts()
+        relevance.loc[counts.index] += counts.astype("int64")
+
+    df = raw_pois.rename(columns={"poi_id": "tile_id"}).copy()
+    df["relevance"] = df["tile_id"].map(relevance).fillna(0).astype("int64")
+    df = df.sort_values("relevance", ascending=False).reset_index(drop=True)
     category_map = load_category_mapping()
     df["purpose"] = df["category"].map(category_map).fillna("OTHER")
     return df

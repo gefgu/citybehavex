@@ -67,3 +67,10 @@ EVALUATION_NOTES.md
 
 
 data/.web_cache_rs
+
+.codex
+.claude
+.agents
+.finetuning
+.pytest_cache
+.uv-cache
