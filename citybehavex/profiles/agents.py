@@ -20,7 +20,11 @@ import pandas as pd
 from fastmob.network import haversine_m_batch
 from pydantic import BaseModel, ConfigDict, Field
 
-from citybehavex.math import sample_beta_scaled_ints, sample_multinomial_index, sample_weighted_indices
+from citybehavex.math import (
+    sample_beta_scaled_ints,
+    sample_multinomial_index,
+    sample_weighted_indices,
+)
 from citybehavex.profiles.config import AgentProfilesConfig
 
 # ---------------------------------------------------------------------------

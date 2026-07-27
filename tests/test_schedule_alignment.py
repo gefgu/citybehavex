@@ -3,9 +3,14 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from citybehavex.schedules.alignment import _extract_scores, _load_cache, _save_cache, score_alignment_matrix
-from citybehavex.schedules import ScheduleConfig
 from citybehavex.llm_diaries import Diary
+from citybehavex.schedules import ScheduleConfig
+from citybehavex.schedules.alignment import (
+    _extract_scores,
+    _load_cache,
+    _save_cache,
+    score_alignment_matrix,
+)
 
 
 def _diary(diary_id: str, away_purpose: str, away_start: str, away_end: str) -> Diary:

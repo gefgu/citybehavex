@@ -11,9 +11,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable, Sequence
 
+import numpy as np
 import pandas as pd
 import requests
-import numpy as np
 
 
 @dataclass(frozen=True)

@@ -67,6 +67,7 @@ include = ["citybehavex/category/*.csv"]
 [dependency-groups]
 dev = [
     "pytest>=8.0.0",
+    "ruff>=0.14.0",
 ]
 
 [tool.pytest.ini_options]
@@ -74,6 +75,14 @@ pythonpath = ["."]
 markers = [
     "slow: exercises the real Rust simulation core end-to-end rather than mocking it",
 ]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+extend-exclude = ["citybehavex-py", "notebooks", "checkpoints", "target"]
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I"]
 
 [tool.uv.sources]
 fastmob = { path = "../fastmob", editable = true }

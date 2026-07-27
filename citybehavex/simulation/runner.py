@@ -7,12 +7,12 @@ from pathlib import Path
 from typing import Optional
 
 import duckdb
+import fastmob
 import h3
 import numpy as np
 import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
-import fastmob
 import typer
 from fastmob.models import DensityEPR
 
@@ -21,12 +21,12 @@ from citybehavex.activities import (
     ProfileClusters,
     activity_descriptions,
     activity_duration_arrays,
+    available_semantic_cluster_ids,
     build_catalog,
     build_eligibility_csr,
+    build_poi_semantic_activity_data,
     cluster_profile_embeddings,
     expand_cluster_scores,
-    build_poi_semantic_activity_data,
-    available_semantic_cluster_ids,
     score_activity_alignment,
     score_poi_semantic_alignment,
     score_poi_type_alignment,
@@ -66,7 +66,11 @@ from citybehavex.schedules import (
     score_alignment_matrix,
 )
 from citybehavex.simulation.core import CoreTiming, simulate_agents, social_network_sidecar_path
-from citybehavex.tessellation import build_poi_tessellation, build_tessellation, purpose_distribution
+from citybehavex.tessellation import (
+    build_poi_tessellation,
+    build_tessellation,
+    purpose_distribution,
+)
 from citybehavex.utils import ProgressReporter
 
 _WORK_SCORE_COLUMN = "work_score"

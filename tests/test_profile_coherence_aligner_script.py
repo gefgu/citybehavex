@@ -10,7 +10,6 @@ import pandas as pd
 from citybehavex.profiles import AgentProfile
 from citybehavex.profiles.coherence_alignment import COHERENCE_CANDIDATE_TEXT
 
-
 SCRIPT_PATH = Path(__file__).resolve().parents[1] / "scripts" / "train_modernbert_profile_coherence_aligner.py"
 SPEC = importlib.util.spec_from_file_location("train_modernbert_profile_coherence_aligner", SCRIPT_PATH)
 aligner = importlib.util.module_from_spec(SPEC)

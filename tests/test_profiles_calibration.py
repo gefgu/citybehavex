@@ -6,7 +6,7 @@ import pytest
 
 from citybehavex.llm import LLMConfig
 from citybehavex.llm_diaries import DiariesConfig, DiaryValidationError, LLMStats
-from citybehavex.profiles import AgentProfilesConfig, WEIGHT_GROUPS, calibrate_demographic_weights
+from citybehavex.profiles import WEIGHT_GROUPS, AgentProfilesConfig, calibrate_demographic_weights
 from citybehavex.simulation.runner import resolve_calibrated_profiles_config
 
 

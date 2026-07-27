@@ -4,11 +4,11 @@ import json
 from datetime import datetime, timedelta
 from types import SimpleNamespace
 
+import fastmob
 import h3
 import pandas as pd
 import polars as pl
 import pytest
-import fastmob
 
 from citybehavex.reports import (
     ALL_REPORT_SECTIONS,

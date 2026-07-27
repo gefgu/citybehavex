@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 import numpy as np
 import pandas as pd
 
 from .models import DiaryBatch
+
+if TYPE_CHECKING:
+    from citybehavex.schedules.ddcrp import DiaryBank
 
 
 def diary_batch_to_markov_training(

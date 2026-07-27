@@ -11,8 +11,10 @@ from fastmob.network import (
     build_road_graph,
     fetch_rail_network,
     fetch_road_network,
-    haversine_m_batch as haversine_m,
     snap_locations_to_graph,
+)
+from fastmob.network import (
+    haversine_m_batch as haversine_m,
 )
 
 __all__ = [

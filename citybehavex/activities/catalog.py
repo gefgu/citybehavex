@@ -12,7 +12,6 @@ from dataclasses import dataclass
 
 import numpy as np
 
-
 # Fixed purpose codes (matches _PURPOSE_CODE in schedule_ddcrp.py and WORK_CODE in Rust)
 N_PURPOSES = 3
 

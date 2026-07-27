@@ -556,8 +556,8 @@ def rebold_comparison_table(text: str, datasets: list[str], n_cols: int = 8) -> 
     for dataset in datasets:
         labels = COMPARISON_DATASET_LABELS.get(dataset, [])
         row_idx = [
-            i for i, l in enumerate(lines)
-            if "&" in l and any(lbl in l for lbl in labels) and "Ref." not in l
+            i for i, line in enumerate(lines)
+            if "&" in line and any(lbl in line for lbl in labels) and "Ref." not in line
         ]
         if len(row_idx) < 2:
             continue

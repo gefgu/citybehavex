@@ -10,7 +10,6 @@ import pandas as pd
 from citybehavex.llm_diaries import Diary, DiaryBatch, LocationCountDistribution
 from citybehavex.profiles import AgentProfile
 
-
 SCRIPT_PATH = Path(__file__).resolve().parents[1] / "scripts" / "train_modernbert_schedule_aligner.py"
 SPEC = importlib.util.spec_from_file_location("train_modernbert_schedule_aligner", SCRIPT_PATH)
 aligner = importlib.util.module_from_spec(SPEC)

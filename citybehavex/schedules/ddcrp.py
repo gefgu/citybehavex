@@ -32,7 +32,8 @@ import numpy as np
 import pandas as pd
 
 try:
-    from joblib import Parallel, delayed as _delayed
+    from joblib import Parallel
+    from joblib import delayed as _delayed
     _JOBLIB_AVAILABLE = True
 except ImportError:
     _JOBLIB_AVAILABLE = False

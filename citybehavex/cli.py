@@ -17,11 +17,9 @@ from .reports.comparison import (
     load_trajectory,
 )
 from .roads import RoadNetworkConfig
-from .simulation import run_simulation
-from .simulation import SimulationConfig
+from .simulation import SimulationConfig, run_simulation
 from .social.config import SocialNetworkConfig
-from .tessellation import build_poi_tessellation, build_tessellation
-from .tessellation import TessellationConfig
+from .tessellation import TessellationConfig, build_poi_tessellation, build_tessellation
 
 app = typer.Typer(help="CityBehavEx - synthetic urban mobility toolkit.")
 

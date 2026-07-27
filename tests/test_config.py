@@ -1,18 +1,18 @@
 from __future__ import annotations
 
-import pytest
 from pathlib import Path
 
+import pytest
+
+from citybehavex.activities.config import ActivitiesConfig
 from citybehavex.config import apply_overrides, load_config
 from citybehavex.llm import LLMConfig
 from citybehavex.llm_diaries import DiariesConfig
-from citybehavex.activities.config import ActivitiesConfig
 from citybehavex.profiles.config import AgentProfilesConfig
 from citybehavex.reports.config import ComparisonConfig
 from citybehavex.schedules import ScheduleConfig
 from citybehavex.simulation import SimulationConfig
 from citybehavex.social.config import SocialNetworkConfig
-
 
 ROOT = Path(__file__).resolve().parents[1]
 
