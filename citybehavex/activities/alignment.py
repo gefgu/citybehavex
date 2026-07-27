@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import hashlib
 import os
-import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
@@ -20,18 +19,9 @@ from citybehavex.activities.poi_semantic import (
     example_categories_by_semantic_cluster,
 )
 from citybehavex.llm_diaries import Diary
+from citybehavex.utils import ProgressReporter
 
 START_PREVIOUS_ACTIVITY = -1
-
-
-def _format_duration(seconds: float) -> str:
-    if not np.isfinite(seconds):
-        return "unknown"
-    if seconds < 60:
-        return f"{seconds:.0f}s"
-    if seconds < 3600:
-        return f"{seconds / 60:.1f}min"
-    return f"{seconds / 3600:.1f}h"
 
 
 @dataclass(frozen=True)
@@ -563,28 +553,21 @@ def score_activity_alignment(
         ]
         total_chunks = len(chunks)
         total_pairs = len(pending)
-        start_time = time.perf_counter()
         checkpoint_every = config.alignment_checkpoint_every
 
         def _apply_chunk_scores(chunk: list[tuple[str, str, str]], chunk_scores: list[float]) -> None:
             for (key, _query, _text), score in zip(chunk, chunk_scores):
                 cache[key] = float(np.clip(score, 0.0, 1.0))
 
-        def _report_progress(done_chunks: int, done_pairs: int) -> None:
-            if checkpoint_every <= 0 or done_chunks % checkpoint_every != 0:
-                return
-            elapsed = time.perf_counter() - start_time
-            rate = done_pairs / elapsed if elapsed > 0 else 0.0
-            remaining_pairs = total_pairs - done_pairs
-            eta = remaining_pairs / rate if rate > 0 else float("nan")
-            print(
-                f"Activity alignment: {done_chunks}/{total_chunks} batches, "
-                f"{done_pairs}/{total_pairs} pairs, {rate:.0f} pairs/sec, "
-                f"{elapsed:.1f}s elapsed, ETA {_format_duration(eta)}",
-                flush=True,
-            )
-            if cache_path is not None:
-                _save_cache(cache_path, cache)
+        progress = ProgressReporter(
+            "Activity alignment",
+            total_pairs,
+            "pairs",
+            rate_precision=0,
+            checkpoint_every=checkpoint_every,
+            emit=lambda message: print(message, flush=True),
+            on_report=(lambda: _save_cache(cache_path, cache)) if cache_path is not None else None,
+        )
 
         if config.alignment_concurrency <= 1:
             done_pairs = 0
@@ -598,7 +581,12 @@ def score_activity_alignment(
                 )
                 _apply_chunk_scores(chunk, chunk_scores)
                 done_pairs += len(chunk)
-                _report_progress(done_chunks, done_pairs)
+                progress.report(
+                    done_pairs,
+                    checkpoint_count=done_chunks,
+                    done_batches=done_chunks,
+                    total_batches=total_chunks,
+                )
         else:
             done_pairs = 0
             with ThreadPoolExecutor(max_workers=config.alignment_concurrency) as executor:
@@ -618,7 +606,12 @@ def score_activity_alignment(
                     chunk_scores = future.result()
                     _apply_chunk_scores(chunk, chunk_scores)
                     done_pairs += len(chunk)
-                    _report_progress(done_chunks, done_pairs)
+                    progress.report(
+                        done_pairs,
+                        checkpoint_count=done_chunks,
+                        done_batches=done_chunks,
+                        total_batches=total_chunks,
+                    )
 
         for cluster_id, profile_text in enumerate(cluster_narratives):
             for block, eligible, previous_candidates, period_index in zip(
@@ -730,28 +723,21 @@ def score_poi_semantic_alignment(
         ]
         total_chunks = len(chunks)
         total_pairs = len(pending)
-        start_time = time.perf_counter()
         checkpoint_every = config.alignment_checkpoint_every
 
         def _apply_chunk_scores(chunk: list[tuple[str, str, str]], chunk_scores: list[float]) -> None:
             for (key, _query, _text), score in zip(chunk, chunk_scores):
                 cache[key] = float(np.clip(score, 0.0, 1.0))
 
-        def _report_progress(done_chunks: int, done_pairs: int) -> None:
-            if checkpoint_every <= 0 or done_chunks % checkpoint_every != 0:
-                return
-            elapsed = time.perf_counter() - start_time
-            rate = done_pairs / elapsed if elapsed > 0 else 0.0
-            remaining_pairs = total_pairs - done_pairs
-            eta = remaining_pairs / rate if rate > 0 else float("nan")
-            print(
-                f"POI activity alignment: {done_chunks}/{total_chunks} batches, "
-                f"{done_pairs}/{total_pairs} pairs, {rate:.0f} pairs/sec, "
-                f"{elapsed:.1f}s elapsed, ETA {_format_duration(eta)}",
-                flush=True,
-            )
-            if cache_path is not None:
-                _save_cache(cache_path, cache)
+        progress = ProgressReporter(
+            "POI activity alignment",
+            total_pairs,
+            "pairs",
+            rate_precision=0,
+            checkpoint_every=checkpoint_every,
+            emit=lambda message: print(message, flush=True),
+            on_report=(lambda: _save_cache(cache_path, cache)) if cache_path is not None else None,
+        )
 
         if config.alignment_concurrency <= 1:
             done_pairs = 0
@@ -765,7 +751,12 @@ def score_poi_semantic_alignment(
                 )
                 _apply_chunk_scores(chunk, chunk_scores)
                 done_pairs += len(chunk)
-                _report_progress(done_chunks, done_pairs)
+                progress.report(
+                    done_pairs,
+                    checkpoint_count=done_chunks,
+                    done_batches=done_chunks,
+                    total_batches=total_chunks,
+                )
         else:
             done_pairs = 0
             with ThreadPoolExecutor(max_workers=config.alignment_concurrency) as executor:
@@ -785,7 +776,12 @@ def score_poi_semantic_alignment(
                     chunk_scores = future.result()
                     _apply_chunk_scores(chunk, chunk_scores)
                     done_pairs += len(chunk)
-                    _report_progress(done_chunks, done_pairs)
+                    progress.report(
+                        done_pairs,
+                        checkpoint_count=done_chunks,
+                        done_batches=done_chunks,
+                        total_batches=total_chunks,
+                    )
 
         for cluster_id, profile_text in enumerate(cluster_narratives):
             for semantic_cluster_id, semantic_cluster in enumerate(poi_data.semantic_clusters):
@@ -891,28 +887,21 @@ def score_poi_type_alignment(
         ]
         total_chunks = len(chunks)
         total_pairs = len(pending)
-        start_time = time.perf_counter()
         checkpoint_every = config.alignment_checkpoint_every
 
         def _apply_chunk_scores(chunk: list[tuple[str, str, str]], chunk_scores: list[float]) -> None:
             for (key, _query, _text), score in zip(chunk, chunk_scores):
                 cache[key] = float(np.clip(score, 0.0, 1.0))
 
-        def _report_progress(done_chunks: int, done_pairs: int) -> None:
-            if checkpoint_every <= 0 or done_chunks % checkpoint_every != 0:
-                return
-            elapsed = time.perf_counter() - start_time
-            rate = done_pairs / elapsed if elapsed > 0 else 0.0
-            remaining_pairs = total_pairs - done_pairs
-            eta = remaining_pairs / rate if rate > 0 else float("nan")
-            print(
-                f"POI type alignment: {done_chunks}/{total_chunks} batches, "
-                f"{done_pairs}/{total_pairs} pairs, {rate:.0f} pairs/sec, "
-                f"{elapsed:.1f}s elapsed, ETA {_format_duration(eta)}",
-                flush=True,
-            )
-            if cache_path is not None:
-                _save_cache(cache_path, cache)
+        progress = ProgressReporter(
+            "POI type alignment",
+            total_pairs,
+            "pairs",
+            rate_precision=0,
+            checkpoint_every=checkpoint_every,
+            emit=lambda message: print(message, flush=True),
+            on_report=(lambda: _save_cache(cache_path, cache)) if cache_path is not None else None,
+        )
 
         if config.alignment_concurrency <= 1:
             done_pairs = 0
@@ -926,7 +915,12 @@ def score_poi_type_alignment(
                 )
                 _apply_chunk_scores(chunk, chunk_scores)
                 done_pairs += len(chunk)
-                _report_progress(done_chunks, done_pairs)
+                progress.report(
+                    done_pairs,
+                    checkpoint_count=done_chunks,
+                    done_batches=done_chunks,
+                    total_batches=total_chunks,
+                )
         else:
             done_pairs = 0
             with ThreadPoolExecutor(max_workers=config.alignment_concurrency) as executor:
@@ -946,7 +940,12 @@ def score_poi_type_alignment(
                     chunk_scores = future.result()
                     _apply_chunk_scores(chunk, chunk_scores)
                     done_pairs += len(chunk)
-                    _report_progress(done_chunks, done_pairs)
+                    progress.report(
+                        done_pairs,
+                        checkpoint_count=done_chunks,
+                        done_batches=done_chunks,
+                        total_batches=total_chunks,
+                    )
 
         for cluster_id, profile_text in enumerate(cluster_narratives):
             for block in blocks:

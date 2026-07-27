@@ -67,19 +67,10 @@ from citybehavex.schedules import (
 )
 from citybehavex.simulation.core import CoreTiming, simulate_agents, social_network_sidecar_path
 from citybehavex.tessellation import build_poi_tessellation, build_tessellation, purpose_distribution
+from citybehavex.utils import ProgressReporter
 
 _WORK_SCORE_COLUMN = "work_score"
 _PROGRESS_INTERVAL_SECONDS = 5.0
-
-
-def _format_duration(seconds: float) -> str:
-    if not np.isfinite(seconds):
-        return "unknown"
-    if seconds < 60:
-        return f"{seconds:.0f}s"
-    if seconds < 3600:
-        return f"{seconds / 60:.1f}min"
-    return f"{seconds / 3600:.1f}h"
 
 
 def _minmax(values: np.ndarray) -> np.ndarray:
@@ -735,23 +726,27 @@ def maybe_build_diaries(
     batches: dict[str, DiaryBatch] = {}
     total_diaries = len(day_types) * config.llm.diary_count
     completed_by_day_type = {day_type: 0 for day_type in day_types}
-    last_progress_at = 0.0
+    diary_progress = ProgressReporter(
+        "LLM diary generation",
+        total_diaries,
+        "diaries",
+        rate_precision=2,
+        min_interval_seconds=_PROGRESS_INTERVAL_SECONDS,
+        emit=typer.echo,
+        started=started,
+    )
 
-    def _report_progress(day_type: str, completed: int, total: int, current_stats: LLMStats) -> None:
-        nonlocal last_progress_at
+    def report_diary_generation_progress(
+        day_type: str,
+        completed: int,
+        total: int,
+        current_stats: LLMStats,
+    ) -> None:
         completed_by_day_type[day_type] = completed
         done = sum(completed_by_day_type.values())
-        elapsed = time.perf_counter() - started
-        if done < total_diaries and elapsed - last_progress_at < _PROGRESS_INTERVAL_SECONDS:
-            return
-        last_progress_at = elapsed
-        rate = done / elapsed if elapsed > 0 else 0.0
-        remaining = total_diaries - done
-        eta = remaining / rate if rate > 0 else float("nan")
-        typer.echo(
-            f"LLM diary generation: {done}/{total_diaries} diaries "
-            f"({day_type} {completed}/{total}), {current_stats.calls:,} chat calls, "
-            f"{rate:.2f} diaries/sec, {elapsed:.1f}s elapsed, ETA {_format_duration(eta)}"
+        diary_progress.report(
+            done,
+            detail=f"({day_type} {completed}/{total}), {current_stats.calls:,} chat calls",
         )
 
     for day_type in day_types:
@@ -768,7 +763,7 @@ def maybe_build_diaries(
             random_state=config.simulation.random_state,
             variant=day_type,
             stats=stats,
-            progress_callback=_report_progress,
+            progress_callback=report_diary_generation_progress,
         )
     return batches, stats, time.perf_counter() - started
 
@@ -893,20 +888,18 @@ def _build_schedule(
             f"Macro-schedule alignment: scoring {len(scoring_narratives)} profile rows "
             f"x {len(bank.diaries)} diaries ..."
         )
-        last_alignment_progress_at = 0.0
+        alignment_progress = ProgressReporter(
+            "Macro-schedule alignment",
+            len(scoring_narratives),
+            "rows",
+            rate_precision=2,
+            min_interval_seconds=_PROGRESS_INTERVAL_SECONDS,
+            emit=typer.echo,
+        )
 
         def _report_alignment_progress(done: int, total: int, elapsed: float) -> None:
-            nonlocal last_alignment_progress_at
-            if done < total and elapsed - last_alignment_progress_at < _PROGRESS_INTERVAL_SECONDS:
-                return
-            last_alignment_progress_at = elapsed
-            rate = done / elapsed if elapsed > 0 else 0.0
-            remaining = total - done
-            eta = remaining / rate if rate > 0 else float("nan")
-            typer.echo(
-                f"Macro-schedule alignment: {done}/{total} rows, {rate:.2f} rows/sec, "
-                f"{elapsed:.1f}s elapsed, ETA {_format_duration(eta)}"
-            )
+            alignment_progress.total = total
+            alignment_progress.report(done, elapsed=elapsed)
 
         scored = score_alignment_matrix(
             scoring_narratives,
@@ -932,21 +925,19 @@ def _build_schedule(
         f"{config.simulation.agents} agents x {config.simulation.days} days ..."
     )
     ddcrp_started = time.perf_counter()
-    last_ddcrp_progress_at = 0.0
+    ddcrp_progress = ProgressReporter(
+        "ddCRP schedule selection",
+        config.simulation.agents,
+        "agents",
+        rate_precision=1,
+        min_interval_seconds=_PROGRESS_INTERVAL_SECONDS,
+        emit=typer.echo,
+        started=ddcrp_started,
+    )
 
     def _report_ddcrp_progress(done: int, total: int) -> None:
-        nonlocal last_ddcrp_progress_at
-        elapsed = time.perf_counter() - ddcrp_started
-        if done < total and elapsed - last_ddcrp_progress_at < _PROGRESS_INTERVAL_SECONDS:
-            return
-        last_ddcrp_progress_at = elapsed
-        rate = done / elapsed if elapsed > 0 else 0.0
-        remaining = total - done
-        eta = remaining / rate if rate > 0 else float("nan")
-        typer.echo(
-            f"ddCRP schedule selection: {done}/{total} agents, {rate:.1f} agents/sec, "
-            f"{elapsed:.1f}s elapsed, ETA {_format_duration(eta)}"
-        )
+        ddcrp_progress.total = total
+        ddcrp_progress.report(done)
 
     diary_arrays, chosen, crp_info = build_ddcrp_diary(
         bank,
