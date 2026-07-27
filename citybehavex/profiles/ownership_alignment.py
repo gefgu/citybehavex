@@ -1,8 +1,5 @@
 from __future__ import annotations
 
-import hashlib
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from pathlib import Path
 from typing import Sequence
 
 import numpy as np
@@ -10,12 +7,14 @@ import pandas as pd
 
 from citybehavex.activities.alignment import (
     ProfileClusters,
-    _load_cache,
-    _save_cache,
     _score_chunk_with_retries,
 )
+from citybehavex.profiles._common import (
+    alignment_cache_key,
+    alignment_query_text,
+    score_cached_alignment_pairs,
+)
 from citybehavex.profiles.config import AgentProfilesConfig
-from citybehavex.utils import ProgressReporter
 
 VEHICLE_CANDIDATES: tuple[tuple[str, str], ...] = (
     (
@@ -27,15 +26,14 @@ VEHICLE_CANDIDATES: tuple[tuple[str, str], ...] = (
         "owns or has reliable access to a bicycle, e-bike, or equivalent personal cycle",
     ),
 )
+OWNERSHIP_QUERY_INSTRUCTION = (
+    "Score how likely this person is to have the listed transport option. "
+    "Use 0 for very unlikely and 1 for very likely."
+)
 
 
 def _query_text(profile_text: str, city_profile: str | None) -> str:
-    city_context = f"\nCity context: {city_profile}" if city_profile else ""
-    return (
-        f"{profile_text}{city_context}\n"
-        "Score how likely this person is to have the listed transport option. "
-        "Use 0 for very unlikely and 1 for very likely."
-    )
+    return alignment_query_text(profile_text, city_profile, OWNERSHIP_QUERY_INSTRUCTION)
 
 
 def _cache_key(
@@ -45,8 +43,7 @@ def _cache_key(
     vehicle: str,
     candidate_text: str,
 ) -> str:
-    raw = f"{model or ''}\x00{profile_text}\x00{city_profile or ''}\x00{vehicle}\x00{candidate_text}"
-    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+    return alignment_cache_key(model, profile_text, city_profile, vehicle, candidate_text)
 
 
 def score_vehicle_ownership_alignment(
@@ -70,19 +67,9 @@ def score_vehicle_ownership_alignment(
     scores = np.zeros((len(cluster_narratives), len(VEHICLE_CANDIDATES)), dtype=np.float64)
     rows: list[dict[str, object]] = []
 
-    cache: dict[str, float] = {}
-    cache_path = (
-        Path(config.ownership_alignment_cache_path)
-        if config.ownership_alignment_cache_path
-        else None
-    )
-    if cache_path is not None:
-        cache = _load_cache(cache_path)
-
     try:
-        pending: list[tuple[str, str, str]] = []
-        pending_seen: set[str] = set()
-        for cluster_id, profile_text in enumerate(cluster_narratives):
+        pairs: list[tuple[str, str, str]] = []
+        for profile_text in cluster_narratives:
             query = _query_text(profile_text, city_profile)
             for vehicle, candidate_text in VEHICLE_CANDIDATES:
                 key = _cache_key(
@@ -92,76 +79,21 @@ def score_vehicle_ownership_alignment(
                     vehicle,
                     candidate_text,
                 )
-                if key in cache or key in pending_seen:
-                    continue
-                pending_seen.add(key)
-                pending.append((key, query, candidate_text))
+                pairs.append((key, query, candidate_text))
 
-        chunks = [
-            pending[start : start + config.ownership_alignment_batch_size]
-            for start in range(0, len(pending), config.ownership_alignment_batch_size)
-        ]
-        total_chunks = len(chunks)
-        total_pairs = len(pending)
-        checkpoint_every = config.ownership_alignment_checkpoint_every
-
-        def _apply_chunk_scores(chunk: list[tuple[str, str, str]], chunk_scores: list[float]) -> None:
-            for (key, _query, _text), score in zip(chunk, chunk_scores):
-                cache[key] = float(np.clip(score, 0.0, 1.0))
-
-        progress = ProgressReporter(
-            "Vehicle ownership alignment",
-            total_pairs,
-            "pairs",
-            rate_precision=0,
-            checkpoint_every=checkpoint_every,
-            emit=lambda message: print(message, flush=True),
-            on_report=(lambda: _save_cache(cache_path, cache)) if cache_path is not None else None,
+        cache = score_cached_alignment_pairs(
+            pairs,
+            base_url=config.ownership_alignment_base_url,
+            model=config.ownership_alignment_model,
+            batch_size=config.ownership_alignment_batch_size,
+            cache_path=config.ownership_alignment_cache_path,
+            concurrency=config.ownership_alignment_concurrency,
+            timeout_seconds=config.ownership_alignment_timeout_seconds,
+            retries=config.ownership_alignment_retries,
+            checkpoint_every=config.ownership_alignment_checkpoint_every,
+            progress_label="Vehicle ownership alignment",
+            score_chunk=_score_chunk_with_retries,
         )
-
-        if config.ownership_alignment_concurrency <= 1:
-            done_pairs = 0
-            for done_chunks, chunk in enumerate(chunks, start=1):
-                chunk_scores = _score_chunk_with_retries(
-                    config.ownership_alignment_base_url,
-                    config.ownership_alignment_model,
-                    [(query, text) for _key, query, text in chunk],
-                    timeout=config.ownership_alignment_timeout_seconds,
-                    retries=config.ownership_alignment_retries,
-                )
-                _apply_chunk_scores(chunk, chunk_scores)
-                done_pairs += len(chunk)
-                progress.report(
-                    done_pairs,
-                    checkpoint_count=done_chunks,
-                    done_batches=done_chunks,
-                    total_batches=total_chunks,
-                )
-        else:
-            done_pairs = 0
-            with ThreadPoolExecutor(max_workers=config.ownership_alignment_concurrency) as executor:
-                futures = {
-                    executor.submit(
-                        _score_chunk_with_retries,
-                        config.ownership_alignment_base_url,
-                        config.ownership_alignment_model,
-                        [(query, text) for _key, query, text in chunk],
-                        timeout=config.ownership_alignment_timeout_seconds,
-                        retries=config.ownership_alignment_retries,
-                    ): chunk
-                    for chunk in chunks
-                }
-                for done_chunks, future in enumerate(as_completed(futures), start=1):
-                    chunk = futures[future]
-                    chunk_scores = future.result()
-                    _apply_chunk_scores(chunk, chunk_scores)
-                    done_pairs += len(chunk)
-                    progress.report(
-                        done_pairs,
-                        checkpoint_count=done_chunks,
-                        done_batches=done_chunks,
-                        total_batches=total_chunks,
-                    )
 
         for cluster_id, profile_text in enumerate(cluster_narratives):
             query = _query_text(profile_text, city_profile)
@@ -188,8 +120,6 @@ def score_vehicle_ownership_alignment(
     except Exception:  # noqa: BLE001 - callers intentionally fall back.
         return None
 
-    if cache_path is not None:
-        _save_cache(cache_path, cache)
     return np.clip(scores, 0.0, 1.0), pd.DataFrame(rows)
 
 
