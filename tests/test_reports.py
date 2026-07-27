@@ -638,8 +638,7 @@ def test_generate_comparison_report_uses_road_network_distance_when_provided(tmp
     import itertools
 
     import numpy as np
-
-    from citybehavex.roads import haversine_m
+    from fastmob.network import haversine_m_batch
 
     traj, real_path = _build_report_fixture(tmp_path)
     real_df = pl.read_parquet(real_path)
@@ -652,7 +651,7 @@ def test_generate_comparison_report_uses_road_network_distance_when_provided(tmp
     pairs = list(itertools.permutations(range(len(coords)), 2))
     from_node = np.array([p[0] for p in pairs], dtype=np.int64)
     to_node = np.array([p[1] for p in pairs], dtype=np.int64)
-    length_m = haversine_m(lat[from_node], lng[from_node], lat[to_node], lng[to_node]) * 2.0
+    length_m = haversine_m_batch(lat[from_node], lng[from_node], lat[to_node], lng[to_node]) * 2.0
     weight_ds = np.maximum(1, np.round(length_m)).astype(np.int64)
 
     road_nodes_df = pl.DataFrame({"node_idx": np.arange(len(coords), dtype=np.int64), "lat": lat, "lng": lng})

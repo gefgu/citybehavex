@@ -20,7 +20,7 @@
 //! merely approximating the same formula.
 //!
 //! **Not yet ported**: the road-network-aware variant
-//! (`citybehavex.metrics.jump_lengths_km`/`radius_of_gyration_km`, used when
+//! (`fastmob.measures.individual.network_distance`, used when
 //! `comparison.road_network_distance` is enabled and a road graph exists) --
 //! most experiments in this repo don't have a road graph built yet
 //! (`road_network_available: false`), so straight-line Haversine (this

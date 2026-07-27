@@ -3,13 +3,8 @@ from __future__ import annotations
 import numpy as np
 import polars as pl
 import pytest
-
-from citybehavex.metrics import (
-    build_road_network_handle,
-    jump_lengths_km,
-    radius_of_gyration_km,
-)
-from citybehavex.roads import haversine_m
+from fastmob.measures.individual.network_distance import jump_lengths_km, radius_of_gyration_km
+from fastmob.network import RoadNetwork, haversine_m_batch
 
 
 def _tiny_road_graph():
@@ -37,7 +32,7 @@ def _tiny_road_graph():
 
 def test_jump_lengths_km_uses_road_distance_not_haversine():
     nodes_df, edges_df = _tiny_road_graph()
-    network = build_road_network_handle(edges_df, nodes_df)
+    network = RoadNetwork.build(edges_df, nodes_df)
 
     df = pl.DataFrame(
         {
@@ -56,13 +51,13 @@ def test_jump_lengths_km_uses_road_distance_not_haversine():
     # Routed along the time-optimal chain (3 * 2000m), not the direct-but-slower edge.
     assert jumps_km[0] == pytest.approx(6.0)
 
-    haversine_km = haversine_m(48.85, 2.35, 48.85, 2.38) / 1000.0
+    haversine_km = haversine_m_batch(48.85, 2.35, 48.85, 2.38) / 1000.0
     assert jumps_km[0] > haversine_km
 
 
 def test_jump_lengths_km_falls_back_to_haversine_when_unsnapped():
     nodes_df, edges_df = _tiny_road_graph()
-    network = build_road_network_handle(edges_df, nodes_df)
+    network = RoadNetwork.build(edges_df, nodes_df)
 
     # Both stops are far (>> snap_max_distance_m) from any graph node, so
     # both endpoints are unsnapped and the pair must fall back to Haversine.
@@ -78,13 +73,13 @@ def test_jump_lengths_km_falls_back_to_haversine_when_unsnapped():
         df, uid_col="uid", lat_col="lat", lng_col="lng", datetime_col="datetime",
         network=network, snap_max_distance_m=750.0,
     )
-    expected_km = haversine_m(10.0, 10.0, 10.0, 10.1) / 1000.0
+    expected_km = haversine_m_batch(10.0, 10.0, 10.0, 10.1) / 1000.0
     assert jumps_km[0] == pytest.approx(expected_km)
 
 
 def test_radius_of_gyration_km_uses_road_distance():
     nodes_df, edges_df = _tiny_road_graph()
-    network = build_road_network_handle(edges_df, nodes_df)
+    network = RoadNetwork.build(edges_df, nodes_df)
 
     df = pl.DataFrame(
         {
@@ -108,7 +103,7 @@ def test_radius_of_gyration_km_uses_road_distance():
     haversine_rog = np.sqrt(
         np.mean(
             np.square(
-                haversine_m(df["lat"].to_numpy(), df["lng"].to_numpy(), centroid_lat, centroid_lng)
+                haversine_m_batch(df["lat"].to_numpy(), df["lng"].to_numpy(), centroid_lat, centroid_lng)
                 / 1000.0
             )
         )

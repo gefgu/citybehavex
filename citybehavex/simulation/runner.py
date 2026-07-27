@@ -15,6 +15,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 import typer
 from fastmob.models import DensityEPR
+from fastmob.network import build_rail_graph, build_road_graph, snap_locations_to_graph
 
 from citybehavex.activities import (
     ActivitiesConfig,
@@ -57,7 +58,6 @@ from citybehavex.profiles import (
     score_profile_coherence_alignment,
     score_vehicle_ownership_alignment,
 )
-from citybehavex.roads import build_rail_graph, build_road_graph, snap_locations_to_graph
 from citybehavex.schedules import (
     DdcrpAgentInfo,
     DiaryBank,
