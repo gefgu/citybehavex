@@ -1,13 +1,10 @@
 from __future__ import annotations
 
-import hashlib
-import os
-import tempfile
 import time
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
-from typing import Any, Callable, Optional, Sequence
+from typing import Callable, Optional, Sequence
 
 import numpy as np
 import requests
@@ -15,87 +12,28 @@ import requests
 from citybehavex.embedding import diary_to_prose
 from citybehavex.llm_diaries import Diary
 from citybehavex.schedules.config import ScheduleConfig
+from citybehavex.utils.alignment import (
+    alignment_cache_key,
+    extract_rerank_scores,
+    post_rerank_scores,
+)
+from citybehavex.utils.cache import load_score_cache, save_score_cache
 
 
 def _cache_key(model: str | None, profile_text: str, diary_text: str) -> str:
-    raw = f"{model or ''}\x00{profile_text}\x00{diary_text}"
-    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+    return alignment_cache_key(model, profile_text, diary_text)
 
 
 def _load_cache(path: Path) -> dict[str, float]:
-    if not path.exists():
-        return {}
-    try:
-        data = np.load(path, allow_pickle=False)
-        keys = data["keys"]
-        scores = data["scores"]
-    except Exception:  # noqa: BLE001 - corrupt cache should not break a run.
-        return {}
-    return {str(k): float(scores[i]) for i, k in enumerate(keys)}
+    return load_score_cache(path)
 
 
 def _save_cache(path: Path, cache: dict[str, float]) -> None:
-    """Write the cache atomically: a crash or interrupt mid-write must never
-    leave `path` holding a truncated/corrupt ``.npz``, since it's reused
-    across runs -- only entries missing from it get re-sent to the reranker."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    keys = np.array(list(cache.keys()))
-    scores = np.array([cache[k] for k in cache], dtype=np.float32)
-    tmp_name: str | None = None
-    try:
-        with tempfile.NamedTemporaryFile(
-            mode="wb",
-            dir=path.parent,
-            prefix=path.name + ".",
-            suffix=".tmp",
-            delete=False,
-        ) as fh:
-            np.savez(fh, keys=keys, scores=scores)
-            tmp_name = fh.name
-        os.replace(tmp_name, path)
-    except BaseException:
-        if tmp_name is not None:
-            Path(tmp_name).unlink(missing_ok=True)
-        raise
+    save_score_cache(path, cache)
 
 
-def _extract_scores(payload: Any, expected: int) -> Optional[list[float]]:
-    """Parse common TEI rerank/sequence-classification response shapes."""
-    rows: Any
-    if isinstance(payload, dict):
-        rows = (
-            payload.get("data")
-            or payload.get("results")
-            or payload.get("scores")
-            or payload.get("rerank")
-        )
-    else:
-        rows = payload
-    if rows is None:
-        return None
-
-    if isinstance(rows, list) and all(isinstance(x, (int, float)) for x in rows):
-        if len(rows) != expected:
-            return None
-        return [float(x) for x in rows]
-
-    if isinstance(rows, list) and all(isinstance(x, dict) for x in rows):
-        scores = [0.0] * expected
-        seen = set()
-        for pos, row in enumerate(rows):
-            idx = int(row.get("index", row.get("corpus_id", pos)))
-            if idx < 0 or idx >= expected:
-                return None
-            raw_score = row.get("score", row.get("relevance_score"))
-            if raw_score is None:
-                return None
-            scores[idx] = float(raw_score)
-            seen.add(idx)
-        if len(seen) != expected:
-            return None
-        return scores
-
-    return None
+def _extract_scores(payload: object, expected: int) -> Optional[list[float]]:
+    return extract_rerank_scores(payload, expected)
 
 
 def _post_rerank(
@@ -106,22 +44,15 @@ def _post_rerank(
     *,
     timeout: float,
 ) -> Optional[list[float]]:
-    payload: dict[str, Any] = {
-        "query": query,
-        "texts": list(texts),
-        "raw_scores": False,
-        "truncate": True,
-    }
-    if model:
-        payload["model"] = model
-    resp = requests.post(
-        base_url.rstrip("/") + "/rerank",
-        headers={"Content-Type": "application/json"},
-        json=payload,
+    return post_rerank_scores(
+        base_url,
+        model,
+        query,
+        texts,
         timeout=timeout,
+        retries=1,
+        requests_module=requests,
     )
-    resp.raise_for_status()
-    return _extract_scores(resp.json(), len(texts))
 
 
 def _rerank_chunk_with_retries(
@@ -133,21 +64,15 @@ def _rerank_chunk_with_retries(
     timeout: float,
     retries: int,
 ) -> list[float]:
-    """Score one profile row's diary chunk, retrying transient failures. Raises
-    (rather than returning ``None``) once retries are exhausted, so callers'
-    existing broad ``except Exception: return None`` fallback still applies."""
-    last_error: Exception | None = None
-    for _attempt in range(max(1, retries)):
-        try:
-            scores = _post_rerank(base_url, model, query, texts, timeout=timeout)
-        except Exception as exc:  # noqa: BLE001 - retry, raise on exhaustion.
-            last_error = exc
-            continue
-        if scores is None:
-            last_error = ValueError("reranker response could not be parsed")
-            continue
-        return scores
-    raise RuntimeError(f"failed to score a batch of {len(texts)} diaries") from last_error
+    return post_rerank_scores(
+        base_url,
+        model,
+        query,
+        texts,
+        timeout=timeout,
+        retries=retries,
+        requests_module=requests,
+    )
 
 
 def score_alignment_matrix(

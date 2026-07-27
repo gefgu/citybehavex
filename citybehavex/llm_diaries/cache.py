@@ -7,6 +7,7 @@ from typing import Optional
 from pydantic import ValidationError
 
 from citybehavex.llm.config import LLMConfig
+from citybehavex.utils.cache import write_text_atomic
 
 from .models import DiaryBatch, DiaryValidationError, LocationCountDistribution
 
@@ -63,8 +64,7 @@ def load_validated_diary_cache(
 
 
 def save_validated_diary_cache(batch: DiaryBatch, path: Path) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(batch.model_dump_json(indent=2), encoding="utf-8")
+    write_text_atomic(path, batch.model_dump_json(indent=2), encoding="utf-8")
 
 
 def load_cache_with_fallback(

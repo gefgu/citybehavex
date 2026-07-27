@@ -30,6 +30,8 @@ import requests
 
 from citybehavex.embedding.config import EmbeddingConfig
 from citybehavex.llm_diaries import Diary
+from citybehavex.utils.cache import load_vector_cache, save_vector_cache
+from citybehavex.utils.http import post_json_with_retries
 
 
 def diary_to_text(diary: Diary) -> str:
@@ -71,24 +73,11 @@ def _cache_key(text: str, model: str, dim: int) -> str:
 
 
 def _load_cache(cache_path: Path) -> dict[str, np.ndarray]:
-    if not cache_path.exists():
-        return {}
-    try:
-        data = np.load(cache_path, allow_pickle=False)
-        keys = data["keys"]
-        vectors = data["vectors"]
-    except Exception:  # noqa: BLE001 - a corrupt cache should not be fatal.
-        return {}
-    return {str(k): vectors[i] for i, k in enumerate(keys)}
+    return load_vector_cache(cache_path)
 
 
 def _save_cache(cache_path: Path, cache: dict[str, np.ndarray]) -> None:
-    cache_path.parent.mkdir(parents=True, exist_ok=True)
-    keys = np.array(list(cache.keys()))
-    vectors = (
-        np.stack([cache[k] for k in cache]) if cache else np.empty((0, 0), dtype=np.float32)
-    )
-    np.savez(cache_path, keys=keys, vectors=vectors)
+    save_vector_cache(cache_path, cache)
 
 
 def _server_reachable(base_url: str, timeout: float) -> bool:
@@ -163,14 +152,13 @@ def _post_embeddings(
     headers = {"Content-Type": "application/json"}
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
-    resp = requests.post(
+    payload = post_json_with_retries(
         base_url.rstrip("/") + "/v1/embeddings",
         headers=headers,
-        json={"model": model, "input": list(texts), "encoding_format": "float"},
+        payload={"model": model, "input": list(texts), "encoding_format": "float"},
         timeout=timeout,
+        requests_module=requests,
     )
-    resp.raise_for_status()
-    payload = resp.json()
     rows = sorted(payload["data"], key=lambda d: d.get("index", 0))
     return np.asarray([row["embedding"] for row in rows], dtype=np.float32)
 

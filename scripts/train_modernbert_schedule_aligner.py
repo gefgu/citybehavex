@@ -15,6 +15,8 @@ import numpy as np
 import pandas as pd
 import requests
 
+from citybehavex.utils.http import post_openai_chat_json
+
 
 @dataclass(frozen=True)
 class TrainingPair:
@@ -213,36 +215,29 @@ def label_pairs(
     concurrency: int = 1,
     progress_interval: int = 0,
 ) -> pd.DataFrame:
-    headers = {"Content-Type": "application/json"}
-    if api_key:
-        headers["Authorization"] = f"Bearer {api_key}"
-
     def score_pair(pair: TrainingPair) -> dict[str, Any]:
-        last_error: Exception | None = None
-        for _attempt in range(max(1, retries)):
-            try:
-                resp = requests.post(
-                    base_url.rstrip("/") + "/v1/chat/completions",
-                    headers=headers,
-                    json={
-                        "model": model,
-                        "temperature": 0.0,
-                        "messages": [
-                            {
-                                "role": "system",
-                                "content": "You are a strict JSON scorer for mobility schedules.",
-                            },
-                            {"role": "user", "content": alignment_prompt(pair)},
-                        ],
-                        "response_format": {"type": "json_object"},
+        try:
+            payload = post_openai_chat_json(
+                base_url,
+                model=model,
+                api_key=api_key,
+                temperature=0.0,
+                messages=[
+                    {
+                        "role": "system",
+                        "content": "You are a strict JSON scorer for mobility schedules.",
                     },
-                    timeout=timeout,
-                )
-                resp.raise_for_status()
-                score = parse_alignment_payload(_parse_chat_json(resp.json()))
-                return _pair_row(pair, score)
-            except Exception as exc:  # noqa: BLE001 - retry with final failure.
-                last_error = exc
+                    {"role": "user", "content": alignment_prompt(pair)},
+                ],
+                response_format={"type": "json_object"},
+                timeout=timeout,
+                retries=retries,
+                requests_module=requests,
+            )
+            score = parse_alignment_payload(_parse_chat_json(payload))
+            return _pair_row(pair, score)
+        except Exception as exc:  # noqa: BLE001 - add pair context to final failure.
+            last_error = exc
         raise RuntimeError(
             f"failed to label profile={pair.profile_uid} diary={pair.diary_id}: {last_error}"
         ) from last_error

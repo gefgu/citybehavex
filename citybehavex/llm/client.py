@@ -6,6 +6,7 @@ import requests
 
 from citybehavex.llm.config import LLMConfig
 from citybehavex.llm_diaries.models import DiaryValidationError, LLMStats
+from citybehavex.utils.http import post_openai_chat_json
 
 
 class OpenAICompatibleDiaryClient:
@@ -42,34 +43,24 @@ class OpenAICompatibleDiaryClient:
             ) from exc
 
     def generate_json(self, prompt: str, *, stats: LLMStats | None = None) -> Any:
-        request_payload = {
-            "model": self.config.model,
-            "temperature": self.config.temperature,
-            "messages": [
+        if stats is not None:
+            with stats.lock:
+                stats.calls += 1
+        return post_openai_chat_json(
+            self.base_url,
+            model=self.config.model,
+            temperature=self.config.temperature,
+            messages=[
                 {
                     "role": "system",
                     "content": "You generate strictly valid JSON for mobility simulation.",
                 },
                 {"role": "user", "content": prompt},
             ],
-            "response_format": {"type": "json_object"},
-        }
-        if self.config.max_tokens is not None:
-            request_payload["max_tokens"] = self.config.max_tokens
-
-        if stats is not None:
-            with stats.lock:
-                stats.calls += 1
-        response = self.requests.post(
-            self.chat_url,
-            headers=self.headers,
-            json=request_payload,
+            response_format={"type": "json_object"},
+            max_tokens=self.config.max_tokens,
             timeout=self.config.timeout_seconds,
+            retries=1,
+            api_key=self.config.api_key,
+            requests_module=self.requests,
         )
-        response.raise_for_status()
-        try:
-            return response.json()
-        except ValueError as exc:
-            raise DiaryValidationError(
-                f"LLM server returned non-JSON response at {self.chat_url}: {response.text[:500]}"
-            ) from exc

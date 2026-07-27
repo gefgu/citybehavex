@@ -9,7 +9,7 @@ from citybehavex.activities.alignment import (
     ProfileClusters,
     _score_chunk_with_retries,
 )
-from citybehavex.profiles._common import (
+from citybehavex.utils.alignment import (
     alignment_cache_key,
     alignment_query_text,
     score_cached_alignment_pairs,
