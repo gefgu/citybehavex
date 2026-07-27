@@ -184,7 +184,12 @@ def _sample_conditional_work_tiles(
             sampled[i] = global_fallback[i]
             continue
 
-        dist_km = haversine_m_batch(home_lat, home_lng, work_lat, work_lng) / 1000.0
+        dist_km = haversine_m_batch(
+            np.full_like(work_lat, home_lat, dtype=np.float64),
+            np.full_like(work_lng, home_lng, dtype=np.float64),
+            work_lat,
+            work_lng,
+        ) / 1000.0
         finite = np.isfinite(dist_km)
         within = finite & (dist_km <= config.work_distance_max_km)
         candidate_mask = within if within.any() else finite

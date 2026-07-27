@@ -51,7 +51,12 @@ def test_jump_lengths_km_uses_road_distance_not_haversine():
     # Routed along the time-optimal chain (3 * 2000m), not the direct-but-slower edge.
     assert jumps_km[0] == pytest.approx(6.0)
 
-    haversine_km = haversine_m_batch(48.85, 2.35, 48.85, 2.38) / 1000.0
+    haversine_km = haversine_m_batch(
+        np.array([48.85]),
+        np.array([2.35]),
+        np.array([48.85]),
+        np.array([2.38]),
+    )[0] / 1000.0
     assert jumps_km[0] > haversine_km
 
 
@@ -73,7 +78,12 @@ def test_jump_lengths_km_falls_back_to_haversine_when_unsnapped():
         df, uid_col="uid", lat_col="lat", lng_col="lng", datetime_col="datetime",
         network=network, snap_max_distance_m=750.0,
     )
-    expected_km = haversine_m_batch(10.0, 10.0, 10.0, 10.1) / 1000.0
+    expected_km = haversine_m_batch(
+        np.array([10.0]),
+        np.array([10.0]),
+        np.array([10.0]),
+        np.array([10.1]),
+    )[0] / 1000.0
     assert jumps_km[0] == pytest.approx(expected_km)
 
 
@@ -103,7 +113,12 @@ def test_radius_of_gyration_km_uses_road_distance():
     haversine_rog = np.sqrt(
         np.mean(
             np.square(
-                haversine_m_batch(df["lat"].to_numpy(), df["lng"].to_numpy(), centroid_lat, centroid_lng)
+                haversine_m_batch(
+                    df["lat"].to_numpy(),
+                    df["lng"].to_numpy(),
+                    np.full(len(df), centroid_lat, dtype=np.float64),
+                    np.full(len(df), centroid_lng, dtype=np.float64),
+                )
                 / 1000.0
             )
         )

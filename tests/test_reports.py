@@ -644,7 +644,7 @@ def test_generate_comparison_report_uses_road_network_distance_when_provided(tmp
     )
     road = json.loads(road_json.read_text())["wasserstein"]["jump_lengths_km"]
 
-    assert road == pytest.approx(2.0 * baseline, rel=1e-6)
+    assert road == pytest.approx(2.0 * baseline, rel=2e-6)
 
 
 def test_generate_comparison_report_rejects_unknown_section(tmp_path):

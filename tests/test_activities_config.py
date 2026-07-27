@@ -14,7 +14,7 @@ from citybehavex.activities.poi_semantic import (
     semantic_cluster_for_category,
 )
 from citybehavex.config.root import CityBehavExConfig
-from citybehavex.simulation.runner import _build_activity_data
+from citybehavex.simulation.activity_pipeline import _build_activity_data
 
 
 @pytest.mark.parametrize("scale", [0.5, 1.0, 2.0])
@@ -115,7 +115,7 @@ def test_build_activity_data_calls_activity_alignment_without_probe_inputs(monke
         return None
 
     monkeypatch.setattr(
-        "citybehavex.simulation.runner.score_activity_alignment",
+        "citybehavex.simulation.activity_pipeline.score_activity_alignment",
         fake_score_activity_alignment,
     )
 
