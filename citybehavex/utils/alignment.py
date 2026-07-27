@@ -200,17 +200,22 @@ def score_cached_alignment_pairs(
             for (key, _query, _text), score in zip(chunk, chunk_scores):
                 cache[key] = float(np.clip(score, 0.0, 1.0))
 
-        if concurrency <= 1:
-            done_pairs = 0
-            for done_chunks, chunk in enumerate(chunks, start=1):
-                chunk_scores = score_chunk(
+        done_pairs = 0
+        with ThreadPoolExecutor(max_workers=max(concurrency, 1)) as executor:
+            futures = {
+                executor.submit(
+                    score_chunk,
                     base_url,
                     model,
                     [(query, text) for _key, query, text in chunk],
                     timeout=timeout_seconds,
                     retries=retries,
-                )
-                apply_chunk_scores(chunk, chunk_scores)
+                ): chunk
+                for chunk in chunks
+            }
+            for done_chunks, future in enumerate(as_completed(futures), start=1):
+                chunk = futures[future]
+                apply_chunk_scores(chunk, future.result())
                 done_pairs += len(chunk)
                 progress.report(
                     done_pairs,
@@ -218,30 +223,6 @@ def score_cached_alignment_pairs(
                     done_batches=done_chunks,
                     total_batches=len(chunks),
                 )
-        else:
-            done_pairs = 0
-            with ThreadPoolExecutor(max_workers=concurrency) as executor:
-                futures = {
-                    executor.submit(
-                        score_chunk,
-                        base_url,
-                        model,
-                        [(query, text) for _key, query, text in chunk],
-                        timeout=timeout_seconds,
-                        retries=retries,
-                    ): chunk
-                    for chunk in chunks
-                }
-                for done_chunks, future in enumerate(as_completed(futures), start=1):
-                    chunk = futures[future]
-                    apply_chunk_scores(chunk, future.result())
-                    done_pairs += len(chunk)
-                    progress.report(
-                        done_pairs,
-                        checkpoint_count=done_chunks,
-                        done_batches=done_chunks,
-                        total_batches=len(chunks),
-                    )
     finally:
         if cache_file is not None:
             save_score_cache(cache_file, cache)

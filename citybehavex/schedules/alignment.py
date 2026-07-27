@@ -143,19 +143,14 @@ def score_alignment_matrix(
             _save_cache(cache_path, cache)
 
     try:
-        if config.alignment_concurrency <= 1:
-            for row, chunk_idx in work_items:
-                _, _, scores = _run_item(row, chunk_idx)
+        with ThreadPoolExecutor(max_workers=max(config.alignment_concurrency, 1)) as executor:
+            futures = {
+                executor.submit(_run_item, row, chunk_idx): (row, chunk_idx)
+                for row, chunk_idx in work_items
+            }
+            for future in as_completed(futures):
+                row, chunk_idx, scores = future.result()
                 _apply(row, chunk_idx, scores)
-        else:
-            with ThreadPoolExecutor(max_workers=config.alignment_concurrency) as executor:
-                futures = {
-                    executor.submit(_run_item, row, chunk_idx): (row, chunk_idx)
-                    for row, chunk_idx in work_items
-                }
-                for future in as_completed(futures):
-                    row, chunk_idx, scores = future.result()
-                    _apply(row, chunk_idx, scores)
     except Exception:  # noqa: BLE001 - callers intentionally fall back.
         if cache_path is not None:
             _save_cache(cache_path, cache)
