@@ -9,9 +9,7 @@ import pytest
 from citybehavex.activities.alignment import (
     _cache_key,
     _period_cache_key,
-    _poi_cache_key,
     _poi_type_cache_key,
-    _save_cache,
     cluster_profile_embeddings,
     expand_cluster_scores,
     score_activity_alignment,
@@ -21,6 +19,8 @@ from citybehavex.activities.alignment import (
 from citybehavex.activities.config import ActivitiesConfig
 from citybehavex.activities.poi_semantic import build_poi_semantic_activity_data
 from citybehavex.llm_diaries import Diary
+from citybehavex.utils.alignment import alignment_cache_key
+from citybehavex.utils.cache import load_score_cache, save_score_cache
 
 
 def _diary(diary_id: str = "schedule-030") -> Diary:
@@ -239,7 +239,7 @@ def test_alignment_cache_keys_distinguish_score_products():
     keys = {
         _cache_key("model", "profile", block, -1, activity_text),
         _period_cache_key("model", "profile", "WORK", 2, -1, activity_text),
-        _poi_cache_key("model", "profile", "food_drink", activity_text),
+        alignment_cache_key("model", "profile", "POI", "food_drink", activity_text),
         _poi_type_cache_key("model", "profile", block, "food_drink"),
     }
     assert len(keys) == 4
@@ -459,7 +459,7 @@ def test_activity_alignment_returns_none_when_retries_exhausted(monkeypatch):
 
 def test_save_cache_is_atomic_on_failure(tmp_path, monkeypatch):
     cache_path = tmp_path / "activity_alignment_cache.npz"
-    _save_cache(cache_path, {"existing-key": 0.42})
+    save_score_cache(cache_path, {"existing-key": 0.42})
     assert cache_path.exists()
 
     original_savez = np.savez
@@ -470,13 +470,11 @@ def test_save_cache_is_atomic_on_failure(tmp_path, monkeypatch):
 
     monkeypatch.setattr(np, "savez", broken_savez)
     with pytest.raises(OSError):
-        _save_cache(cache_path, {"new-key": 0.99})
+        save_score_cache(cache_path, {"new-key": 0.99})
 
     # The original cache must survive a failed write untouched, and no stray
     # temp file should be left behind.
-    from citybehavex.activities.alignment import _load_cache
-
-    reloaded = _load_cache(cache_path)
+    reloaded = load_score_cache(cache_path)
     assert reloaded.keys() == {"existing-key"}
     assert reloaded["existing-key"] == pytest.approx(0.42)
     assert not (tmp_path / "activity_alignment_cache.npz.tmp").exists()

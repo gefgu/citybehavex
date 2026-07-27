@@ -54,8 +54,7 @@ def parse_single_diary_response(payload: Any) -> Diary:
     return parse_single_diary_content(response.choices[0].message.content)
 
 
-def diary_schema() -> dict[str, Any]:
-    return DiaryBatch.model_json_schema()
+diary_schema = DiaryBatch.model_json_schema
 
 
 def loads_model_json(content: str) -> Any:

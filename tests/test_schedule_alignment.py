@@ -5,12 +5,9 @@ import pytest
 
 from citybehavex.llm_diaries import Diary
 from citybehavex.schedules import ScheduleConfig
-from citybehavex.schedules.alignment import (
-    _extract_scores,
-    _load_cache,
-    _save_cache,
-    score_alignment_matrix,
-)
+from citybehavex.schedules.alignment import score_alignment_matrix
+from citybehavex.utils.alignment import extract_rerank_scores
+from citybehavex.utils.cache import load_score_cache, save_score_cache
 
 
 def _diary(diary_id: str, away_purpose: str, away_start: str, away_end: str) -> Diary:
@@ -27,9 +24,9 @@ def _diary(diary_id: str, away_purpose: str, away_start: str, away_end: str) -> 
 
 
 def test_extract_scores_accepts_common_tei_shapes():
-    assert _extract_scores([0.1, 0.9], 2) == [0.1, 0.9]
-    assert _extract_scores({"scores": [0.2, 0.8]}, 2) == [0.2, 0.8]
-    assert _extract_scores(
+    assert extract_rerank_scores([0.1, 0.9], 2) == [0.1, 0.9]
+    assert extract_rerank_scores({"scores": [0.2, 0.8]}, 2) == [0.2, 0.8]
+    assert extract_rerank_scores(
         [{"index": 1, "score": 0.7}, {"index": 0, "score": 0.3}], 2
     ) == [0.3, 0.7]
 
@@ -147,7 +144,7 @@ def test_score_alignment_matrix_only_refetches_missing_cache_entries(monkeypatch
 
 def test_save_cache_is_atomic_on_failure(tmp_path, monkeypatch):
     cache_path = tmp_path / "schedule_alignment_cache.npz"
-    _save_cache(cache_path, {"existing-key": 0.42})
+    save_score_cache(cache_path, {"existing-key": 0.42})
     assert cache_path.exists()
 
     original_savez = np.savez
@@ -158,9 +155,9 @@ def test_save_cache_is_atomic_on_failure(tmp_path, monkeypatch):
 
     monkeypatch.setattr(np, "savez", broken_savez)
     with pytest.raises(OSError):
-        _save_cache(cache_path, {"new-key": 0.99})
+        save_score_cache(cache_path, {"new-key": 0.99})
 
-    reloaded = _load_cache(cache_path)
+    reloaded = load_score_cache(cache_path)
     assert reloaded.keys() == {"existing-key"}
     assert reloaded["existing-key"] == pytest.approx(0.42)
     assert not (tmp_path / "schedule_alignment_cache.npz.tmp").exists()

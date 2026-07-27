@@ -14,7 +14,6 @@ from citybehavex.reports import (
     ALL_REPORT_SECTIONS,
     _activities_sidecar_path,
     _collapse_explicit_purposes,
-    _common_part_of_commuters,
     _daily_location_lognormal_dataset,
     _derive_purpose_groups_from_heuristic,
     _mobility_law_visits,
@@ -108,40 +107,6 @@ def test_trajectory_od_matrix_orders_users_and_excludes_invalid_and_self_loops()
     assert row[destination][0] == 2.0
     assert float(matrix.select(pl.exclude("origin")).sum_horizontal().sum()) == 2.0
     assert origin not in matrix.columns
-
-
-def test_common_part_of_commuters_uses_trajectory_cpc(monkeypatch):
-    traj = SimpleNamespace(
-        df=pd.DataFrame(
-            {
-                "uid": [1, 1],
-                "datetime": pd.to_datetime(
-                    ["2026-01-01 08:00:00", "2026-01-01 09:00:00"]
-                ),
-                "lat": [48.85, 48.90],
-                "lng": [2.35, 2.45],
-            }
-        ),
-        uid_col="uid",
-        datetime_col="datetime",
-        lat_col="lat",
-        lng_col="lng",
-    )
-    calls = []
-
-    def cpc_multi(synthetic_traj, observed_traj, *, resolutions):
-        calls.append((synthetic_traj, observed_traj, resolutions))
-        return [(r, 0.75) for r in resolutions]
-
-    monkeypatch.setattr(
-        "citybehavex.reports.comparison.trajectory_common_part_of_commuters_multi",
-        cpc_multi,
-    )
-
-    values = _common_part_of_commuters(traj, traj)
-
-    assert values == [(7, 0.75), (8, 0.75), (9, 0.75)]
-    assert calls == [(traj, traj, (7, 8, 9))]
 
 
 def test_motif_visits_use_h3_locations_and_binary_purposes():
