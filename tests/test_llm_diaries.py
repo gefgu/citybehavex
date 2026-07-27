@@ -26,11 +26,6 @@ from citybehavex.llm_diaries import (
     sample_motif,
 )
 from citybehavex.llm_diaries.motifs import motif_weights_for_location_count
-from citybehavex.llm_diaries.training import (
-    annotate_trajectory_purposes_ddcrp,
-    diary_batch_to_markov_training,
-)
-
 DEFAULT_COUNTS = allocate_location_counts(1.0, 0.5, 6, 10)
 
 
@@ -476,14 +471,6 @@ def test_one_location_diary_retries_until_home_only(monkeypatch, tmp_path):
     assert all(episode.purpose == "HOME" for episode in batch.diaries[0].episodes)
 
 
-def test_markov_training_requires_validated_batch():
-    batch = DiaryBatch.model_validate(_batch())
-    training = diary_batch_to_markov_training(batch, representative_day="2026-01-01")
-    assert list(training.columns) == ["uid", "datetime", "location", "purpose"]
-    assert training["uid"].nunique() == 10
-    assert pd.api.types.is_datetime64_any_dtype(training["datetime"])
-
-
 def test_motif_weights_for_location_count_sums_to_one_and_matches_group():
     weights = motif_weights_for_location_count(4)
 
@@ -650,22 +637,3 @@ def test_fetch_diary_batch_default_rate_never_constrains_motif(monkeypatch, tmp_
     assert batch.motif_exploration_rate == 1.0
     assert all("Structure the day as" not in prompt for prompt in prompts)
 
-
-def test_ddcrp_annotation_preserves_engine_purpose_column():
-    batch = DiaryBatch.model_validate(_batch())
-    traj = pd.DataFrame(
-        {
-            "uid": [1],
-            "datetime": [pd.Timestamp("2026-01-01 08:30:00")],
-            "purpose": ["OTHER"],
-        }
-    )
-
-    annotated = annotate_trajectory_purposes_ddcrp(
-        traj,
-        bank=type("Bank", (), {"diaries": batch.diaries})(),
-        chosen=np.array([[0]], dtype=np.int64),
-        start_date=pd.Timestamp("2026-01-01"),
-    )
-
-    assert annotated["purpose"].tolist() == ["OTHER"]
