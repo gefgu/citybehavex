@@ -11,6 +11,7 @@ import fastmob
 import h3
 import numpy as np
 import pandas as pd
+import polars as pl
 import pyarrow as pa
 import pyarrow.parquet as pq
 import typer
@@ -65,7 +66,19 @@ from citybehavex.schedules import (
     build_diary_bank,
     score_alignment_matrix,
 )
-from citybehavex.simulation.core import CoreTiming, simulate_agents, social_network_sidecar_path
+from citybehavex.simulation.core import simulate_agents, social_network_sidecar_path
+from citybehavex.simulation.inputs import (
+    ActivityInputs,
+    CoreTiming,
+    DiaryInputs,
+    InitialLocationInputs,
+    LocationInputs,
+    NetworkInputs,
+    OutputHooks,
+    SimulationRunParams,
+    SocialGraphInputs,
+    TransportInputs,
+)
 from citybehavex.tessellation import (
     build_poi_tessellation,
     build_tessellation,
@@ -1149,10 +1162,13 @@ class _IncrementalParquetWriter:
         self._writer: pq.ParquetWriter | None = None
         self.rows_written = 0
 
-    def write(self, chunk: pd.DataFrame) -> None:
-        if chunk.empty:
+    def write(self, chunk: pd.DataFrame | pl.DataFrame) -> None:
+        if len(chunk) == 0:
             return
-        table = pa.Table.from_pandas(chunk, preserve_index=False)
+        if isinstance(chunk, pl.DataFrame):
+            table = chunk.to_arrow()
+        else:
+            table = pa.Table.from_pandas(chunk, preserve_index=False)
         if self._writer is None:
             self._writer = pq.ParquetWriter(self._path, table.schema)
         self._writer.write_table(table)
@@ -1234,12 +1250,12 @@ def _run_simulation_core(
             f"max {rn.max_leg_waypoints} waypoints/leg"
         )
         road_kwargs = dict(
-            road_edge_from=edges_df["from_node"].to_numpy(dtype=np.int64),
-            road_edge_to=edges_df["to_node"].to_numpy(dtype=np.int64),
-            road_edge_weight_ds=edges_df["weight_ds"].to_numpy(dtype=np.int64),
-            road_node_lats=nodes_df["lat"].to_numpy(dtype=np.float64),
-            road_node_lngs=nodes_df["lng"].to_numpy(dtype=np.float64),
-            location_road_node=tessellation_df["road_node"].to_numpy(dtype=np.int64),
+            edge_from=edges_df["from_node"].to_numpy(dtype=np.int64),
+            edge_to=edges_df["to_node"].to_numpy(dtype=np.int64),
+            edge_weight_ds=edges_df["weight_ds"].to_numpy(dtype=np.int64),
+            node_lats=nodes_df["lat"].to_numpy(dtype=np.float64),
+            node_lngs=nodes_df["lng"].to_numpy(dtype=np.float64),
+            location_node=tessellation_df["road_node"].to_numpy(dtype=np.int64),
             max_leg_waypoints=rn.max_leg_waypoints,
         )
 
@@ -1272,13 +1288,13 @@ def _run_simulation_core(
             f"max {railn.max_leg_waypoints} waypoints/leg"
         )
         rail_kwargs = dict(
-            rail_edge_from=rail_edges_df["from_node"].to_numpy(dtype=np.int64),
-            rail_edge_to=rail_edges_df["to_node"].to_numpy(dtype=np.int64),
-            rail_edge_weight_ds=rail_edges_df["weight_ds"].to_numpy(dtype=np.int64),
-            rail_node_lats=rail_nodes_df["lat"].to_numpy(dtype=np.float64),
-            rail_node_lngs=rail_nodes_df["lng"].to_numpy(dtype=np.float64),
-            location_rail_node=tessellation_df["rail_node"].to_numpy(dtype=np.int64),
-            max_rail_leg_waypoints=railn.max_leg_waypoints,
+            edge_from=rail_edges_df["from_node"].to_numpy(dtype=np.int64),
+            edge_to=rail_edges_df["to_node"].to_numpy(dtype=np.int64),
+            edge_weight_ds=rail_edges_df["weight_ds"].to_numpy(dtype=np.int64),
+            node_lats=rail_nodes_df["lat"].to_numpy(dtype=np.float64),
+            node_lngs=rail_nodes_df["lng"].to_numpy(dtype=np.float64),
+            location_node=tessellation_df["rail_node"].to_numpy(dtype=np.int64),
+            max_leg_waypoints=railn.max_leg_waypoints,
         )
 
     base = output_path or config.simulation.output
@@ -1303,7 +1319,11 @@ def _run_simulation_core(
     if trip_writer is not None:
 
         def on_trip_day_flush(chunk_df):
-            trip_writer.write(_merge_tessellation_metadata(chunk_df, tessellation_df, ["tile_id", "category"]))
+            trip_writer.write(
+                _merge_tessellation_metadata(
+                    chunk_df.to_pandas(), tessellation_df, ["tile_id", "category"]
+                )
+            )
 
     act_path = base.replace(".parquet", "_activities.parquet")
     stream_activities = config.simulation.stream_output
@@ -1313,32 +1333,33 @@ def _run_simulation_core(
     profile_types = [p.job for p in profiles] if profiles is not None else None
     has_car = np.asarray([p.has_car for p in profiles], dtype=np.bool_) if profiles is not None else None
     has_bike = np.asarray([p.has_bike for p in profiles], dtype=np.bool_) if profiles is not None else None
-    df, encounters, moving, activities, social_graph = simulate_agents(
+    locations = LocationInputs.from_tessellation(
         tessellation_df,
         relevance_column,
-        diary_arrays,
+        location_semantic_cluster_ids=location_semantic_cluster_ids,
+        poi_type_choice_enabled=config.activities.poi_type_choice_enabled
+        and poi_type_alignment_scores is not None,
+        poi_type_alignment_scores=poi_type_alignment_scores,
+        poi_type_choice_temperature=config.activities.poi_type_choice_temperature,
+        poi_type_choice_alpha=config.activities.poi_type_choice_alpha,
+    )
+    params = SimulationRunParams.from_hours(
         start_ts=int(start_date.timestamp()),
         end_ts=int(end_date.timestamp()),
         slot_seconds=granularity * 60,
         car_speed_kmh=config.simulation.car_speed_kmh,
         walking_speed_kmh=config.simulation.walking_speed_kmh,
         bike_speed_kmh=config.simulation.bike_speed_kmh,
-        walking_threshold_mu_ln_km=config.simulation.walking_threshold_mu_ln_km,
-        walking_threshold_sigma_ln=config.simulation.walking_threshold_sigma_ln,
-        bike_threshold_mu_ln_km=config.simulation.bike_threshold_mu_ln_km,
-        bike_threshold_sigma_ln=config.simulation.bike_threshold_sigma_ln,
         n_agents=config.simulation.agents,
         random_state=config.simulation.random_state,
-        social_graph_k=config.social.social_graph_k,
-        profile_graph_exact_threshold=config.social.profile_graph_exact_threshold,
-        home_h3_resolution=config.social.home_h3_resolution,
-        work_h3_resolution=config.social.work_h3_resolution,
-        degree_mu_ln=config.social.degree_mu_ln,
-        degree_sigma_ln=config.social.degree_sigma_ln,
-        max_degree=config.social.max_degree,
-        similarity_temperature=config.social.similarity_temperature,
-        max_candidate_pool=config.social.max_candidate_pool,
-        max_ring_expansion=config.social.max_ring_expansion,
+        rho=config.simulation.rho,
+        gamma=config.simulation.gamma,
+        alpha=config.simulation.alpha,
+        dt_update_mob_sim_hours=config.simulation.dt_update_mob_sim_hours,
+        indipendency_window_hours=config.simulation.indipendency_window_hours,
+        gravity_deterrence_exponent=config.simulation.gravity_deterrence_exponent,
+        gravity_origin_exponent=config.simulation.gravity_origin_exponent,
+        gravity_destination_exponent=config.simulation.gravity_destination_exponent,
         dynamic_friendships_enabled=config.social.dynamic_friendships_enabled,
         friendship_update_interval_hours=config.social.friendship_update_interval_hours,
         encounter_window_hours=config.social.encounter_window_hours,
@@ -1352,47 +1373,78 @@ def _run_simulation_core(
         strength_decay_rate=config.social.strength_decay_rate,
         max_dynamic_degree=config.social.max_dynamic_degree,
         max_colocation_group_size=config.social.max_colocation_group_size,
-        rho=config.simulation.rho,
-        gamma=config.simulation.gamma,
-        alpha=config.simulation.alpha,
-        dt_update_mob_sim_hours=config.simulation.dt_update_mob_sim_hours,
-        indipendency_window_hours=config.simulation.indipendency_window_hours,
-        gravity_deterrence_exponent=config.simulation.gravity_deterrence_exponent,
-        gravity_origin_exponent=config.simulation.gravity_origin_exponent,
-        gravity_destination_exponent=config.simulation.gravity_destination_exponent,
-        timing=timing,
+    )
+    initial_locations = InitialLocationInputs.build(
         starting_locs=home_tiles,
         work_tiles=work_tiles,
+        locations=locations,
+        n_agents=config.simulation.agents,
+        random_state=config.simulation.random_state,
+    )
+    social_graph_inputs = SocialGraphInputs.build(
+        n_agents=config.simulation.agents,
+        random_state=config.simulation.random_state,
+        locations=locations,
+        initial_locations=initial_locations,
         profile_embeddings=profile_embeddings,
+        social_graph_k=config.social.social_graph_k,
+        profile_graph_exact_threshold=config.social.profile_graph_exact_threshold,
+        home_h3_resolution=config.social.home_h3_resolution,
+        work_h3_resolution=config.social.work_h3_resolution,
+        degree_mu_ln=config.social.degree_mu_ln,
+        degree_sigma_ln=config.social.degree_sigma_ln,
+        max_degree=config.social.max_degree,
+        similarity_temperature=config.social.similarity_temperature,
+        max_candidate_pool=config.social.max_candidate_pool,
+        max_ring_expansion=config.social.max_ring_expansion,
+    )
+    activity_inputs = ActivityInputs.build(
+        n_agents=config.simulation.agents,
         act_embs=act_embs,
         act_dur_mu=act_dur_mu,
         act_dur_sigma=act_dur_sigma,
         purpose_act_starts=purpose_act_starts,
         purpose_acts=purpose_acts,
+        profile_embeddings=profile_embeddings,
         act_kappa=config.activities.kappa,
         act_temp=config.activities.temperature,
         activity_alignment_scores=activity_alignment_scores,
         activity_cluster_labels=activity_cluster_labels,
         poi_semantic_scores=poi_semantic_scores,
-        location_semantic_cluster_ids=location_semantic_cluster_ids,
         poi_mask_starts=poi_mask_starts,
         poi_mask_activities=poi_mask_activities,
-        poi_type_choice_enabled=config.activities.poi_type_choice_enabled and poi_type_alignment_scores is not None,
-        poi_type_alignment_scores=poi_type_alignment_scores,
-        poi_type_choice_temperature=config.activities.poi_type_choice_temperature,
-        poi_type_choice_alpha=config.activities.poi_type_choice_alpha,
         activity_history_weight=config.activities.history_weight,
         materialize_travel=config.activities.materialize_travel,
-        return_social_graph=True,
-        social_node_profiles=profile_types,
+    )
+    transport_inputs = TransportInputs.build(
+        n_agents=config.simulation.agents,
+        random_state=config.simulation.random_state,
         has_car=has_car,
         has_bike=has_bike,
-        on_day_flush=on_day_flush,
-        on_encounter_day_flush=on_encounter_day_flush,
-        on_trip_day_flush=on_trip_day_flush,
-        on_activity_day_flush=on_activity_day_flush,
-        **road_kwargs,
-        **rail_kwargs,
+        walking_threshold_mu_ln_km=config.simulation.walking_threshold_mu_ln_km,
+        walking_threshold_sigma_ln=config.simulation.walking_threshold_sigma_ln,
+        bike_threshold_mu_ln_km=config.simulation.bike_threshold_mu_ln_km,
+        bike_threshold_sigma_ln=config.simulation.bike_threshold_sigma_ln,
+    )
+    df, encounters, moving, activities, social_graph = simulate_agents(
+        locations,
+        DiaryInputs.from_arrays(diary_arrays),
+        params,
+        initial_locations=initial_locations,
+        social_graph=social_graph_inputs,
+        activities=activity_inputs,
+        transport=transport_inputs,
+        road_network=NetworkInputs.from_arrays(n_locations=len(tessellation_df), **road_kwargs),
+        rail_network=NetworkInputs.from_arrays(n_locations=len(tessellation_df), **rail_kwargs),
+        output_hooks=OutputHooks(
+            on_day_flush=on_day_flush,
+            on_encounter_day_flush=on_encounter_day_flush,
+            on_trip_day_flush=on_trip_day_flush,
+            on_activity_day_flush=on_activity_day_flush,
+        ),
+        timing=timing,
+        return_social_graph=True,
+        social_node_profiles=profile_types,
     )
     social_path = social_network_sidecar_path(base)
     social_graph.write_json(social_path)
@@ -1410,7 +1462,7 @@ def _run_simulation_core(
                 f"Saved {encounters_writer.rows_written:,} encounters (streamed) -> {enc_path}"
             )
     elif len(encounters) > 0:
-        encounters.to_parquet(enc_path, index=False)
+        encounters.write_parquet(enc_path)
         typer.echo(f"Saved {len(encounters):,} encounters -> {enc_path}")
     if moving_writer is not None:
         # `moving` here is only the final day's still-open tail -- everything
@@ -1420,7 +1472,7 @@ def _run_simulation_core(
         if moving_writer.rows_written > 0:
             typer.echo(f"Saved {moving_writer.rows_written:,} waypoints (streamed) -> {moving_path}")
     elif transport_paths_enabled and len(moving) > 0:
-        moving.to_parquet(moving_path, index=False)
+        moving.write_parquet(moving_path)
         typer.echo(f"Saved {len(moving):,} waypoints -> {moving_path}")
     if activities_writer is not None:
         # `activities` here is only the tail since the last flush -- earlier
@@ -1430,10 +1482,10 @@ def _run_simulation_core(
         if activities_writer.rows_written > 0:
             typer.echo(f"Saved {activities_writer.rows_written:,} activities (streamed) -> {act_path}")
     elif config.activities.enabled and len(activities) > 0:
-        activities.to_parquet(act_path, index=False)
+        activities.write_parquet(act_path)
         typer.echo(f"Saved {len(activities):,} activities -> {act_path}")
 
-    df = _merge_tessellation_metadata(df, tessellation_df, ["tile_id", "category"])
+    df = _merge_tessellation_metadata(df.to_pandas(), tessellation_df, ["tile_id", "category"])
     if trip_writer is not None:
         # `df` here is only the tail (the final, possibly-partial day plus
         # every agent's still-open stop) -- earlier days were already

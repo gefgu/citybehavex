@@ -3,7 +3,7 @@ from __future__ import annotations
 import h3
 import numpy as np
 
-from citybehavex.simulation.social_graph import (
+from citybehavex.social.social_graph import (
     build_colocation_social_graph,
     build_knn_fallback_social_graph,
     build_profile_social_graph,

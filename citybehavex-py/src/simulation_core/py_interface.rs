@@ -1,4 +1,5 @@
 use numpy::{IntoPyArray, PyArray1, PyReadonlyArray1};
+use pyo3::CastError;
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3::types::PyAny;
@@ -13,11 +14,56 @@ use crate::simulation_core::outputs::{
 };
 use fastmob_core::network::road_graph::{RoadGraph, batch_road_distances};
 
-/// Borrowed slice from an optional numpy array, or an empty slice when absent.
-fn opt_slice<'a, T: numpy::Element>(v: &'a Option<PyReadonlyArray1<'_, T>>) -> PyResult<&'a [T]> {
-    match v {
-        Some(arr) => Ok(arr.as_slice()?),
-        None => Ok(&[]),
+fn array_attr<'py, T: numpy::Element>(
+    obj: &Bound<'py, PyAny>,
+    name: &str,
+) -> PyResult<PyReadonlyArray1<'py, T>> {
+    obj.getattr(name)?
+        .extract()
+        .map_err(|e: CastError<'_, '_>| PyValueError::new_err(e.to_string()))
+}
+
+fn opt_array_attr<'py, T: numpy::Element>(
+    obj: &Bound<'py, PyAny>,
+    name: &str,
+) -> PyResult<Option<PyReadonlyArray1<'py, T>>> {
+    let value = obj.getattr(name)?;
+    if value.is_none() {
+        Ok(None)
+    } else {
+        value
+            .extract()
+            .map(Some)
+            .map_err(|e: CastError<'_, '_>| PyValueError::new_err(e.to_string()))
+    }
+}
+
+fn bool_attr(obj: &Bound<'_, PyAny>, name: &str) -> PyResult<bool> {
+    let value = obj.getattr(name)?;
+    value.extract()
+}
+
+fn f64_attr(obj: &Bound<'_, PyAny>, name: &str) -> PyResult<f64> {
+    let value = obj.getattr(name)?;
+    value.extract()
+}
+
+fn i64_attr(obj: &Bound<'_, PyAny>, name: &str) -> PyResult<i64> {
+    let value = obj.getattr(name)?;
+    value.extract()
+}
+
+fn usize_attr(obj: &Bound<'_, PyAny>, name: &str) -> PyResult<usize> {
+    let value = obj.getattr(name)?;
+    value.extract()
+}
+
+fn opt_u64_attr(obj: &Bound<'_, PyAny>, name: &str) -> PyResult<Option<u64>> {
+    let value = obj.getattr(name)?;
+    if value.is_none() {
+        Ok(None)
+    } else {
+        Ok(Some(value.extract()?))
     }
 }
 
@@ -42,174 +88,98 @@ fn opt_i64_as_usize_vec(v: &Option<PyReadonlyArray1<'_, i64>>) -> PyResult<Optio
 #[pyfunction]
 #[allow(clippy::too_many_arguments, clippy::type_complexity)]
 #[pyo3(signature = (
-    latitudes, longitudes, relevances, distances,
-    neighbor_starts, neighbors,
-    diary_timestamps, diary_abs_locs, diary_starts, diary_ends,
-    rho, gamma, alpha,
-    start_ts, end_ts, indipendency_window_s, dt_update_mob_sim_s,
-    slot_seconds, car_speed_kmh,
-    n_agents, master_seed=None, diary_block_ids=None, starting_locs=None,
-    starting_locs_mode_relevance=false,
-    work_tiles=None,
-    edge_profile_sim=None,
-    act_embs=None, act_dur_mu=None, act_dur_sigma=None,
-    purpose_act_starts=None, purpose_acts=None,
-    profile_embs=None, emb_dim=0usize,
-    act_kappa=1.0f64, act_temp=0.5f64,
-    profile_act_sims=None,
-    activity_alignment_scores=None, activity_cluster_labels=None,
-    activity_alignment_clusters=0usize, activity_alignment_blocks=0usize,
-    activity_alignment_previous=0usize,
-    poi_semantic_scores=None, location_semantic_cluster_ids=None,
-    poi_mask_starts=None, poi_mask_activities=None,
-    poi_semantic_clusters=0usize,
-    poi_type_choice_enabled=false,
-    poi_type_alignment_scores=None, poi_type_alignment_blocks=0usize,
-    poi_type_alignment_clusters=0usize, poi_type_choice_temperature=0.5f64,
-    poi_type_choice_alpha=1.0f64,
-    activity_history_weight=1.0f64,
-    materialize_travel=true,
-    road_edge_from=None, road_edge_to=None, road_edge_weight_ds=None,
-    road_node_lats=None, road_node_lngs=None, location_road_node=None,
-    max_leg_waypoints=16usize,
-    gravity_deterrence_exponent=-2.0f64, gravity_origin_exponent=1.0f64,
-    gravity_destination_exponent=1.0f64,
-    walking_speed_kmh=4.8f64, bike_speed_kmh=15.0f64,
-    has_car=None, has_bike=None, walking_threshold_km=None, bike_threshold_km=None,
-    rail_edge_from=None, rail_edge_to=None, rail_edge_weight_ds=None,
-    rail_node_lats=None, rail_node_lngs=None, location_rail_node=None,
-    max_rail_leg_waypoints=16usize,
+    locations,
+    social_graph,
+    diary,
+    params,
+    initial_locations,
+    activities,
+    road_network,
+    rail_network,
+    transport,
     on_day_flush=None,
     on_encounter_day_flush=None,
     on_trip_day_flush=None,
     on_activity_day_flush=None,
-    dynamic_friendships_enabled=false,
-    friendship_update_interval_s=86400i64,
-    encounter_window_s=604800i64,
-    regularity_threshold=0.3f64,
-    topological_overlap_threshold=0.05f64,
-    recast_random_baseline_samples=256usize,
-    recast_random_chance_probability=0.001f64,
-    strength_initial=0.1f64,
-    strength_growth_mu_ln=-2.3f64,
-    strength_growth_sigma_ln=0.5f64,
-    strength_decay_rate=0.05f64,
-    max_dynamic_degree=200usize,
-    max_colocation_group_size=50usize,
     return_social_edges=false
 ))]
 pub fn simulation_core_simulate_agents<'py>(
     py: Python<'py>,
-    latitudes: PyReadonlyArray1<'py, f64>,
-    longitudes: PyReadonlyArray1<'py, f64>,
-    relevances: PyReadonlyArray1<'py, f64>,
-    distances: PyReadonlyArray1<'py, f64>,
-    neighbor_starts: PyReadonlyArray1<'py, i64>,
-    neighbors: PyReadonlyArray1<'py, i64>,
-    diary_timestamps: PyReadonlyArray1<'py, i64>,
-    diary_abs_locs: PyReadonlyArray1<'py, i32>,
-    diary_starts: PyReadonlyArray1<'py, i64>,
-    diary_ends: PyReadonlyArray1<'py, i64>,
-    rho: f64,
-    gamma: f64,
-    alpha: f64,
-    start_ts: i64,
-    end_ts: i64,
-    indipendency_window_s: i64,
-    dt_update_mob_sim_s: i64,
-    slot_seconds: i64,
-    car_speed_kmh: f64,
-    n_agents: usize,
-    master_seed: Option<u64>,
-    diary_block_ids: Option<PyReadonlyArray1<'py, i32>>,
-    starting_locs: Option<PyReadonlyArray1<'py, i64>>,
-    starting_locs_mode_relevance: bool,
-    work_tiles: Option<PyReadonlyArray1<'py, i64>>,
-    edge_profile_sim: Option<PyReadonlyArray1<'py, f64>>,
-    act_embs: Option<PyReadonlyArray1<'py, f64>>,
-    act_dur_mu: Option<PyReadonlyArray1<'py, f64>>,
-    act_dur_sigma: Option<PyReadonlyArray1<'py, f64>>,
-    purpose_act_starts: Option<PyReadonlyArray1<'py, i64>>,
-    purpose_acts: Option<PyReadonlyArray1<'py, i64>>,
-    profile_embs: Option<PyReadonlyArray1<'py, f64>>,
-    emb_dim: usize,
-    act_kappa: f64,
-    act_temp: f64,
-    profile_act_sims: Option<PyReadonlyArray1<'py, f64>>,
-    activity_alignment_scores: Option<PyReadonlyArray1<'py, f64>>,
-    activity_cluster_labels: Option<PyReadonlyArray1<'py, i64>>,
-    activity_alignment_clusters: usize,
-    activity_alignment_blocks: usize,
-    activity_alignment_previous: usize,
-    poi_semantic_scores: Option<PyReadonlyArray1<'py, f64>>,
-    location_semantic_cluster_ids: Option<PyReadonlyArray1<'py, i64>>,
-    poi_mask_starts: Option<PyReadonlyArray1<'py, i64>>,
-    poi_mask_activities: Option<PyReadonlyArray1<'py, i64>>,
-    poi_semantic_clusters: usize,
-    poi_type_choice_enabled: bool,
-    poi_type_alignment_scores: Option<PyReadonlyArray1<'py, f64>>,
-    poi_type_alignment_blocks: usize,
-    poi_type_alignment_clusters: usize,
-    poi_type_choice_temperature: f64,
-    poi_type_choice_alpha: f64,
-    activity_history_weight: f64,
-    materialize_travel: bool,
-    road_edge_from: Option<PyReadonlyArray1<'py, i64>>,
-    road_edge_to: Option<PyReadonlyArray1<'py, i64>>,
-    road_edge_weight_ds: Option<PyReadonlyArray1<'py, i64>>,
-    road_node_lats: Option<PyReadonlyArray1<'py, f64>>,
-    road_node_lngs: Option<PyReadonlyArray1<'py, f64>>,
-    location_road_node: Option<PyReadonlyArray1<'py, i64>>,
-    max_leg_waypoints: usize,
-    gravity_deterrence_exponent: f64,
-    gravity_origin_exponent: f64,
-    gravity_destination_exponent: f64,
-    walking_speed_kmh: f64,
-    bike_speed_kmh: f64,
-    has_car: Option<PyReadonlyArray1<'py, bool>>,
-    has_bike: Option<PyReadonlyArray1<'py, bool>>,
-    walking_threshold_km: Option<PyReadonlyArray1<'py, f64>>,
-    bike_threshold_km: Option<PyReadonlyArray1<'py, f64>>,
-    rail_edge_from: Option<PyReadonlyArray1<'py, i64>>,
-    rail_edge_to: Option<PyReadonlyArray1<'py, i64>>,
-    rail_edge_weight_ds: Option<PyReadonlyArray1<'py, i64>>,
-    rail_node_lats: Option<PyReadonlyArray1<'py, f64>>,
-    rail_node_lngs: Option<PyReadonlyArray1<'py, f64>>,
-    location_rail_node: Option<PyReadonlyArray1<'py, i64>>,
-    max_rail_leg_waypoints: usize,
+    locations: Bound<'py, PyAny>,
+    social_graph: Bound<'py, PyAny>,
+    diary: Bound<'py, PyAny>,
+    params: Bound<'py, PyAny>,
+    initial_locations: Bound<'py, PyAny>,
+    activities: Bound<'py, PyAny>,
+    road_network: Bound<'py, PyAny>,
+    rail_network: Bound<'py, PyAny>,
+    transport: Bound<'py, PyAny>,
     on_day_flush: Option<Py<PyAny>>,
     on_encounter_day_flush: Option<Py<PyAny>>,
     on_trip_day_flush: Option<Py<PyAny>>,
     on_activity_day_flush: Option<Py<PyAny>>,
-    dynamic_friendships_enabled: bool,
-    friendship_update_interval_s: i64,
-    encounter_window_s: i64,
-    regularity_threshold: f64,
-    topological_overlap_threshold: f64,
-    recast_random_baseline_samples: usize,
-    recast_random_chance_probability: f64,
-    strength_initial: f64,
-    strength_growth_mu_ln: f64,
-    strength_growth_sigma_ln: f64,
-    strength_decay_rate: f64,
-    max_dynamic_degree: usize,
-    max_colocation_group_size: usize,
     return_social_edges: bool,
 ) -> PyResult<Py<PyAny>> {
+    let latitudes = array_attr::<f64>(&locations, "latitudes")?;
+    let longitudes = array_attr::<f64>(&locations, "longitudes")?;
+    let relevances = array_attr::<f64>(&locations, "relevances")?;
+    let distances = array_attr::<f64>(&locations, "distances")?;
+    let location_semantic_cluster_ids =
+        array_attr::<i64>(&locations, "location_semantic_cluster_ids")?;
+    let poi_type_alignment_scores = array_attr::<f64>(&locations, "poi_type_alignment_scores")?;
+
+    let neighbor_starts = array_attr::<i64>(&social_graph, "neighbor_starts")?;
+    let neighbors = array_attr::<i64>(&social_graph, "neighbors")?;
+    let edge_profile_sim = array_attr::<f64>(&social_graph, "edge_profile_sim")?;
+
+    let diary_timestamps = array_attr::<i64>(&diary, "diary_timestamps")?;
+    let diary_abs_locs = array_attr::<i32>(&diary, "diary_abs_locs")?;
+    let diary_starts = array_attr::<i64>(&diary, "diary_starts")?;
+    let diary_ends = array_attr::<i64>(&diary, "diary_ends")?;
+    let diary_block_ids = array_attr::<i32>(&diary, "diary_block_ids")?;
+
+    let starting_locs = opt_array_attr::<i64>(&initial_locations, "starting_locs")?;
+    let work_tiles = array_attr::<i64>(&initial_locations, "work_tiles")?;
+
+    let act_embs = array_attr::<f64>(&activities, "act_embs")?;
+    let act_dur_mu = array_attr::<f64>(&activities, "act_dur_mu")?;
+    let act_dur_sigma = array_attr::<f64>(&activities, "act_dur_sigma")?;
+    let purpose_act_starts = array_attr::<i64>(&activities, "purpose_act_starts")?;
+    let purpose_acts = array_attr::<i64>(&activities, "purpose_acts")?;
+    let profile_embs = array_attr::<f64>(&activities, "profile_embs")?;
+    let profile_act_sims = array_attr::<f64>(&activities, "profile_act_sims")?;
+    let activity_alignment_scores = array_attr::<f64>(&activities, "activity_alignment_scores")?;
+    let activity_cluster_labels = array_attr::<i64>(&activities, "activity_cluster_labels")?;
+    let poi_semantic_scores = array_attr::<f64>(&activities, "poi_semantic_scores")?;
+    let poi_mask_starts = array_attr::<i64>(&activities, "poi_mask_starts")?;
+    let poi_mask_activities = array_attr::<i64>(&activities, "poi_mask_activities")?;
+
+    let road_edge_from = array_attr::<i64>(&road_network, "edge_from")?;
+    let road_edge_to = array_attr::<i64>(&road_network, "edge_to")?;
+    let road_edge_weight_ds = array_attr::<i64>(&road_network, "edge_weight_ds")?;
+    let road_node_lats = array_attr::<f64>(&road_network, "node_lats")?;
+    let road_node_lngs = array_attr::<f64>(&road_network, "node_lngs")?;
+    let location_road_node = array_attr::<i64>(&road_network, "location_node")?;
+
+    let rail_edge_from = array_attr::<i64>(&rail_network, "edge_from")?;
+    let rail_edge_to = array_attr::<i64>(&rail_network, "edge_to")?;
+    let rail_edge_weight_ds = array_attr::<i64>(&rail_network, "edge_weight_ds")?;
+    let rail_node_lats = array_attr::<f64>(&rail_network, "node_lats")?;
+    let rail_node_lngs = array_attr::<f64>(&rail_network, "node_lngs")?;
+    let location_rail_node = array_attr::<i64>(&rail_network, "location_node")?;
+
+    let has_car = array_attr::<bool>(&transport, "has_car")?;
+    let has_bike = array_attr::<bool>(&transport, "has_bike")?;
+    let walking_threshold_km = array_attr::<f64>(&transport, "walking_threshold_km")?;
+    let bike_threshold_km = array_attr::<f64>(&transport, "bike_threshold_km")?;
+
     let lats = latitudes.as_slice()?;
     let lngs = longitudes.as_slice()?;
     let rels = relevances.as_slice()?;
     let dists = distances.as_slice()?;
     let dt_raw = diary_timestamps.as_slice()?;
     let da_raw = diary_abs_locs.as_slice()?;
-    let default_block_ids;
-    let db_raw = match &diary_block_ids {
-        Some(arr) => arr.as_slice()?,
-        None => {
-            default_block_ids = vec![0i32; da_raw.len()];
-            &default_block_ids
-        }
-    };
+    let db_raw = diary_block_ids.as_slice()?;
 
     let ns = i64_as_usize_vec(&neighbor_starts)?;
     let nb = i64_as_usize_vec(&neighbors)?;
@@ -218,72 +188,25 @@ pub fn simulation_core_simulate_agents<'py>(
 
     let sl_buf = opt_i64_as_usize_vec(&starting_locs)?;
     let sl: Option<&[usize]> = sl_buf.as_deref();
+    let wt_buf = i64_as_usize_vec(&work_tiles)?;
 
-    let wt_buf = opt_i64_as_usize_vec(&work_tiles)?.unwrap_or_default();
-    let wt: &[usize] = &wt_buf;
-
-    // Owned copy (unlike the other optional f64 arrays below) since it's
-    // built from a slice borrowed from a short-lived `Option` match arm.
-    let eps_buf = opt_slice(&edge_profile_sim)?.to_vec();
+    let eps_buf = edge_profile_sim.as_slice()?.to_vec();
     let eps: &[f64] = &eps_buf;
 
-    let act_embs_s = opt_slice(&act_embs)?;
-    let act_dur_mu_s = opt_slice(&act_dur_mu)?;
-    let act_dur_sigma_s = opt_slice(&act_dur_sigma)?;
-    let profile_embs_s = opt_slice(&profile_embs)?;
-    let profile_act_sims_s = opt_slice(&profile_act_sims)?;
-    let activity_alignment_scores_s = opt_slice(&activity_alignment_scores)?;
-    let poi_semantic_scores_s = opt_slice(&poi_semantic_scores)?;
-    let poi_type_alignment_scores_s = opt_slice(&poi_type_alignment_scores)?;
-    let activity_cluster_labels_v =
-        opt_i64_as_usize_vec(&activity_cluster_labels)?.unwrap_or_default();
-    let location_semantic_cluster_ids_v =
-        opt_i64_as_usize_vec(&location_semantic_cluster_ids)?.unwrap_or_default();
-    let poi_mask_starts_v = opt_i64_as_usize_vec(&poi_mask_starts)?.unwrap_or_default();
-    let poi_mask_activities_v = opt_i64_as_usize_vec(&poi_mask_activities)?.unwrap_or_default();
+    let activity_cluster_labels_v = i64_as_usize_vec(&activity_cluster_labels)?;
+    let location_semantic_cluster_ids_v = i64_as_usize_vec(&location_semantic_cluster_ids)?;
+    let poi_mask_starts_v = i64_as_usize_vec(&poi_mask_starts)?;
+    let poi_mask_activities_v = i64_as_usize_vec(&poi_mask_activities)?;
+    let purpose_act_starts_v = i64_as_usize_vec(&purpose_act_starts)?;
+    let purpose_acts_v = i64_as_usize_vec(&purpose_acts)?;
 
-    let purpose_act_starts_v = opt_i64_as_usize_vec(&purpose_act_starts)?.unwrap_or_default();
-    let purpose_acts_v = opt_i64_as_usize_vec(&purpose_acts)?.unwrap_or_default();
+    let road_edge_from_v = i64_as_usize_vec(&road_edge_from)?;
+    let road_edge_to_v = i64_as_usize_vec(&road_edge_to)?;
+    let road_edge_weight_v = i64_as_usize_vec(&road_edge_weight_ds)?;
+    let rail_edge_from_v = i64_as_usize_vec(&rail_edge_from)?;
+    let rail_edge_to_v = i64_as_usize_vec(&rail_edge_to)?;
+    let rail_edge_weight_v = i64_as_usize_vec(&rail_edge_weight_ds)?;
 
-    let road_edge_from_v = opt_i64_as_usize_vec(&road_edge_from)?.unwrap_or_default();
-    let road_edge_to_v = opt_i64_as_usize_vec(&road_edge_to)?.unwrap_or_default();
-    let road_edge_weight_v = opt_i64_as_usize_vec(&road_edge_weight_ds)?.unwrap_or_default();
-    let road_node_lats_s = opt_slice(&road_node_lats)?;
-    let road_node_lngs_s = opt_slice(&road_node_lngs)?;
-    let location_road_node_s = opt_slice(&location_road_node)?;
-
-    let rail_edge_from_v = opt_i64_as_usize_vec(&rail_edge_from)?.unwrap_or_default();
-    let rail_edge_to_v = opt_i64_as_usize_vec(&rail_edge_to)?.unwrap_or_default();
-    let rail_edge_weight_v = opt_i64_as_usize_vec(&rail_edge_weight_ds)?.unwrap_or_default();
-    let rail_node_lats_s = opt_slice(&rail_node_lats)?;
-    let rail_node_lngs_s = opt_slice(&rail_node_lngs)?;
-    let location_rail_node_s = opt_slice(&location_rail_node)?;
-
-    let default_has_car = vec![true; n_agents];
-    let default_has_bike = vec![false; n_agents];
-    let default_walk_threshold = vec![0.0; n_agents];
-    let default_bike_threshold = vec![0.0; n_agents];
-    let has_car_s = match &has_car {
-        Some(arr) => arr.as_slice()?,
-        None => &default_has_car,
-    };
-    let has_bike_s = match &has_bike {
-        Some(arr) => arr.as_slice()?,
-        None => &default_has_bike,
-    };
-    let walking_threshold_s = match &walking_threshold_km {
-        Some(arr) => arr.as_slice()?,
-        None => &default_walk_threshold,
-    };
-    let bike_threshold_s = match &bike_threshold_km {
-        Some(arr) => arr.as_slice()?,
-        None => &default_bike_threshold,
-    };
-
-    // Marshal one day's worth of closed waypoint rows to the Python callback
-    // (if given) as numpy arrays, in the same column order as the final
-    // `path_*` return tuple below, so callers can share one DataFrame-
-    // building helper for both the streamed chunks and the final tail.
     let mut on_day_flush_closure = on_day_flush.map(|callback| {
         move |chunk: RoadPathOutputBuffers| -> Result<(), String> {
             let agent = chunk.agent.into_pyarray(py);
@@ -303,10 +226,6 @@ pub fn simulation_core_simulate_agents<'py>(
         .as_mut()
         .map(|f| f as &mut dyn FnMut(RoadPathOutputBuffers) -> Result<(), String>);
 
-    // Marshal one day's worth of encounters to the Python callback (if given)
-    // as numpy arrays, in the same column order as the final `encounter_*`
-    // return tuple, so callers can share one DataFrame-building helper for
-    // both the streamed chunks and the final tail.
     let mut on_encounter_day_flush_closure = on_encounter_day_flush.map(|callback| {
         move |chunk: (Vec<u32>, Vec<u32>, Vec<u32>, Vec<i32>)| -> Result<(), String> {
             let agent = chunk.0.into_pyarray(py);
@@ -323,11 +242,6 @@ pub fn simulation_core_simulate_agents<'py>(
         f as &mut dyn FnMut((Vec<u32>, Vec<u32>, Vec<u32>, Vec<i32>)) -> Result<(), String>
     });
 
-    // Marshal one day's worth of closed stop rows to the Python callback (if
-    // given) as numpy arrays, in the same field order `_build_trip_frame`
-    // expects (matching `TripOutputBuffers`), so callers can share one
-    // DataFrame-building helper for both the streamed chunks and the final
-    // tail.
     let mut on_trip_day_flush_closure = on_trip_day_flush.map(|callback| {
         move |chunk: TripOutputBuffers| -> Result<(), String> {
             let agent = chunk.agents.into_pyarray(py);
@@ -358,9 +272,6 @@ pub fn simulation_core_simulate_agents<'py>(
         .as_mut()
         .map(|f| f as &mut dyn FnMut(TripOutputBuffers) -> Result<(), String>);
 
-    // Marshal one day's worth of closed micro-activity rows to the Python
-    // callback (if given) as numpy arrays, in the same field order as the
-    // final `act_*` return tuple.
     let mut on_activity_day_flush_closure = on_activity_day_flush.map(|callback| {
         move |chunk: ActivityOutputBuffers| -> Result<(), String> {
             let agent = chunk.agent.into_pyarray(py);
@@ -391,12 +302,12 @@ pub fn simulation_core_simulate_agents<'py>(
                 relevances: rels,
                 distances: dists,
                 semantic_cluster_ids: &location_semantic_cluster_ids_v,
-                poi_type_scores: poi_type_alignment_scores_s,
-                poi_type_choice_enabled,
-                poi_type_n_clusters: poi_type_alignment_clusters,
-                poi_type_n_blocks: poi_type_alignment_blocks,
-                poi_type_temperature: poi_type_choice_temperature,
-                poi_type_alpha: poi_type_choice_alpha,
+                poi_type_scores: poi_type_alignment_scores.as_slice()?,
+                poi_type_choice_enabled: bool_attr(&locations, "poi_type_choice_enabled")?,
+                poi_type_n_clusters: usize_attr(&locations, "poi_type_alignment_clusters")?,
+                poi_type_n_blocks: usize_attr(&locations, "poi_type_alignment_blocks")?,
+                poi_type_temperature: f64_attr(&locations, "poi_type_choice_temperature")?,
+                poi_type_alpha: f64_attr(&locations, "poi_type_choice_alpha")?,
             },
             social_graph: SocialGraphInputs {
                 neighbor_starts: &ns,
@@ -411,88 +322,97 @@ pub fn simulation_core_simulate_agents<'py>(
                 ends: &de,
             },
             params: SimulationParams {
-                rho,
-                gamma,
-                alpha,
-                gravity_deterrence_exponent,
-                gravity_origin_exponent,
-                gravity_destination_exponent,
-                start_ts,
-                end_ts,
-                indipendency_window_s,
-                dt_update_mob_sim_s,
-                slot_seconds,
-                car_speed_kmh,
-                walking_speed_kmh,
-                bike_speed_kmh,
-                n_agents,
-                master_seed,
-                dynamic_friendships_enabled,
-                friendship_update_interval_s,
-                encounter_window_s,
-                regularity_threshold,
-                topological_overlap_threshold,
-                recast_random_baseline_samples,
-                recast_random_chance_probability,
-                strength_initial,
-                strength_growth_mu_ln,
-                strength_growth_sigma_ln,
-                strength_decay_rate,
-                max_dynamic_degree,
-                max_colocation_group_size,
+                rho: f64_attr(&params, "rho")?,
+                gamma: f64_attr(&params, "gamma")?,
+                alpha: f64_attr(&params, "alpha")?,
+                gravity_deterrence_exponent: f64_attr(&params, "gravity_deterrence_exponent")?,
+                gravity_origin_exponent: f64_attr(&params, "gravity_origin_exponent")?,
+                gravity_destination_exponent: f64_attr(&params, "gravity_destination_exponent")?,
+                start_ts: i64_attr(&params, "start_ts")?,
+                end_ts: i64_attr(&params, "end_ts")?,
+                indipendency_window_s: i64_attr(&params, "indipendency_window_s")?,
+                dt_update_mob_sim_s: i64_attr(&params, "dt_update_mob_sim_s")?,
+                slot_seconds: i64_attr(&params, "slot_seconds")?,
+                car_speed_kmh: f64_attr(&params, "car_speed_kmh")?,
+                walking_speed_kmh: f64_attr(&params, "walking_speed_kmh")?,
+                bike_speed_kmh: f64_attr(&params, "bike_speed_kmh")?,
+                n_agents: usize_attr(&params, "n_agents")?,
+                master_seed: opt_u64_attr(&params, "master_seed")?,
+                dynamic_friendships_enabled: bool_attr(&params, "dynamic_friendships_enabled")?,
+                friendship_update_interval_s: i64_attr(&params, "friendship_update_interval_s")?,
+                encounter_window_s: i64_attr(&params, "encounter_window_s")?,
+                regularity_threshold: f64_attr(&params, "regularity_threshold")?,
+                topological_overlap_threshold: f64_attr(&params, "topological_overlap_threshold")?,
+                recast_random_baseline_samples: usize_attr(
+                    &params,
+                    "recast_random_baseline_samples",
+                )?,
+                recast_random_chance_probability: f64_attr(
+                    &params,
+                    "recast_random_chance_probability",
+                )?,
+                strength_initial: f64_attr(&params, "strength_initial")?,
+                strength_growth_mu_ln: f64_attr(&params, "strength_growth_mu_ln")?,
+                strength_growth_sigma_ln: f64_attr(&params, "strength_growth_sigma_ln")?,
+                strength_decay_rate: f64_attr(&params, "strength_decay_rate")?,
+                max_dynamic_degree: usize_attr(&params, "max_dynamic_degree")?,
+                max_colocation_group_size: usize_attr(&params, "max_colocation_group_size")?,
             },
             initial_locations: InitialLocationInputs {
                 starting_locs: sl,
-                starting_locs_mode_relevance,
-                work_tiles: wt,
+                starting_locs_mode_relevance: bool_attr(
+                    &initial_locations,
+                    "starting_locs_mode_relevance",
+                )?,
+                work_tiles: &wt_buf,
             },
             activities: ActivityInputs {
-                act_embs: act_embs_s,
-                act_dur_mu: act_dur_mu_s,
-                act_dur_sigma: act_dur_sigma_s,
+                act_embs: act_embs.as_slice()?,
+                act_dur_mu: act_dur_mu.as_slice()?,
+                act_dur_sigma: act_dur_sigma.as_slice()?,
                 purpose_act_starts: &purpose_act_starts_v,
                 purpose_acts: &purpose_acts_v,
-                profile_embs: profile_embs_s,
-                profile_act_sims: profile_act_sims_s,
-                contextual_scores: activity_alignment_scores_s,
+                profile_embs: profile_embs.as_slice()?,
+                profile_act_sims: profile_act_sims.as_slice()?,
+                contextual_scores: activity_alignment_scores.as_slice()?,
                 cluster_labels: &activity_cluster_labels_v,
-                n_clusters: activity_alignment_clusters,
-                n_blocks: activity_alignment_blocks,
-                n_previous: activity_alignment_previous,
-                poi_semantic_scores: poi_semantic_scores_s,
+                n_clusters: usize_attr(&activities, "activity_alignment_clusters")?,
+                n_blocks: usize_attr(&activities, "activity_alignment_blocks")?,
+                n_previous: usize_attr(&activities, "activity_alignment_previous")?,
+                poi_semantic_scores: poi_semantic_scores.as_slice()?,
                 location_semantic_cluster_ids: &location_semantic_cluster_ids_v,
                 poi_mask_starts: &poi_mask_starts_v,
                 poi_mask_activities: &poi_mask_activities_v,
-                n_poi_semantic_clusters: poi_semantic_clusters,
-                history_weight: activity_history_weight,
-                emb_dim,
-                kappa: act_kappa,
-                temperature: act_temp,
-                materialize_travel,
+                n_poi_semantic_clusters: usize_attr(&activities, "poi_semantic_clusters")?,
+                history_weight: f64_attr(&activities, "activity_history_weight")?,
+                emb_dim: usize_attr(&activities, "emb_dim")?,
+                kappa: f64_attr(&activities, "act_kappa")?,
+                temperature: f64_attr(&activities, "act_temp")?,
+                materialize_travel: bool_attr(&activities, "materialize_travel")?,
             },
             road_network: RoadNetworkInputs {
                 edge_from: &road_edge_from_v,
                 edge_to: &road_edge_to_v,
                 edge_weight_ds: &road_edge_weight_v,
-                node_lats: road_node_lats_s,
-                node_lngs: road_node_lngs_s,
-                location_node: location_road_node_s,
-                max_leg_waypoints,
+                node_lats: road_node_lats.as_slice()?,
+                node_lngs: road_node_lngs.as_slice()?,
+                location_node: location_road_node.as_slice()?,
+                max_leg_waypoints: usize_attr(&road_network, "max_leg_waypoints")?,
             },
             rail_network: RoadNetworkInputs {
                 edge_from: &rail_edge_from_v,
                 edge_to: &rail_edge_to_v,
                 edge_weight_ds: &rail_edge_weight_v,
-                node_lats: rail_node_lats_s,
-                node_lngs: rail_node_lngs_s,
-                location_node: location_rail_node_s,
-                max_leg_waypoints: max_rail_leg_waypoints,
+                node_lats: rail_node_lats.as_slice()?,
+                node_lngs: rail_node_lngs.as_slice()?,
+                location_node: location_rail_node.as_slice()?,
+                max_leg_waypoints: usize_attr(&rail_network, "max_leg_waypoints")?,
             },
             transport: TransportInputs {
-                has_car: has_car_s,
-                has_bike: has_bike_s,
-                walking_threshold_km: walking_threshold_s,
-                bike_threshold_km: bike_threshold_s,
+                has_car: has_car.as_slice()?,
+                has_bike: has_bike.as_slice()?,
+                walking_threshold_km: walking_threshold_km.as_slice()?,
+                bike_threshold_km: bike_threshold_km.as_slice()?,
             },
         },
         on_day_flush_ref,

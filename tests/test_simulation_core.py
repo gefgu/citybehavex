@@ -4,6 +4,7 @@ import citybehavex._core as core
 import h3
 import numpy as np
 import pandas as pd
+import polars as pl
 
 from citybehavex.activities import (
     N_ACTIVITIES,
@@ -15,7 +16,21 @@ from citybehavex.activities import (
 from citybehavex.config.root import CityBehavExConfig
 from citybehavex.profiles import generate_profiles
 from citybehavex.profiles.config import AgentProfilesConfig
-from citybehavex.simulation.core import build_social_graph_artifact, simulate_agents
+from citybehavex.simulation.core import (
+    build_social_graph_artifact,
+    simulate_agents as _simulate_agents,
+)
+from citybehavex.simulation.inputs import (
+    ActivityInputs,
+    DiaryInputs,
+    InitialLocationInputs,
+    LocationInputs,
+    NetworkInputs,
+    OutputHooks,
+    SimulationRunParams,
+    SocialGraphInputs,
+    TransportInputs,
+)
 from citybehavex.simulation.runner import (
     _append_home_anchors,
     _append_work_scores,
@@ -25,6 +40,293 @@ from citybehavex.simulation.runner import (
 
 _SLOT = 900
 _SPEED = 50.0
+_rust_simulate_agents = core.simulation_core_simulate_agents
+
+
+def _params_from_flat(kwargs):
+    return SimulationRunParams(
+        start_ts=int(kwargs.pop("start_ts")),
+        end_ts=int(kwargs.pop("end_ts")),
+        slot_seconds=int(kwargs.pop("slot_seconds")),
+        car_speed_kmh=float(kwargs.pop("car_speed_kmh")),
+        n_agents=int(kwargs.pop("n_agents")),
+        master_seed=kwargs.pop("master_seed", kwargs.pop("random_state", None)),
+        walking_speed_kmh=float(kwargs.pop("walking_speed_kmh", 4.8)),
+        bike_speed_kmh=float(kwargs.pop("bike_speed_kmh", 15.0)),
+        rho=float(kwargs.pop("rho", 0.6)),
+        gamma=float(kwargs.pop("gamma", 0.21)),
+        alpha=float(kwargs.pop("alpha", 0.2)),
+        dt_update_mob_sim_s=int(kwargs.pop("dt_update_mob_sim_s", 24 * 7 * 3600)),
+        indipendency_window_s=int(kwargs.pop("indipendency_window_s", 1800)),
+        gravity_deterrence_exponent=float(kwargs.pop("gravity_deterrence_exponent", -2.0)),
+        gravity_origin_exponent=float(kwargs.pop("gravity_origin_exponent", 1.0)),
+        gravity_destination_exponent=float(kwargs.pop("gravity_destination_exponent", 1.0)),
+        dynamic_friendships_enabled=bool(kwargs.pop("dynamic_friendships_enabled", False)),
+        friendship_update_interval_s=int(kwargs.pop("friendship_update_interval_s", 86400)),
+        encounter_window_s=int(kwargs.pop("encounter_window_s", 604800)),
+        regularity_threshold=float(kwargs.pop("regularity_threshold", 0.3)),
+        topological_overlap_threshold=float(kwargs.pop("topological_overlap_threshold", 0.05)),
+        recast_random_baseline_samples=int(kwargs.pop("recast_random_baseline_samples", 256)),
+        recast_random_chance_probability=float(
+            kwargs.pop("recast_random_chance_probability", 1.0e-3)
+        ),
+        strength_initial=float(kwargs.pop("strength_initial", 0.1)),
+        strength_growth_mu_ln=float(kwargs.pop("strength_growth_mu_ln", -2.3)),
+        strength_growth_sigma_ln=float(kwargs.pop("strength_growth_sigma_ln", 0.5)),
+        strength_decay_rate=float(kwargs.pop("strength_decay_rate", 0.05)),
+        max_dynamic_degree=int(kwargs.pop("max_dynamic_degree", 200)),
+        max_colocation_group_size=int(kwargs.pop("max_colocation_group_size", 50)),
+    )
+
+
+def _core_simulation_core_simulate_agents(*args, **kwargs):
+    if args:
+        return _rust_simulate_agents(*args, **kwargs)
+    locations = LocationInputs(
+        kwargs.pop("latitudes"),
+        kwargs.pop("longitudes"),
+        kwargs.pop("relevances"),
+        distances=kwargs.pop("distances", None),
+        location_semantic_cluster_ids=kwargs.pop("location_semantic_cluster_ids", None),
+        poi_type_choice_enabled=kwargs.pop("poi_type_choice_enabled", False),
+        poi_type_alignment_scores=kwargs.pop("poi_type_alignment_scores", None),
+        poi_type_choice_temperature=kwargs.pop("poi_type_choice_temperature", 0.5),
+        poi_type_choice_alpha=kwargs.pop("poi_type_choice_alpha", 1.0),
+    )
+    social_graph = SocialGraphInputs(
+        kwargs.pop("neighbor_starts"),
+        kwargs.pop("neighbors"),
+        edge_profile_sim=kwargs.pop("edge_profile_sim", None),
+    )
+    diary = DiaryInputs(
+        kwargs.pop("diary_timestamps"),
+        kwargs.pop("diary_abs_locs"),
+        kwargs.pop("diary_starts"),
+        kwargs.pop("diary_ends"),
+        kwargs.pop("diary_block_ids", None),
+    )
+    params = _params_from_flat(kwargs)
+    initial_locations = InitialLocationInputs(
+        kwargs.pop("starting_locs", None),
+        kwargs.pop("work_tiles", None),
+        kwargs.pop("starting_locs_mode_relevance", False),
+    )
+    activities = ActivityInputs(
+        act_embs=kwargs.pop("act_embs", None),
+        act_dur_mu=kwargs.pop("act_dur_mu", None),
+        act_dur_sigma=kwargs.pop("act_dur_sigma", None),
+        purpose_act_starts=kwargs.pop("purpose_act_starts", None),
+        purpose_acts=kwargs.pop("purpose_acts", None),
+        profile_embs=kwargs.pop("profile_embs", None),
+        emb_dim=kwargs.pop("emb_dim", 0),
+        act_kappa=kwargs.pop("act_kappa", 1.0),
+        act_temp=kwargs.pop("act_temp", 0.5),
+        profile_act_sims=kwargs.pop("profile_act_sims", None),
+        activity_alignment_scores=kwargs.pop("activity_alignment_scores", None),
+        activity_cluster_labels=kwargs.pop("activity_cluster_labels", None),
+        poi_semantic_scores=kwargs.pop("poi_semantic_scores", None),
+        poi_mask_starts=kwargs.pop("poi_mask_starts", None),
+        poi_mask_activities=kwargs.pop("poi_mask_activities", None),
+        activity_history_weight=kwargs.pop("activity_history_weight", 1.0),
+        materialize_travel=kwargs.pop("materialize_travel", True),
+    )
+    road_network = NetworkInputs.from_arrays(
+        n_locations=len(locations.latitudes),
+        edge_from=kwargs.pop("road_edge_from", None),
+        edge_to=kwargs.pop("road_edge_to", None),
+        edge_weight_ds=kwargs.pop("road_edge_weight_ds", None),
+        node_lats=kwargs.pop("road_node_lats", None),
+        node_lngs=kwargs.pop("road_node_lngs", None),
+        location_node=kwargs.pop("location_road_node", None),
+        max_leg_waypoints=kwargs.pop("max_leg_waypoints", 16),
+    )
+    rail_network = NetworkInputs.from_arrays(
+        n_locations=len(locations.latitudes),
+        edge_from=kwargs.pop("rail_edge_from", None),
+        edge_to=kwargs.pop("rail_edge_to", None),
+        edge_weight_ds=kwargs.pop("rail_edge_weight_ds", None),
+        node_lats=kwargs.pop("rail_node_lats", None),
+        node_lngs=kwargs.pop("rail_node_lngs", None),
+        location_node=kwargs.pop("location_rail_node", None),
+        max_leg_waypoints=kwargs.pop("max_rail_leg_waypoints", 16),
+    )
+    transport = TransportInputs(
+        kwargs.pop("has_car", np.ones(params.n_agents, dtype=np.bool_)),
+        kwargs.pop("has_bike", np.zeros(params.n_agents, dtype=np.bool_)),
+        kwargs.pop("walking_threshold_km", np.zeros(params.n_agents, dtype=np.float64)),
+        kwargs.pop("bike_threshold_km", np.zeros(params.n_agents, dtype=np.float64)),
+    )
+    on_day_flush = kwargs.pop("on_day_flush", None)
+    on_encounter_day_flush = kwargs.pop("on_encounter_day_flush", None)
+    on_trip_day_flush = kwargs.pop("on_trip_day_flush", None)
+    on_activity_day_flush = kwargs.pop("on_activity_day_flush", None)
+    return_social_edges = kwargs.pop("return_social_edges", False)
+    assert not kwargs
+    return _rust_simulate_agents(
+        locations,
+        social_graph,
+        diary,
+        params,
+        initial_locations,
+        activities,
+        road_network,
+        rail_network,
+        transport,
+        on_day_flush,
+        on_encounter_day_flush,
+        on_trip_day_flush,
+        on_activity_day_flush,
+        return_social_edges,
+    )
+
+
+core.simulation_core_simulate_agents = _core_simulation_core_simulate_agents
+
+
+def simulate_agents(tessellation_df, relevance_column, diary_arrays, **kwargs):
+    random_state = int(kwargs.pop("random_state"))
+    n_agents = int(kwargs.pop("n_agents"))
+    locations = LocationInputs.from_tessellation(
+        tessellation_df,
+        relevance_column,
+        location_semantic_cluster_ids=kwargs.pop("location_semantic_cluster_ids", None),
+        poi_type_choice_enabled=kwargs.pop("poi_type_choice_enabled", False),
+        poi_type_alignment_scores=kwargs.pop("poi_type_alignment_scores", None),
+        poi_type_choice_temperature=kwargs.pop("poi_type_choice_temperature", 0.5),
+        poi_type_choice_alpha=kwargs.pop("poi_type_choice_alpha", 1.0),
+    )
+    params = SimulationRunParams.from_hours(
+        start_ts=kwargs.pop("start_ts"),
+        end_ts=kwargs.pop("end_ts"),
+        slot_seconds=kwargs.pop("slot_seconds"),
+        car_speed_kmh=kwargs.pop("car_speed_kmh"),
+        n_agents=n_agents,
+        random_state=random_state,
+        walking_speed_kmh=kwargs.pop("walking_speed_kmh", 4.8),
+        bike_speed_kmh=kwargs.pop("bike_speed_kmh", 15.0),
+        rho=kwargs.pop("rho", 0.6),
+        gamma=kwargs.pop("gamma", 0.21),
+        alpha=kwargs.pop("alpha", 0.2),
+        dt_update_mob_sim_hours=kwargs.pop("dt_update_mob_sim_hours", 24 * 7),
+        indipendency_window_hours=kwargs.pop("indipendency_window_hours", 0.5),
+        gravity_deterrence_exponent=kwargs.pop("gravity_deterrence_exponent", -2.0),
+        gravity_origin_exponent=kwargs.pop("gravity_origin_exponent", 1.0),
+        gravity_destination_exponent=kwargs.pop("gravity_destination_exponent", 1.0),
+        dynamic_friendships_enabled=kwargs.pop("dynamic_friendships_enabled", True),
+        friendship_update_interval_hours=kwargs.pop("friendship_update_interval_hours", 24.0),
+        encounter_window_hours=kwargs.pop("encounter_window_hours", 24.0 * 7),
+        regularity_threshold=kwargs.pop("regularity_threshold", 0.3),
+        topological_overlap_threshold=kwargs.pop("topological_overlap_threshold", 0.05),
+        recast_random_baseline_samples=kwargs.pop("recast_random_baseline_samples", 256),
+        recast_random_chance_probability=kwargs.pop(
+            "recast_random_chance_probability", 1.0e-3
+        ),
+        strength_initial=kwargs.pop("strength_initial", 0.1),
+        strength_growth_mu_ln=kwargs.pop("strength_growth_mu_ln", -2.3),
+        strength_growth_sigma_ln=kwargs.pop("strength_growth_sigma_ln", 0.5),
+        strength_decay_rate=kwargs.pop("strength_decay_rate", 0.05),
+        max_dynamic_degree=kwargs.pop("max_dynamic_degree", 200),
+        max_colocation_group_size=kwargs.pop("max_colocation_group_size", 50),
+    )
+    initial_locations = InitialLocationInputs.build(
+        starting_locs=kwargs.pop("starting_locs", None),
+        work_tiles=kwargs.pop("work_tiles", None),
+        locations=locations,
+        n_agents=n_agents,
+        random_state=random_state,
+        starting_locs_mode_relevance=kwargs.pop("rsl", False),
+    )
+    profile_embeddings = kwargs.pop("profile_embeddings", None)
+    social_graph = SocialGraphInputs.build(
+        n_agents=n_agents,
+        random_state=random_state,
+        locations=locations,
+        initial_locations=initial_locations,
+        profile_embeddings=profile_embeddings,
+        social_graph_k=kwargs.pop("social_graph_k", 20),
+        profile_graph_exact_threshold=kwargs.pop("profile_graph_exact_threshold", 10_000),
+        home_h3_resolution=kwargs.pop("home_h3_resolution", 7),
+        work_h3_resolution=kwargs.pop("work_h3_resolution", 7),
+        degree_mu_ln=kwargs.pop("degree_mu_ln", 2.1776),
+        degree_sigma_ln=kwargs.pop("degree_sigma_ln", 0.5),
+        max_degree=kwargs.pop("max_degree", 200),
+        similarity_temperature=kwargs.pop("similarity_temperature", 0.3),
+        max_candidate_pool=kwargs.pop("max_candidate_pool", 2000),
+        max_ring_expansion=kwargs.pop("max_ring_expansion", 2),
+    )
+    activities = ActivityInputs.build(
+        n_agents=n_agents,
+        act_embs=kwargs.pop("act_embs", None),
+        act_dur_mu=kwargs.pop("act_dur_mu", None),
+        act_dur_sigma=kwargs.pop("act_dur_sigma", None),
+        purpose_act_starts=kwargs.pop("purpose_act_starts", None),
+        purpose_acts=kwargs.pop("purpose_acts", None),
+        profile_embeddings=profile_embeddings,
+        act_kappa=kwargs.pop("act_kappa", 1.0),
+        act_temp=kwargs.pop("act_temp", 0.5),
+        activity_alignment_scores=kwargs.pop("activity_alignment_scores", None),
+        activity_cluster_labels=kwargs.pop("activity_cluster_labels", None),
+        poi_semantic_scores=kwargs.pop("poi_semantic_scores", None),
+        poi_mask_starts=kwargs.pop("poi_mask_starts", None),
+        poi_mask_activities=kwargs.pop("poi_mask_activities", None),
+        activity_history_weight=kwargs.pop("activity_history_weight", 1.0),
+        materialize_travel=kwargs.pop("materialize_travel", True),
+    )
+    transport = TransportInputs.build(
+        n_agents=n_agents,
+        random_state=random_state,
+        has_car=kwargs.pop("has_car", None),
+        has_bike=kwargs.pop("has_bike", None),
+        walking_threshold_mu_ln_km=kwargs.pop("walking_threshold_mu_ln_km", -0.35),
+        walking_threshold_sigma_ln=kwargs.pop("walking_threshold_sigma_ln", 0.45),
+        bike_threshold_mu_ln_km=kwargs.pop("bike_threshold_mu_ln_km", 1.4),
+        bike_threshold_sigma_ln=kwargs.pop("bike_threshold_sigma_ln", 0.55),
+    )
+    road_network = NetworkInputs.from_arrays(
+        n_locations=len(tessellation_df),
+        edge_from=kwargs.pop("road_edge_from", None),
+        edge_to=kwargs.pop("road_edge_to", None),
+        edge_weight_ds=kwargs.pop("road_edge_weight_ds", None),
+        node_lats=kwargs.pop("road_node_lats", None),
+        node_lngs=kwargs.pop("road_node_lngs", None),
+        location_node=kwargs.pop("location_road_node", None),
+        max_leg_waypoints=kwargs.pop("max_leg_waypoints", 16),
+    )
+    rail_network = NetworkInputs.from_arrays(
+        n_locations=len(tessellation_df),
+        edge_from=kwargs.pop("rail_edge_from", None),
+        edge_to=kwargs.pop("rail_edge_to", None),
+        edge_weight_ds=kwargs.pop("rail_edge_weight_ds", None),
+        node_lats=kwargs.pop("rail_node_lats", None),
+        node_lngs=kwargs.pop("rail_node_lngs", None),
+        location_node=kwargs.pop("location_rail_node", None),
+        max_leg_waypoints=kwargs.pop("max_rail_leg_waypoints", 16),
+    )
+    timing = kwargs.pop("timing", None)
+    return_social_graph = kwargs.pop("return_social_graph", False)
+    social_node_profiles = kwargs.pop("social_node_profiles", None)
+    hooks = OutputHooks(
+        on_day_flush=kwargs.pop("on_day_flush", None),
+        on_encounter_day_flush=kwargs.pop("on_encounter_day_flush", None),
+        on_trip_day_flush=kwargs.pop("on_trip_day_flush", None),
+        on_activity_day_flush=kwargs.pop("on_activity_day_flush", None),
+    )
+    assert not kwargs
+    return _simulate_agents(
+        locations,
+        DiaryInputs.from_arrays(diary_arrays),
+        params,
+        initial_locations=initial_locations,
+        social_graph=social_graph,
+        activities=activities,
+        transport=transport,
+        road_network=road_network,
+        rail_network=rail_network,
+        output_hooks=hooks,
+        timing=timing,
+        return_social_graph=return_social_graph,
+        social_node_profiles=social_node_profiles,
+    )
 
 
 def test_build_social_graph_artifact_packs_csr_graph():
@@ -480,9 +782,9 @@ def test_simulate_agents_returns_trip_columns():
     assert "activity" not in df.columns
     assert (df["dwell_minutes"] >= 0).all()
     assert (df["trip_duration_minutes"] >= 0).all()
-    assert pd.api.types.is_datetime64_any_dtype(df["arrival"])
-    assert isinstance(moving, pd.DataFrame)
-    assert isinstance(activities, pd.DataFrame)
+    assert isinstance(df.schema["arrival"], pl.Datetime)
+    assert isinstance(moving, pl.DataFrame)
+    assert isinstance(activities, pl.DataFrame)
 
 
 def test_simulate_agents_purpose_uses_engine_abstract_location_not_arrival_window():
@@ -516,8 +818,8 @@ def test_simulate_agents_purpose_uses_engine_abstract_location_not_arrival_windo
         starting_locs=np.array([0], dtype=np.int64),
     )
 
-    other_stop = df.iloc[1]
-    assert other_stop["datetime"] >= pd.Timestamp("1970-01-01 08:15:00")
+    other_stop = df.row(1, named=True)
+    assert other_stop["datetime"] >= pd.Timestamp("1970-01-01 08:15:00").to_pydatetime()
     assert other_stop["purpose"] == "OTHER"
 
 
@@ -642,7 +944,7 @@ def test_simulate_agents_encounters_has_expected_columns():
         n_agents=2,
         random_state=42,
     )
-    assert isinstance(encounters, pd.DataFrame)
+    assert isinstance(encounters, pl.DataFrame)
     for col in ("agent", "contact", "tile", "ts"):
         assert col in encounters.columns
 
@@ -712,9 +1014,11 @@ def test_real_work_trip_materializes_commute_activity():
     )
 
     commute_id = {activity.name: activity.idx for activity in build_catalog()}["commute"]
-    home_stop = df[df["stop_id"] == 0].iloc[0]
-    work_stop = df[df["stop_id"] == 1].iloc[0]
-    commute = activities[(activities["stop_id"] == 1) & (activities["seq"] == 0)].iloc[0]
+    home_stop = df.filter(pl.col("stop_id") == 0).row(0, named=True)
+    work_stop = df.filter(pl.col("stop_id") == 1).row(0, named=True)
+    commute = activities.filter((pl.col("stop_id") == 1) & (pl.col("seq") == 0)).row(
+        0, named=True
+    )
 
     assert commute["activity"] == commute_id
     assert commute["arrival"] == home_stop["departure"]
@@ -744,9 +1048,11 @@ def test_real_non_work_trip_materializes_travel_activity():
     )
 
     travel_id = {activity.name: activity.idx for activity in build_catalog()}["travel"]
-    home_stop = df[df["stop_id"] == 0].iloc[0]
-    other_stop = df[df["stop_id"] == 1].iloc[0]
-    travel = activities[(activities["stop_id"] == 1) & (activities["seq"] == 0)].iloc[0]
+    home_stop = df.filter(pl.col("stop_id") == 0).row(0, named=True)
+    other_stop = df.filter(pl.col("stop_id") == 1).row(0, named=True)
+    travel = activities.filter((pl.col("stop_id") == 1) & (pl.col("seq") == 0)).row(
+        0, named=True
+    )
 
     assert travel["activity"] == travel_id
     assert travel["arrival"] == home_stop["departure"]
@@ -805,13 +1111,13 @@ def test_materialize_travel_false_does_not_emit_trip_interval_activity():
         materialize_travel=False,
     )
 
-    home_stop = df[df["stop_id"] == 0].iloc[0]
-    work_stop = df[df["stop_id"] == 1].iloc[0]
-    matching_trip_interval = activities[
-        (activities["arrival"] == home_stop["departure"])
-        & (activities["departure"] == work_stop["arrival"])
-    ]
-    assert matching_trip_interval.empty
+    home_stop = df.filter(pl.col("stop_id") == 0).row(0, named=True)
+    work_stop = df.filter(pl.col("stop_id") == 1).row(0, named=True)
+    matching_trip_interval = activities.filter(
+        (pl.col("arrival") == home_stop["departure"])
+        & (pl.col("departure") == work_stop["arrival"])
+    )
+    assert matching_trip_interval.is_empty()
 
 
 def test_activities_chain_until_macro_departure_deadline():
@@ -905,7 +1211,7 @@ def test_contextual_activity_alignment_uses_previous_activity_with_separate_micr
         activity_cluster_labels=np.array([0], dtype=np.int64),
     )
 
-    first_stop = activities[activities["stop_id"] == 0]["activity"].tolist()
+    first_stop = activities.filter(pl.col("stop_id") == 0)["activity"].to_list()
     assert first_stop[:2] == [cleanetc, foodprep]
 
 
@@ -958,7 +1264,7 @@ def test_other_poi_uses_semantic_cluster_mask_and_scores():
         starting_locs=np.array([1], dtype=np.int64),
     )
 
-    other_block = activities[activities["block_id"] == 1]["activity"].tolist()
+    other_block = activities.filter(pl.col("block_id") == 1)["activity"].to_list()
     assert other_block
     assert set(other_block) == {compint}
 
@@ -1004,8 +1310,8 @@ def test_other_location_choice_filters_to_aligned_poi_type():
         poi_type_choice_temperature=0.01,
     )
 
-    other_stops = df[df["purpose"] == "OTHER"]
-    assert not other_stops.empty
+    other_stops = df.filter(pl.col("purpose") == "OTHER")
+    assert not other_stops.is_empty()
     assert set(other_stops["lat"]) == {tess.loc[1, "lat"]}
     assert set(other_stops["lng"]) == {tess.loc[1, "lng"]}
 
@@ -1067,8 +1373,12 @@ def test_block_id_refreshes_across_same_abstract_location_boundary():
     # wall-clock cutoff: each agent's own HOME run of block ids, then exactly
     # one switch to its own WORK block id -- never the other agent's blocks,
     # never stuck at a stale/initial value.
-    block_seq_0 = activities[activities["uid"] == 1].sort_values("arrival")["block_id"].tolist()
-    block_seq_1 = activities[activities["uid"] == 2].sort_values("arrival")["block_id"].tolist()
+    block_seq_0 = (
+        activities.filter(pl.col("uid") == 1).sort("arrival")["block_id"].to_list()
+    )
+    block_seq_1 = (
+        activities.filter(pl.col("uid") == 2).sort("arrival")["block_id"].to_list()
+    )
 
     assert block_seq_0[0] == 0
     assert block_seq_0[-1] == 1
