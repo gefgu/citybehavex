@@ -31,7 +31,7 @@ from citybehavex.simulation.inputs import (
     SocialGraphInputs,
     TransportInputs,
 )
-from citybehavex.simulation.runner import (
+from citybehavex.simulation.tessellation_pipeline import (
     _append_home_anchors,
     _append_work_scores,
     _derive_home_anchor_candidates_from_tessellation,

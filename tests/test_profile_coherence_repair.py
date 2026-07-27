@@ -3,7 +3,7 @@ from __future__ import annotations
 import numpy as np
 
 from citybehavex.profiles import AgentProfile, AgentProfilesConfig, reroll_profile_demographics
-from citybehavex.simulation.runner import _coherence_rerun_indices
+from citybehavex.simulation.profile_pipeline import _coherence_rerun_indices
 
 
 def _profile(uid: int = 1) -> AgentProfile:

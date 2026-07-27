@@ -8,13 +8,19 @@ def __getattr__(name: str):
         from . import core
 
         return getattr(core, name)
-    if name in {
-        "load_or_build_tessellation",
-        "maybe_build_diaries",
-        "maybe_build_profiles",
-        "run_simulation",
-        "simulation_dates",
-    }:
+    if name == "load_or_build_tessellation":
+        from . import tessellation_pipeline
+
+        return getattr(tessellation_pipeline, name)
+    if name == "maybe_build_diaries" or name == "simulation_dates":
+        from . import diary_pipeline
+
+        return getattr(diary_pipeline, name)
+    if name == "maybe_build_profiles":
+        from . import profile_pipeline
+
+        return getattr(profile_pipeline, name)
+    if name == "run_simulation":
         from . import runner
 
         return getattr(runner, name)

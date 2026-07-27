@@ -7,7 +7,7 @@ import pytest
 from citybehavex.llm import LLMConfig
 from citybehavex.llm_diaries import DiariesConfig, DiaryValidationError, LLMStats
 from citybehavex.profiles import WEIGHT_GROUPS, AgentProfilesConfig, calibrate_demographic_weights
-from citybehavex.simulation.runner import resolve_calibrated_profiles_config
+from citybehavex.simulation.profile_pipeline import resolve_calibrated_profiles_config
 
 
 class _Response:
@@ -113,7 +113,7 @@ def test_raises_on_negative_weight():
 def test_resolve_falls_back_to_defaults_when_llm_override_disabled(monkeypatch):
     called = []
     monkeypatch.setattr(
-        "citybehavex.simulation.runner.calibrate_demographic_weights",
+        "citybehavex.simulation.profile_pipeline.calibrate_demographic_weights",
         lambda *a, **k: called.append(1) or _weights_payload(0.5),
     )
     pc = AgentProfilesConfig(llm_override=False)
@@ -124,7 +124,7 @@ def test_resolve_falls_back_to_defaults_when_llm_override_disabled(monkeypatch):
 
 def test_resolve_applies_calibrated_weights(monkeypatch):
     monkeypatch.setattr(
-        "citybehavex.simulation.runner.calibrate_demographic_weights",
+        "citybehavex.simulation.profile_pipeline.calibrate_demographic_weights",
         lambda *a, **k: _weights_payload(0.5),
     )
     pc = AgentProfilesConfig(llm_override=True)
@@ -141,7 +141,7 @@ def test_resolve_falls_back_to_defaults_after_calibration_failure(monkeypatch, c
         raise DiaryValidationError("LLM demographic weight calibration failed after 3 attempt(s)")
 
     monkeypatch.setattr(
-        "citybehavex.simulation.runner.calibrate_demographic_weights", raise_failure
+        "citybehavex.simulation.profile_pipeline.calibrate_demographic_weights", raise_failure
     )
     pc = AgentProfilesConfig(llm_override=True)
     result = resolve_calibrated_profiles_config(
@@ -153,7 +153,7 @@ def test_resolve_falls_back_to_defaults_after_calibration_failure(monkeypatch, c
 
 def test_resolve_falls_back_when_no_llm_configured(monkeypatch):
     monkeypatch.setattr(
-        "citybehavex.simulation.runner.calibrate_demographic_weights", lambda *a, **k: None
+        "citybehavex.simulation.profile_pipeline.calibrate_demographic_weights", lambda *a, **k: None
     )
     pc = AgentProfilesConfig(llm_override=True)
     result = resolve_calibrated_profiles_config(pc, LLMConfig(), DiariesConfig())

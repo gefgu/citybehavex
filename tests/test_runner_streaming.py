@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pandas as pd
 
-from citybehavex.simulation.runner import _IncrementalParquetWriter
+from citybehavex.simulation.output import _IncrementalParquetWriter
 
 
 def test_incremental_parquet_writer_appends_chunks_in_order(tmp_path):
