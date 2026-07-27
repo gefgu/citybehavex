@@ -7,19 +7,19 @@ import numpy as np
 import pytest
 
 from citybehavex.activities.alignment import (
+    _cache_key,
+    _period_cache_key,
+    _poi_cache_key,
+    _poi_type_cache_key,
     _save_cache,
     cluster_profile_embeddings,
     expand_cluster_scores,
     score_activity_alignment,
     score_poi_semantic_alignment,
     score_poi_type_alignment,
-    _cache_key,
-    _period_cache_key,
-    _poi_cache_key,
-    _poi_type_cache_key,
 )
-from citybehavex.activities.poi_semantic import build_poi_semantic_activity_data
 from citybehavex.activities.config import ActivitiesConfig
+from citybehavex.activities.poi_semantic import build_poi_semantic_activity_data
 from citybehavex.llm_diaries import Diary
 
 
@@ -234,7 +234,6 @@ def test_poi_type_alignment_scores_only_other_blocks(monkeypatch):
 def test_alignment_cache_keys_distinguish_score_products():
     diary = _diary_with_other()
     block = score_activity_alignment.__globals__["diary_activity_blocks"]([diary])[1]
-    catalog = score_activity_alignment.__globals__["build_catalog"]()
     activity_text = "eatdrink: Eating and drinking"
 
     keys = {

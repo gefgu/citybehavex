@@ -5,10 +5,10 @@ import pandas as pd
 
 from citybehavex.embedding import EmbeddingConfig
 from citybehavex.embedding import service as emb
-from citybehavex.schedules import ScheduleConfig
 from citybehavex.llm_diaries import Diary, DiaryBatch, LocationCountDistribution
 from citybehavex.schedules import (
     DiaryBank,
+    ScheduleConfig,
     build_ddcrp_diary,
     build_diary_bank,
     diary_to_abs_locs,

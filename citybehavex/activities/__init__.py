@@ -1,15 +1,5 @@
 from __future__ import annotations
 
-from .catalog import (
-    N_ACTIVITIES,
-    N_PURPOSES,
-    Activity,
-    activity_descriptions,
-    activity_duration_arrays,
-    build_catalog,
-    build_eligibility_csr,
-)
-from .config import ActivitiesConfig
 from .alignment import (
     ActivityAlignmentScores,
     ActivityBlock,
@@ -21,12 +11,22 @@ from .alignment import (
     score_poi_semantic_alignment,
     score_poi_type_alignment,
 )
+from .catalog import (
+    N_ACTIVITIES,
+    N_PURPOSES,
+    Activity,
+    activity_descriptions,
+    activity_duration_arrays,
+    build_catalog,
+    build_eligibility_csr,
+)
+from .config import ActivitiesConfig
 from .poi_semantic import (
     UNKNOWN_SEMANTIC_CLUSTER,
     UNKNOWN_SEMANTIC_CLUSTER_ID,
     PoiSemanticActivityData,
-    build_poi_semantic_activity_data,
     available_semantic_cluster_ids,
+    build_poi_semantic_activity_data,
     example_categories_by_semantic_cluster,
     load_poi_activity_mask,
     load_poi_semantic_cluster_mapping,

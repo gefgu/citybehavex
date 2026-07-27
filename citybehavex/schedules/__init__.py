@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from .config import ScheduleConfig
 from .alignment import score_alignment_matrix
+from .config import ScheduleConfig
 from .ddcrp import (
     DdcrpAgentInfo,
     DiaryArrays,

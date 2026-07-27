@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from .config import LLMConfig
 from .client import OpenAICompatibleDiaryClient
+from .config import LLMConfig
 
 __all__ = ["LLMConfig", "OpenAICompatibleDiaryClient"]

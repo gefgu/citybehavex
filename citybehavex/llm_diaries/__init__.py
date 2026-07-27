@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import requests
 
-from .config import DiariesConfig
+from citybehavex.math import allocate_location_counts, lognormal_location_probabilities
+
 from .cache import (
     apply_variant,
     cache_path,
@@ -10,14 +11,8 @@ from .cache import (
     load_validated_diary_cache,
     save_validated_diary_cache,
 )
-from citybehavex.math import allocate_location_counts, lognormal_location_probabilities
+from .config import DiariesConfig
 from .generator import fetch_diary_batch as _fetch_diary_batch
-from .motifs import (
-    MOTIF_EXCURSION_PATTERNS,
-    MOTIF_LOCATION_COUNTS,
-    build_motif_rule,
-    sample_motif,
-)
 from .models import (
     ChatChoice,
     ChatCompletionResponse,
@@ -30,6 +25,12 @@ from .models import (
     LocationCountDistribution,
     Purpose,
     parse_clock_minutes,
+)
+from .motifs import (
+    MOTIF_EXCURSION_PATTERNS,
+    MOTIF_LOCATION_COUNTS,
+    build_motif_rule,
+    sample_motif,
 )
 from .parsing import (
     diary_schema,

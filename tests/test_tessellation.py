@@ -1,9 +1,9 @@
 from __future__ import annotations
 
+import pandas as pd
+
 from citybehavex.tessellation import load_category_mapping
 from citybehavex.tessellation.builder import purpose_distribution
-
-import pandas as pd
 
 
 def test_category_mapping_collapses_to_home_work_other():

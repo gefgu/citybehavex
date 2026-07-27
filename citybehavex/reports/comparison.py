@@ -5,10 +5,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Optional
 
+import fastmob
 import h3
 import numpy as np
 import polars as pl
-import fastmob
 import typer
 from fastmob import (
     activity_distribution_jensen_shannon_divergence,
@@ -29,10 +29,15 @@ from fastmob import (
     wasserstein_distance,
 )
 from fastmob.network import haversine_m_batch
+
 from citybehavex.activities import build_catalog
 from citybehavex.metrics import (
     build_road_network_handle,
+)
+from citybehavex.metrics import (
     jump_lengths_km as road_jump_lengths_km,
+)
+from citybehavex.metrics import (
     radius_of_gyration_km as road_radius_of_gyration_km,
 )
 from citybehavex.reports.network_validation import build_network_validation
@@ -1282,7 +1287,6 @@ def generate_comparison_report(
         )
 
     typer.echo("Computing mobility metrics ...")
-    labels = ("synthetic", observed_label)
 
     # When a cached road graph is supplied, recompute jump lengths / radius of
     # gyration as road-network distance (instead of fastmob's straight-line
@@ -1339,7 +1343,6 @@ def generate_comparison_report(
         lng_col=traj.lng_col,
         datetime_col=traj.datetime_col,
     )
-    synth_visits = synth_stays[traj.uid_col].value_counts()["count"].to_list()
     # Real check-in-style datasets can have many consecutive rows at the same
     # location (repeated pings/check-ins without leaving); collapse them into
     # stay episodes the same way the synthetic side is collapsed, so both
@@ -1351,7 +1354,6 @@ def generate_comparison_report(
         lng_col=real_metric_traj.lng_col,
         datetime_col=real_metric_traj.datetime_col,
     )
-    real_visits = real_stays[real_traj.uid_col].value_counts()["count"].to_list()
     w_visits, _ = visits_per_user_wasserstein_distance(
         synth_stays,
         real_stays,

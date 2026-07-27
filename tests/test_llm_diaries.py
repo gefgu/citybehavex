@@ -8,7 +8,6 @@ import pandas as pd
 import pytest
 
 from citybehavex.llm import LLMConfig
-from citybehavex.llm_diaries.training import annotate_trajectory_purposes_ddcrp, diary_batch_to_markov_training
 from citybehavex.llm_diaries import (
     MOTIF_EXCURSION_PATTERNS,
     MOTIF_LOCATION_COUNTS,
@@ -27,6 +26,10 @@ from citybehavex.llm_diaries import (
     sample_motif,
 )
 from citybehavex.llm_diaries.motifs import motif_weights_for_location_count
+from citybehavex.llm_diaries.training import (
+    annotate_trajectory_purposes_ddcrp,
+    diary_batch_to_markov_training,
+)
 
 DEFAULT_COUNTS = allocate_location_counts(1.0, 0.5, 6, 10)
 

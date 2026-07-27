@@ -10,11 +10,10 @@ from typing import Any, Callable
 
 import numpy as np
 import pandas as pd
+from fastmob._core import latlng_to_h3_numpy
 from sklearn.decomposition import TruncatedSVD
 
 import citybehavex._core as _cbx_core
-from fastmob._core import latlng_to_h3_numpy
-
 from citybehavex.math import sample_weighted_indices
 from citybehavex.schedules import DiaryArrays
 from citybehavex.simulation.social_graph import (

@@ -15,6 +15,8 @@ import pandas as pd
 import polars as pl
 from fastmob.measures.individual.network_distance import (
     jump_lengths_km as _fastmob_jump_lengths_km,
+)
+from fastmob.measures.individual.network_distance import (
     radius_of_gyration_km as _fastmob_radius_of_gyration_km,
 )
 from fastmob.network import RoadNetwork

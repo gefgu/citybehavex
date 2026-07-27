@@ -1,22 +1,21 @@
 from __future__ import annotations
 
+import citybehavex._core as core
+import h3
 import numpy as np
 import pandas as pd
-import h3
 
-import citybehavex._core as core
 from citybehavex.activities import (
     N_ACTIVITIES,
     activity_duration_arrays,
-    build_poi_semantic_activity_data,
     build_catalog,
     build_eligibility_csr,
+    build_poi_semantic_activity_data,
 )
 from citybehavex.config.root import CityBehavExConfig
 from citybehavex.profiles import generate_profiles
 from citybehavex.profiles.config import AgentProfilesConfig
-from citybehavex.simulation.core import simulate_agents
-from citybehavex.simulation.core import build_social_graph_artifact
+from citybehavex.simulation.core import build_social_graph_artifact, simulate_agents
 from citybehavex.simulation.runner import (
     _append_home_anchors,
     _append_work_scores,
