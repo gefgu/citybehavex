@@ -4,7 +4,7 @@
 //! that `ComparisonConfig.sections`'s validator checks against.
 
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 
 /// `ACTIVITY_JSD_SECTIONS | {"cpc", "stvd", "micro_activity", "mobility_laws"}`
 /// from `citybehavex/reports/comparison.py`.
@@ -86,7 +86,7 @@ pub struct TransportSpatialConfig {
     pub lat_col: Option<String>,
     pub lng_col: Option<String>,
     pub transport_col: Option<String>,
-    pub mode_map: HashMap<String, String>,
+    pub mode_map: FxHashMap<String, String>,
 }
 
 impl Default for TransportSpatialConfig {
@@ -100,7 +100,7 @@ impl Default for TransportSpatialConfig {
             lat_col: None,
             lng_col: None,
             transport_col: None,
-            mode_map: HashMap::new(),
+            mode_map: FxHashMap::default(),
         }
     }
 }

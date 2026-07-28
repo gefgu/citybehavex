@@ -21,7 +21,7 @@ use crate::settings::reports::EvaluationAdaptationMode;
 use polars::prelude::*;
 use serde::Serialize;
 use serde_json::{Value, json};
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 use std::path::PathBuf;
 
 pub const SECTION_NAMES: &[&str] = &[
@@ -61,7 +61,7 @@ pub struct ComparisonContext {
     pub transport_lat_col: Option<String>,
     pub transport_lng_col: Option<String>,
     pub transport_col: Option<String>,
-    pub transport_mode_map: HashMap<String, String>,
+    pub transport_mode_map: FxHashMap<String, String>,
 }
 
 impl ComparisonContext {

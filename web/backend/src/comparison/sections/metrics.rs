@@ -12,7 +12,7 @@ use crate::comparison::stvd::stvd_hourly_histogram;
 use crate::comparison::util::{canonical_user_ids_vec, to_datetime_expr};
 use crate::comparison::{CAR_SPEED_KMH, CPC_H3_RESOLUTIONS, panel::collapse_to_stays};
 use polars::prelude::*;
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 
 /// Extracts `(lat, lng, uid, timestamp)` parallel arrays for
 /// `common_part_of_commuters`. Timestamps only need to sort consistently
@@ -167,7 +167,7 @@ pub fn wasserstein_metric_rows(
     observed_location_col: Option<&str>,
     observed_h3_resolution: u8,
 ) -> anyhow::Result<Vec<MetricRow>> {
-    let synth_jumps_rog: HashMap<String, JumpsRog> = jumps_rog_for_filters(
+    let synth_jumps_rog: FxHashMap<String, JumpsRog> = jumps_rog_for_filters(
         synthetic.df,
         synthetic.uid_col,
         synthetic.lat_col,
@@ -179,7 +179,7 @@ pub fn wasserstein_metric_rows(
         None,
         10,
     )?;
-    let real_jumps_rog: Option<HashMap<String, JumpsRog>> = match observed {
+    let real_jumps_rog: Option<FxHashMap<String, JumpsRog>> = match observed {
         Some(obs) => Some(jumps_rog_for_filters(
             obs.df,
             obs.uid_col,
@@ -521,8 +521,8 @@ pub fn metrics_section_payload(
 
         let syn_purposes = string_column(syn_v, "purpose")?;
         let obs_purposes = string_column(obs_v, "purpose")?;
-        let mut counts_syn = HashMap::<String, f64>::new();
-        let mut counts_obs = HashMap::<String, f64>::new();
+        let mut counts_syn = FxHashMap::<String, f64>::default();
+        let mut counts_obs = FxHashMap::<String, f64>::default();
         for p in &syn_purposes {
             *counts_syn.entry(p.clone()).or_insert(0.0) += 1.0;
         }

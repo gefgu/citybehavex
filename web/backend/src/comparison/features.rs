@@ -2,9 +2,8 @@
 //! gyration computation (`get_jumps_rog`) -- the caching wrapper isn't
 //! ported yet (a performance optimization, not a correctness requirement:
 //! every call recomputes), but the core per-pair distance calls straight into
-//! `fastmob_core::utils::haversine::haversine_km` (the `geo` crate's
-//! `Haversine::distance`) rather than this crate's own hand-rolled
-//! `comparison::util::haversine_km`.
+//! fastmob-core's presorted individual-measure kernels rather than this
+//! crate's former local per-pair loops.
 //!
 //! **This distinction matters, unlike most other "either formula works"
 //! spots**: Python's `fastmob.TrajDataFrame.jump_lengths(merge=True)` calls
@@ -29,9 +28,8 @@
 
 use super::filters::{FilterMeta, filter_df};
 use super::panel::{AdaptationMode, adapt_evaluation_dataframe};
-use fastmob_core::utils::haversine::haversine_km;
 use polars::prelude::*;
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 
 pub struct JumpsRog {
     pub jumps: Vec<f64>,
@@ -57,8 +55,8 @@ pub fn jumps_rog_for_filters(
     mode: AdaptationMode,
     location_col: Option<&str>,
     h3_resolution: u8,
-) -> anyhow::Result<HashMap<String, JumpsRog>> {
-    let mut out = HashMap::new();
+) -> anyhow::Result<FxHashMap<String, JumpsRog>> {
+    let mut out = FxHashMap::default();
     for meta in filters {
         let filtered = filter_df(df, Some(datetime_col), meta)?;
         if filtered.height() == 0 {
@@ -89,10 +87,12 @@ pub fn jumps_rog_for_filters(
 }
 
 /// Mirrors the non-road-aware branch of `features.py::get_jumps_rog`'s
-/// `build()` closure for a single (already filtered/adapted) dataframe:
-/// per-user consecutive-row jump lengths (zero-length jumps excluded, they
-/// aren't movement) and per-user radius of gyration, matching
-/// `fastmob.TrajDataFrame.jump_lengths(merge=True)`/`.radius_of_gyration()`.
+/// `build()` closure for a single (already filtered/adapted) dataframe.
+///
+/// The dataframe is physically sorted once, then handed to fastmob-core's
+/// presorted contiguous-range kernels. This matches the fast path used by
+/// `fastmob.TrajDataFrame(..., sort=True).jump_lengths()`/
+/// `.radius_of_gyration()` without carrying a local duplicate of the kernels.
 pub fn jumps_rog(
     df: &DataFrame,
     uid_col: &str,
@@ -118,6 +118,7 @@ pub fn jumps_rog(
             dt_expr.alias(datetime_col),
         ])
         .drop_nulls(Some(cols([uid_col, lat_col, lng_col, datetime_col])))
+        .filter(col(lat_col).is_finite().and(col(lng_col).is_finite()))
         .sort([uid_col, datetime_col], SortMultipleOptions::default())
         .collect()?;
     if sorted.height() == 0 {
@@ -143,44 +144,22 @@ pub fn jumps_rog(
         .collect();
 
     let (_indices, ends) = super::activity::contiguous_user_ranges(&uid);
-    let mut jumps = Vec::new();
-    let mut rog = Vec::new();
-    let mut start = 0usize;
-    for &end in &ends {
-        let user_lat = &lat[start..end];
-        let user_lng = &lng[start..end];
-        for i in 1..user_lat.len() {
-            let d = haversine_km(user_lat[i - 1], user_lng[i - 1], user_lat[i], user_lng[i]);
-            if d > 0.0 {
-                jumps.push(d);
-            }
-        }
-        rog.push(radius_of_gyration(user_lat, user_lng));
-        start = end;
-    }
+    let (_starts, _ends, jumps_all) =
+        fastmob_core::measures::individual::jump_lengths::jump_lengths_presorted_impl(
+            &lat, &lng, &ends,
+        )
+        .map_err(|e| anyhow::anyhow!(e))?;
+    let jumps = jumps_all.into_iter().filter(|d| *d > 0.0).collect();
+    let (rog_all, valid) =
+        fastmob_core::measures::individual::radius_of_gyration::radius_of_gyration_presorted_impl(
+            &lat, &lng, &ends,
+        );
+    let rog = rog_all
+        .into_iter()
+        .zip(valid)
+        .filter_map(|(value, is_valid)| is_valid.then_some(value))
+        .collect();
     Ok(JumpsRog { jumps, rog })
-}
-
-/// Mirrors fastmob-core's `rog_for_slice`: RMS Haversine distance from each
-/// point to the user's centroid (mean lat/lng, i.e. an arithmetic-mean
-/// "center of mass" in degree-space, not a geodesic centroid -- matching
-/// fastmob-core's own approximation, which is exact enough at city scale).
-fn radius_of_gyration(lat: &[f64], lng: &[f64]) -> f64 {
-    let n = lat.len();
-    if n == 0 {
-        return 0.0;
-    }
-    let cm_lat = lat.iter().sum::<f64>() / n as f64;
-    let cm_lng = lng.iter().sum::<f64>() / n as f64;
-    let sum_sq: f64 = lat
-        .iter()
-        .zip(lng.iter())
-        .map(|(&la, &lo)| {
-            let d = haversine_km(cm_lat, cm_lng, la, lo);
-            d * d
-        })
-        .sum();
-    (sum_sq / n as f64).sqrt()
 }
 
 #[cfg(test)]

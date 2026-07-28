@@ -5,6 +5,7 @@
 //! called directly with no PyO3 in the loop.
 
 use polars::prelude::*;
+use rustc_hash::FxHashMap;
 use std::collections::BTreeSet;
 
 /// Mirrors `fastmob`'s `_factorize_activities`: dense integer codes for each
@@ -22,7 +23,7 @@ pub fn factorize(values: &[String]) -> Factorized {
         .collect::<BTreeSet<_>>()
         .into_iter()
         .collect();
-    let index: std::collections::HashMap<&str, u64> = categories
+    let index: FxHashMap<&str, u64> = categories
         .iter()
         .enumerate()
         .map(|(i, c)| (c.as_str(), i as u64))
@@ -227,7 +228,7 @@ pub fn discover_daily_motifs_from_agents(
         .map_err(|e| anyhow::anyhow!(e))?;
 
     let mut daily = Vec::with_capacity(out_user_ids.len());
-    let mut counts: std::collections::HashMap<i64, i64> = std::collections::HashMap::new();
+    let mut counts: FxHashMap<i64, i64> = FxHashMap::default();
     for ((user_id, date_id), motif_id) in out_user_ids
         .into_iter()
         .zip(out_date_ids)

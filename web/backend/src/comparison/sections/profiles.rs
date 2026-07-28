@@ -7,8 +7,9 @@ use crate::payload::{
     ComparisonContext, available_filters, empty_chart_payload, prepared_visits_for_filter,
 };
 use polars::prelude::*;
+use rustc_hash::FxHashMap;
 use serde_json::{Value, json};
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, HashSet};
 
 const PROFILE_METRICS: &[&str] = &["regularity", "diversity", "stationarity", "entropy"];
 const PROFILE_ORDER: &[&str] = &["Scouter", "Regular", "Routiner"];
@@ -123,7 +124,7 @@ fn intermittency_and_return(tokens: &[String]) -> Option<(f64, f64)> {
     if tokens.is_empty() {
         return None;
     }
-    let mut counts = HashMap::<&str, usize>::new();
+    let mut counts = FxHashMap::<&str, usize>::default();
     for token in tokens {
         *counts.entry(token.as_str()).or_insert(0) += 1;
     }

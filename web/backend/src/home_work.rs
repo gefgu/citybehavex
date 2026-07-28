@@ -9,7 +9,7 @@ use crate::columns::{
 use crate::datasource::{parquet_columns, quote_path};
 use h3o::{CellIndex, LatLng, Resolution};
 use serde_json::{Value, json};
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 use std::path::Path;
 
 const DISPLAY_RESOLUTIONS: [u8; 2] = [7, 9];
@@ -58,9 +58,9 @@ impl DemoFilter {
     }
 }
 
-fn detect_cols(path: &Path) -> anyhow::Result<HashMap<&'static str, Option<String>>> {
+fn detect_cols(path: &Path) -> anyhow::Result<FxHashMap<&'static str, Option<String>>> {
     let columns = parquet_columns(path)?;
-    Ok(HashMap::from([
+    Ok([
         (
             "uid",
             detect_in(
@@ -89,7 +89,9 @@ fn detect_cols(path: &Path) -> anyhow::Result<HashMap<&'static str, Option<Strin
                 ACTIVITY_CANDIDATES,
             ),
         ),
-    ]))
+    ]
+    .into_iter()
+    .collect())
 }
 
 fn profile_filter_sql(profiles_path: Option<&Path>, demo: &DemoFilter) -> String {
@@ -136,7 +138,7 @@ const FINE_RESOLUTION: u8 = 12;
 
 fn modal_points(
     path: &Path,
-    cols: &HashMap<&str, Option<String>>,
+    cols: &FxHashMap<&str, Option<String>>,
     purpose: &str,
     profiles_path: Option<&Path>,
     demo: &DemoFilter,
@@ -173,7 +175,7 @@ fn modal_points(
     let fine_res = Resolution::try_from(FINE_RESOLUTION)
         .map_err(|e| anyhow::anyhow!("invalid H3 resolution {FINE_RESOLUTION}: {e}"))?;
     // (uid) -> (fine_cell) -> (representative lat/lng, count)
-    let mut by_user: HashMap<String, HashMap<u64, ((f64, f64), i64)>> = HashMap::new();
+    let mut by_user: FxHashMap<String, FxHashMap<u64, ((f64, f64), i64)>> = FxHashMap::default();
     for row in rows {
         let (uid, lat, lng) = row?;
         let Ok(ll) = LatLng::new(lat, lng) else {
@@ -199,10 +201,10 @@ fn modal_points(
     Ok(out)
 }
 
-fn counts_by_cell(points: &[(f64, f64)], resolution: u8) -> anyhow::Result<HashMap<u64, i64>> {
+fn counts_by_cell(points: &[(f64, f64)], resolution: u8) -> anyhow::Result<FxHashMap<u64, i64>> {
     let res = Resolution::try_from(resolution)
         .map_err(|e| anyhow::anyhow!("invalid H3 resolution {resolution}: {e}"))?;
-    let mut counts = HashMap::<u64, i64>::new();
+    let mut counts = FxHashMap::<u64, i64>::default();
     for &(lat, lng) in points {
         if let Ok(ll) = LatLng::new(lat, lng) {
             *counts.entry(u64::from(ll.to_cell(res))).or_insert(0) += 1;
@@ -211,7 +213,7 @@ fn counts_by_cell(points: &[(f64, f64)], resolution: u8) -> anyhow::Result<HashM
     Ok(counts)
 }
 
-fn feature_collection(counts: &HashMap<u64, i64>) -> anyhow::Result<Value> {
+fn feature_collection(counts: &FxHashMap<u64, i64>) -> anyhow::Result<Value> {
     let mut features = Vec::new();
     let mut cells: Vec<_> = counts.iter().collect();
     cells.sort_by_key(|(cell, _)| **cell);
@@ -247,7 +249,7 @@ fn quantile(sorted: &[i64], q: f64) -> f64 {
     }
 }
 
-fn annotate_panel(mut layers: HashMap<String, Value>, ramp: &[&str]) -> Value {
+fn annotate_panel(mut layers: FxHashMap<String, Value>, ramp: &[&str]) -> Value {
     let mut all_counts = Vec::new();
     let mut total_agents = 0i64;
     for fc in layers.values() {
@@ -334,14 +336,14 @@ fn annotate_panel(mut layers: HashMap<String, Value>, ramp: &[&str]) -> Value {
 
 fn panel_for(
     path: &Path,
-    cols: &HashMap<&str, Option<String>>,
+    cols: &FxHashMap<&str, Option<String>>,
     purpose: &str,
     profiles_path: Option<&Path>,
     demo: &DemoFilter,
     ramp: &[&str],
 ) -> anyhow::Result<Value> {
     let points = modal_points(path, cols, purpose, profiles_path, demo)?;
-    let mut layers = HashMap::new();
+    let mut layers = FxHashMap::default();
     for res in DISPLAY_RESOLUTIONS {
         layers.insert(
             res.to_string(),
@@ -353,7 +355,7 @@ fn panel_for(
 
 fn matched_counts(
     synthetic_path: &Path,
-    cols: &HashMap<&str, Option<String>>,
+    cols: &FxHashMap<&str, Option<String>>,
     profiles_path: Option<&Path>,
     demo: &DemoFilter,
 ) -> anyhow::Result<(i64, i64)> {

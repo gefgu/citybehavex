@@ -10,7 +10,7 @@ use crate::comparison::visits::prepare_activity_visits;
 use crate::payload::{ComparisonContext, choose_regular_filter, detected_col, empty_chart_payload};
 use polars::prelude::*;
 use serde_json::{Value, json};
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 
 pub(crate) fn string_column(df: &DataFrame, name: &str) -> anyhow::Result<Vec<String>> {
     Ok(df
@@ -23,10 +23,10 @@ pub(crate) fn string_column(df: &DataFrame, name: &str) -> anyhow::Result<Vec<St
         .collect())
 }
 
-fn purpose_distribution(visits: &DataFrame) -> anyhow::Result<(Vec<String>, HashMap<String, f64>)> {
+fn purpose_distribution(visits: &DataFrame) -> anyhow::Result<(Vec<String>, FxHashMap<String, f64>)> {
     let purposes = string_column(visits, "purpose")?;
     let mut order = Vec::<String>::new();
-    let mut counts = HashMap::<String, i64>::new();
+    let mut counts = FxHashMap::<String, i64>::default();
     for purpose in purposes {
         if !counts.contains_key(&purpose) {
             order.push(purpose.clone());
@@ -75,7 +75,7 @@ pub(crate) fn align_square(
     matrix: &[Vec<f64>],
     target: &[String],
 ) -> Vec<Vec<f64>> {
-    let index: HashMap<&str, usize> = target
+    let index: FxHashMap<&str, usize> = target
         .iter()
         .enumerate()
         .map(|(i, cat)| (cat.as_str(), i))
@@ -105,7 +105,7 @@ pub(crate) fn align_daily(
     target: &[String],
 ) -> Vec<Vec<f64>> {
     let n_bins = matrix.first().map_or(0, Vec::len);
-    let index: HashMap<&str, usize> = target
+    let index: FxHashMap<&str, usize> = target
         .iter()
         .enumerate()
         .map(|(i, cat)| (cat.as_str(), i))
@@ -190,7 +190,7 @@ fn build_activity_block(
     let (syn_order, syn_dist) = purpose_distribution(synthetic_visits)?;
     let (obs_order, obs_dist) = match observed_visits {
         Some(obs) => purpose_distribution(obs)?,
-        None => (Vec::new(), HashMap::new()),
+        None => (Vec::new(), FxHashMap::default()),
     };
     let purpose_categories = ordered_union(&syn_order, &obs_order);
     let mut purpose_series = vec![json!({

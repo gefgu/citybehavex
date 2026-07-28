@@ -16,8 +16,8 @@
 //! `data/.web_cache/` -- the two servers' cache files are not intended to be
 //! byte-compatible or shared, only each internally self-consistent.
 
+use rustc_hash::FxHashMap;
 use serde_json::{Value, json};
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -78,14 +78,14 @@ fn mtime_or(path: &Path, missing: &str) -> Value {
 
 pub struct Cache {
     dir: PathBuf,
-    inflight: Mutex<HashMap<String, Arc<OnceCell<Value>>>>,
+    inflight: Mutex<FxHashMap<String, Arc<OnceCell<Value>>>>,
 }
 
 impl Cache {
     pub fn new(dir: PathBuf) -> Self {
         Self {
             dir,
-            inflight: Mutex::new(HashMap::new()),
+            inflight: Mutex::new(FxHashMap::default()),
         }
     }
 

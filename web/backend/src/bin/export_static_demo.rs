@@ -16,6 +16,7 @@ use citybehavex_web::payload::{self, ComparisonContext};
 use citybehavex_web::routes::timeline as timeline_routes;
 
 use chrono::{NaiveDateTime, TimeDelta};
+use rustc_hash::FxHashMap;
 use serde::Deserialize;
 use serde_json::{Value, json};
 use std::path::Path;
@@ -679,8 +680,7 @@ fn export_static_demo(manifest_path: &Path) -> anyhow::Result<()> {
     std::fs::create_dir_all(&output_dir)?;
 
     let mut experiments_payload = Vec::new();
-    let mut detail_payloads: std::collections::HashMap<String, Value> =
-        std::collections::HashMap::new();
+    let mut detail_payloads: FxHashMap<String, Value> = FxHashMap::default();
 
     for (entry, experiment) in &prepared {
         let selected = experiment.runs.first().expect("at least one run selected");

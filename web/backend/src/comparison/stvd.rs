@@ -8,7 +8,7 @@ use super::h3::h3_cells;
 use super::util::to_datetime_expr;
 use h3o::CellIndex;
 use polars::prelude::*;
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 
 pub const STVD_ALL_HOURS: [i32; 24] = {
     let mut hours = [0i32; 24];
@@ -22,7 +22,7 @@ pub const STVD_ALL_HOURS: [i32; 24] = {
 
 /// Per-cell hourly row counts for one trajectory at one H3 resolution --
 /// `cell -> [count_hour_0, count_hour_1, ..., count_hour_23]`.
-pub type HourlyLayer = HashMap<u64, [i64; 24]>;
+pub type HourlyLayer = FxHashMap<u64, [i64; 24]>;
 
 /// Mirrors `comparison.py::_stvd_hourly_histogram`: per-H3-cell,
 /// per-hour-of-day row count, one table per resolution.
@@ -32,7 +32,7 @@ pub fn stvd_hourly_histogram(
     lng_col: &str,
     datetime_col: &str,
     resolutions: &[u8],
-) -> anyhow::Result<HashMap<u8, HourlyLayer>> {
+) -> anyhow::Result<FxHashMap<u8, HourlyLayer>> {
     let schema = df.schema();
     let dt_expr = to_datetime_expr(&schema, datetime_col);
     let work = df
@@ -43,7 +43,7 @@ pub fn stvd_hourly_histogram(
         .with_columns([col("_dt").dt().hour().cast(DataType::Int32).alias("_hour")])
         .collect()?;
 
-    let mut layers = HashMap::new();
+    let mut layers = FxHashMap::default();
     for &res in resolutions {
         let cells = h3_cells(
             work.column(lat_col)?.as_materialized_series(),
@@ -53,7 +53,7 @@ pub fn stvd_hourly_histogram(
         let cell_ca = cells.u64()?;
         let hour_ca = work.column("_hour")?.i32()?;
 
-        let mut layer: HourlyLayer = HashMap::new();
+        let mut layer: HourlyLayer = FxHashMap::default();
         for i in 0..work.height() {
             if let (Some(cell), Some(hour)) = (cell_ca.get(i), hour_ca.get(i)) {
                 let entry = layer.entry(cell).or_insert([0i64; 24]);
@@ -84,12 +84,12 @@ pub struct StvdFeature {
 /// `raw_shift` clamped to a ceiling of `12.0` -- not the `min(raw_shift,
 /// 24-raw_shift)` a true 24-hour circular distance would compute.
 pub fn diff_stvd_layers(
-    syn_hourly: &HashMap<u8, HourlyLayer>,
-    real_hourly: &HashMap<u8, HourlyLayer>,
+    syn_hourly: &FxHashMap<u8, HourlyLayer>,
+    real_hourly: &FxHashMap<u8, HourlyLayer>,
     resolutions: &[u8],
-) -> anyhow::Result<HashMap<u8, Vec<StvdFeature>>> {
+) -> anyhow::Result<FxHashMap<u8, Vec<StvdFeature>>> {
     let zero_row = [0i64; 24];
-    let mut layers = HashMap::new();
+    let mut layers = FxHashMap::default();
 
     for &res in resolutions {
         let syn_lookup = syn_hourly.get(&res).cloned().unwrap_or_default();
@@ -177,7 +177,7 @@ pub fn compute_stvd_layers(
     real_lng_col: &str,
     real_datetime_col: &str,
     resolutions: &[u8],
-) -> anyhow::Result<HashMap<u8, Vec<StvdFeature>>> {
+) -> anyhow::Result<FxHashMap<u8, Vec<StvdFeature>>> {
     let syn_hourly = stvd_hourly_histogram(
         syn_df,
         syn_lat_col,
