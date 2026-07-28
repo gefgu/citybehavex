@@ -17,19 +17,8 @@ path = "src/bin/export_static_demo.rs"
 
 [dependencies]
 fastmob-core = { path = "../../../fastmob/fastmob-core" }
+fastmob-vis = { path = "../../../fastmob/fastmob-vis" }
 rustc-hash = "2"
-# skmob-vis is NOT yet a dependency here: its `[lib] crate-type = ["cdylib",
-# "rlib"]` means any consumer needing the rlib output also forces a build of
-# the cdylib target in the same rustc invocation, which unconditionally links
-# pyo3 in non-extension-module mode (no `pyo3 = { features = ["extension-module"] }`
-# gate in its Cargo.toml) and fails outside a Python-embedding context -- the
-# same `-lpython3.14` link error `citybehavex-py` needs `PYO3_PYTHON` +
-# `pyo3/extension-module` to avoid, except here there's no clean equivalent
-# fix from the consumer side since crate-type is fixed by the producer, not
-# selectable per-dependency. Revisit when Phase 6 needs `ecdf_points`: either
-# a small upstream change to skmob-vis (split a pure-rlib core out, mirroring
-# the fastmob-core/fastmob-py split) or just reimplement the ~30-line function
-# directly here.
 
 axum = "0.8"
 tokio = { version = "1", features = ["full"] }
