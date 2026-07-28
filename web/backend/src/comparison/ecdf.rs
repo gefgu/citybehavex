@@ -1,11 +1,7 @@
 //! Mirrors `payload/legacy.py`'s ECDF helpers (`_downsample`, `_ecdf`,
-//! `_ecdf_block`, `_transport_ecdf_block`). The underlying point-computation
-//! algorithm is `skmob_vis::ecdf_points` (`skmob_vis/src/lib.rs`, exposed to
-//! Python as `skmob_vis._core.compute_ecdf`) -- reimplemented directly here
-//! rather than taking `skmob-vis` as a Cargo dependency, since its `[lib]
-//! crate-type = ["cdylib", "rlib"]` forces a PyO3 cdylib build on any
-//! consumer of the rlib (see `web/backend/Cargo.toml`'s comment on this).
-//! ~30 lines, easy to keep in sync if the upstream implementation changes.
+//! `_ecdf_block`, `_transport_ecdf_block`). The point-computation algorithm
+//! comes from `fastmob_vis::ecdf_points`, exposed to Python as
+//! `fastmob_vis._core.compute_ecdf`.
 
 use super::DEFAULT_MODE_ORDER;
 use polars::prelude::*;
@@ -13,47 +9,15 @@ use serde::Serialize;
 
 pub const MAX_ECDF_POINTS: usize = 400;
 
-/// Mirrors `skmob_vis::ecdf_points`: empirical CDF as `[x, cumulative_probability]`
+/// Wrapper over `fastmob_vis::ecdf_points`: empirical CDF as `[x, cumulative_probability]`
 /// points (one point per distinct value, ties collapsed), truncated at
 /// `cdf_cutoff` (the point where `probability == cdf_cutoff` is kept and the
 /// curve stops there; if a step would exceed the cutoff, one final point at
 /// exactly `cdf_cutoff` is emitted instead).
 pub fn ecdf_points(values: &[f64], cdf_cutoff: f64) -> anyhow::Result<Vec<[f64; 2]>> {
-    if values.is_empty() {
-        anyhow::bail!("values must not be empty");
-    }
-    if values.iter().any(|v| !v.is_finite()) {
-        anyhow::bail!("values must contain only finite values");
-    }
-    if !(cdf_cutoff.is_finite() && cdf_cutoff > 0.0 && cdf_cutoff <= 1.0) {
-        anyhow::bail!("cdf_cutoff must be finite and in the interval (0, 1]");
-    }
-
-    let mut sorted = values.to_vec();
-    sorted.sort_by(f64::total_cmp);
-
-    let total = sorted.len() as f64;
-    let mut points = Vec::new();
-    let mut index = 0usize;
-    while index < sorted.len() {
-        let x = sorted[index];
-        let mut next = index + 1;
-        while next < sorted.len() && sorted[next] == x {
-            next += 1;
-        }
-        let probability = next as f64 / total;
-        if probability <= cdf_cutoff {
-            points.push([x, probability]);
-            if probability == cdf_cutoff {
-                break;
-            }
-        } else {
-            points.push([x, cdf_cutoff]);
-            break;
-        }
-        index = next;
-    }
-    Ok(points)
+    fastmob_vis::ecdf_points(values.to_vec(), "values", cdf_cutoff)
+        .map(|points| points.into_iter().map(|p| [p[0], p[1]]).collect())
+        .map_err(anyhow::Error::msg)
 }
 
 /// Mirrors `legacy.py::_downsample`. Minor known deviation: numpy's

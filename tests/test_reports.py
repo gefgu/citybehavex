@@ -71,6 +71,7 @@ def test_load_trajectory_detects_common_column_names(tmp_path):
     assert traj.datetime_col == "start_timestamp"
     assert traj.lat_col == "latitude"
     assert traj.lng_col == "longitude"
+    assert traj.sorted
 
 
 def test_trajectory_od_matrix_orders_users_and_excludes_invalid_and_self_loops():

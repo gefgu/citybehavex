@@ -105,6 +105,29 @@ def waiting_times_minutes(traj: fastmob.TrajDataFrame) -> list:
     return [s / 60 for s in secs]
 
 
+def _traj_dataframe(
+    df: pl.DataFrame,
+    *,
+    datetime_col: str,
+    lat_col: str,
+    lng_col: str,
+    uid_col: str,
+    presorted: bool = False,
+) -> fastmob.TrajDataFrame:
+    """Build a fastmob trajectory wrapper and preserve sorted-state metadata."""
+    traj = fastmob.TrajDataFrame(
+        df,
+        datetime_col=datetime_col,
+        lat_col=lat_col,
+        lng_col=lng_col,
+        uid_col=uid_col,
+        sort=not presorted,
+    )
+    if presorted:
+        traj.sorted = True
+    return traj
+
+
 def _to_datetime(col: pl.Series) -> pl.Series:
     """Coerce a datetime-ish column (string or already-parsed) to polars
     ``Datetime``, coercing unparsable values to null."""
@@ -341,13 +364,11 @@ def _observed_transport_leg_records(
     if work.is_empty():
         return _empty_transport_records()
 
-    jump_km = haversine_m_batch(
-        work["_prev_lat"].to_numpy(),
-        work["_prev_lng"].to_numpy(),
-        work[lat].to_numpy(),
-        work[lng].to_numpy(),
-    ) / 1000.0
-    work = work.with_columns(pl.Series("jump_km", jump_km)).filter(pl.col("jump_km").is_finite())
+    work = work.with_columns(
+        _fastmob_haversine_km_expr(
+            pl.col("_prev_lat"), pl.col("_prev_lng"), pl.col(lat), pl.col(lng)
+        ).alias("jump_km")
+    ).filter(pl.col("jump_km").is_finite())
     if work.is_empty():
         return _empty_transport_records()
 
@@ -1134,7 +1155,7 @@ def load_trajectory(path: str) -> fastmob.TrajDataFrame:
         raise ValueError(
             f"{path} is missing recognizable columns for: {', '.join(missing)}"
         )
-    return fastmob.TrajDataFrame(
+    return _traj_dataframe(
         df,
         datetime_col=datetime_col,
         lat_col=lat_col,
@@ -1183,6 +1204,14 @@ def generate_comparison_report(
     transport_spatial_config: Optional[object] = None,
     evaluation_adaptation_config: Optional[object] = None,
 ) -> None:
+    if not getattr(traj, "sorted", False):
+        traj = _traj_dataframe(
+            traj.df,
+            datetime_col=traj.datetime_col,
+            lat_col=traj.lat_col,
+            lng_col=traj.lng_col,
+            uid_col=traj.uid_col,
+        )
     if sections is not None:
         unknown = set(sections) - ALL_REPORT_SECTIONS
         if unknown:
@@ -1198,7 +1227,7 @@ def generate_comparison_report(
     _dt_col = detect_column(real_df, _DATETIME_CANDIDATES)
     if _dt_col and not isinstance(real_df.schema[_dt_col], pl.Datetime):
         real_df = real_df.with_columns(_to_datetime(real_df[_dt_col]).alias(_dt_col))
-    real_traj = fastmob.TrajDataFrame(
+    real_traj = _traj_dataframe(
         real_df,
         datetime_col=_dt_col,
         lat_col=detect_column(real_df, _LAT_CANDIDATES),
@@ -1217,12 +1246,13 @@ def generate_comparison_report(
     if real_eval.warning:
         typer.echo(f"Warning: {real_eval.warning}", err=True)
     real_metric_df = real_eval.df
-    real_metric_traj = fastmob.TrajDataFrame(
+    real_metric_traj = _traj_dataframe(
         real_metric_df,
         datetime_col=real_traj.datetime_col,
         lat_col=real_traj.lat_col,
         lng_col=real_traj.lng_col,
         uid_col=real_traj.uid_col,
+        presorted=real_eval.adapted,
     )
 
     # The "synthetic" side is normally genuine simulation output (already
@@ -1267,12 +1297,13 @@ def generate_comparison_report(
     if synth_eval.warning:
         typer.echo(f"Warning: {synth_eval.warning}", err=True)
     if synth_eval.adapted:
-        traj = fastmob.TrajDataFrame(
+        traj = _traj_dataframe(
             synth_eval.df,
             datetime_col=traj.datetime_col,
             lat_col=traj.lat_col,
             lng_col=traj.lng_col,
             uid_col=traj.uid_col,
+            presorted=True,
         )
 
     typer.echo("Computing mobility metrics ...")
