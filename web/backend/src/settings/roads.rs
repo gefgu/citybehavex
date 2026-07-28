@@ -1,7 +1,7 @@
 //! Mirrors `citybehavex/roads/config.py::{RoadNetworkConfig,RailNetworkConfig}`.
 
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields, default)]
@@ -46,7 +46,7 @@ pub struct RailNetworkConfig {
     pub snap_max_distance_m: f64,
     pub max_leg_waypoints: i64,
     pub classes: Vec<String>,
-    pub speed_kmh_by_class: HashMap<String, f64>,
+    pub speed_kmh_by_class: FxHashMap<String, f64>,
     pub default_speed_kmh: f64,
 }
 
@@ -67,13 +67,15 @@ impl Default for RailNetworkConfig {
                 "monorail".to_string(),
                 "standard_gauge".to_string(),
             ],
-            speed_kmh_by_class: HashMap::from([
+            speed_kmh_by_class: [
                 ("subway".to_string(), 35.0),
                 ("tram".to_string(), 22.0),
                 ("light_rail".to_string(), 30.0),
                 ("monorail".to_string(), 28.0),
                 ("standard_gauge".to_string(), 45.0),
-            ]),
+            ]
+            .into_iter()
+            .collect(),
             default_speed_kmh: 35.0,
         }
     }

@@ -1,0 +1,13 @@
+repos:
+  - repo: local
+    hooks:
+      - id: cargo-clippy-disallowed-types
+        name: cargo clippy (disallowed types, see clippy.toml)
+        description: >-
+          Enforces the `disallowed-types` rules in clippy.toml (e.g.
+          std::collections::HashMap -> rustc_hash::FxHashMap) without failing
+          on unrelated pre-existing clippy warnings.
+        entry: cargo clippy --workspace --all-targets -- -D clippy::disallowed_types
+        language: system
+        types: [rust]
+        pass_filenames: false

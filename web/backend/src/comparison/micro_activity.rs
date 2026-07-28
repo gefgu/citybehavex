@@ -8,6 +8,7 @@
 use crate::settings::catalog;
 use chrono::{NaiveDateTime, TimeDelta};
 use polars::prelude::*;
+use rustc_hash::FxHashMap;
 use serde::Serialize;
 
 #[derive(Debug, Clone, Serialize)]
@@ -74,11 +75,11 @@ pub fn micro_activity_daily_usage_data(
     let n_bins = (1440 / bin_size_minutes) as usize;
     let bin_seconds = bin_size_minutes * 60;
     let activity_ids: Vec<i64> = catalog::CATALOG.iter().map(|a| a.idx as i64).collect();
-    let labels: std::collections::HashMap<i64, &str> = catalog::CATALOG
+    let labels: FxHashMap<i64, &str> = catalog::CATALOG
         .iter()
         .map(|a| (a.idx as i64, a.name))
         .collect();
-    let mut id_to_row: std::collections::HashMap<i64, usize> = std::collections::HashMap::new();
+    let mut id_to_row: FxHashMap<i64, usize> = FxHashMap::default();
     for (row, &id) in activity_ids.iter().enumerate() {
         id_to_row.insert(id, row);
     }

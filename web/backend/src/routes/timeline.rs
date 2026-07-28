@@ -7,9 +7,10 @@ use crate::experiments::{self, get_experiment};
 use crate::models::{ApiError, ApiResponse, ApiResult};
 use axum::extract::{Path, Query};
 use chrono::{DateTime, NaiveDateTime, TimeZone};
+use rustc_hash::FxHashMap;
 use serde::Deserialize;
 use serde_json::{Value, json};
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeSet, HashSet};
 use std::path::{Path as FsPath, PathBuf};
 
 #[derive(Debug, Deserialize)]
@@ -388,7 +389,7 @@ fn attach_profile_character_fields(
     let conn = duckdb::Connection::open_in_memory()?;
     let mut stmt = conn.prepare(&sql)?;
     let mut rows = stmt.query([])?;
-    let mut by_uid = HashMap::<i64, (String, String)>::new();
+    let mut by_uid = FxHashMap::<i64, (String, String)>::default();
     while let Some(row) = rows.next()? {
         let uid: i64 = row.get(0)?;
         let gender_raw = row.get::<_, Option<String>>(1)?;
@@ -439,8 +440,8 @@ fn attach_waypoints(segments: &mut [Value], moving_path: &FsPath) -> anyhow::Res
     let conn = duckdb::Connection::open_in_memory()?;
     let mut stmt = conn.prepare(&sql)?;
     let mut rows = stmt.query([])?;
-    let mut waypoints = HashMap::<(i64, i64), Vec<Value>>::new();
-    let mut modes = HashMap::<(i64, i64), String>::new();
+    let mut waypoints = FxHashMap::<(i64, i64), Vec<Value>>::default();
+    let mut modes = FxHashMap::<(i64, i64), String>::default();
     while let Some(row) = rows.next()? {
         let key = (row.get::<_, i64>(0)?, row.get::<_, i64>(1)?);
         waypoints.entry(key).or_default().push(json!({
@@ -749,9 +750,9 @@ fn activity_fields(activity_id: Option<i64>) -> Value {
     }
 }
 
-fn query_agent_activities(path: &FsPath, uid: i64) -> anyhow::Result<HashMap<i64, Vec<Value>>> {
+fn query_agent_activities(path: &FsPath, uid: i64) -> anyhow::Result<FxHashMap<i64, Vec<Value>>> {
     if !path.exists() {
-        return Ok(HashMap::new());
+        return Ok(FxHashMap::default());
     }
     let columns = parquet_columns(path)?;
     if !columns.contains("uid")
@@ -760,7 +761,7 @@ fn query_agent_activities(path: &FsPath, uid: i64) -> anyhow::Result<HashMap<i64
         || !columns.contains("arrival")
         || !columns.contains("departure")
     {
-        return Ok(HashMap::new());
+        return Ok(FxHashMap::default());
     }
     let seq_expr = if columns.contains("seq") {
         "seq"
@@ -777,7 +778,7 @@ fn query_agent_activities(path: &FsPath, uid: i64) -> anyhow::Result<HashMap<i64
     let conn = duckdb::Connection::open_in_memory()?;
     let mut stmt = conn.prepare(&sql)?;
     let mut rows = stmt.query(duckdb::params![uid])?;
-    let mut by_stop = HashMap::<i64, Vec<Value>>::new();
+    let mut by_stop = FxHashMap::<i64, Vec<Value>>::default();
     while let Some(row) = rows.next()? {
         let stop_id = row.get::<_, i64>(0)?;
         let activity = row.get::<_, Option<i64>>(3)?;
@@ -871,15 +872,15 @@ fn diary_cache_variant_path(base: &FsPath, variant: &str) -> PathBuf {
 fn load_diary_cache(
     base_path: Option<&FsPath>,
     day_types: &[String],
-) -> HashMap<(String, String), Value> {
+) -> FxHashMap<(String, String), Value> {
     let Some(base_path) = base_path else {
-        return HashMap::new();
+        return FxHashMap::default();
     };
     let mut paths = vec![base_path.to_path_buf()];
     for day_type in day_types {
         paths.push(diary_cache_variant_path(base_path, day_type));
     }
-    let mut out = HashMap::new();
+    let mut out = FxHashMap::default();
     for path in paths {
         if !path.exists() {
             continue;
@@ -977,9 +978,9 @@ fn query_agent_crp_rows(
     Ok((t_a, alpha_a, diaries))
 }
 
-fn query_encounter_counts(path: &FsPath, uid: i64) -> anyhow::Result<HashMap<i64, i64>> {
+fn query_encounter_counts(path: &FsPath, uid: i64) -> anyhow::Result<FxHashMap<i64, i64>> {
     if !path.exists() {
-        return Ok(HashMap::new());
+        return Ok(FxHashMap::default());
     }
     let sql = format!(
         "SELECT CASE WHEN agent = $uid THEN contact ELSE agent END AS contact_uid, count(*) FROM read_parquet('{}') WHERE agent = $uid OR contact = $uid GROUP BY 1",
@@ -988,7 +989,7 @@ fn query_encounter_counts(path: &FsPath, uid: i64) -> anyhow::Result<HashMap<i64
     let conn = duckdb::Connection::open_in_memory()?;
     let mut stmt = conn.prepare(&sql)?;
     let mut rows = stmt.query(duckdb::params![uid])?;
-    let mut out = HashMap::new();
+    let mut out = FxHashMap::default();
     while let Some(row) = rows.next()? {
         out.insert(row.get::<_, i64>(0)?, row.get::<_, i64>(1)?);
     }

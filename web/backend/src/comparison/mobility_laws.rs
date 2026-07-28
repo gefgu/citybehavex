@@ -495,9 +495,10 @@ pub fn bin_visitation_law_data(
     let f = law_data.column("f")?.cast(&DataType::Float64)?;
     let f = f.f64()?;
 
-    use std::collections::{HashMap, HashSet};
+    use rustc_hash::FxHashMap;
+    use std::collections::HashSet;
     // key: (location_id, r_center_bits, f_bits) -> set of user ids
-    let mut groups: HashMap<(String, u64, u64), HashSet<i64>> = HashMap::new();
+    let mut groups: FxHashMap<(String, u64, u64), HashSet<i64>> = FxHashMap::default();
     for i in 0..law_data.height() {
         let (Some(uid), Some(loc), Some(r), Some(freq)) =
             (user_id.get(i), location_id.get(i), r_km.get(i), f.get(i))

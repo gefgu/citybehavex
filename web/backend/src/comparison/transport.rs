@@ -3,14 +3,14 @@
 //! small mode-normalization helpers they share.
 
 use super::DEFAULT_MODE_ORDER;
-use super::util::{haversine_km, to_datetime_expr};
+use super::util::to_datetime_expr;
 use crate::columns::{
     DATETIME_CANDIDATES, LAT_CANDIDATES, LNG_CANDIDATES, TRANSPORT_CANDIDATES, UID_CANDIDATES,
     detect_in,
 };
 use polars::prelude::*;
 use serde::Serialize;
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 use std::path::{Path, PathBuf};
 
 /// Mirrors `comparison.py::_default_synthetic_moving_path`.
@@ -29,7 +29,7 @@ pub fn default_synthetic_moving_path(synthetic_path: &Path) -> PathBuf {
 /// Mirrors `comparison.py::_normalize_transport_mode`.
 fn normalize_transport_mode(
     value: Option<&str>,
-    mode_map: &HashMap<String, String>,
+    mode_map: &FxHashMap<String, String>,
 ) -> Option<String> {
     let raw = value?.trim();
     if raw.is_empty() {
@@ -54,7 +54,7 @@ fn normalize_transport_mode(
 
 /// Mirrors `comparison.py::_transport_mode_map`: lowercase every key/value
 /// of the configured `mode_map`.
-pub fn transport_mode_map(raw: &HashMap<String, String>) -> HashMap<String, String> {
+pub fn transport_mode_map(raw: &FxHashMap<String, String>) -> FxHashMap<String, String> {
     raw.iter()
         .map(|(k, v)| (k.trim().to_lowercase(), v.trim().to_lowercase()))
         .collect()
@@ -77,7 +77,7 @@ fn empty_transport_records() -> anyhow::Result<DataFrame> {
 fn join_normalized_mode(
     df: LazyFrame,
     mode_col: &str,
-    mode_map: &HashMap<String, String>,
+    mode_map: &FxHashMap<String, String>,
 ) -> anyhow::Result<LazyFrame> {
     let raw_modes: Vec<Option<String>> = df
         .clone()
@@ -115,7 +115,7 @@ fn join_normalized_mode(
 /// yjmob/yjmob2 scale.
 pub fn synthetic_transport_leg_records(
     moving_path: &Path,
-    mode_map: &HashMap<String, String>,
+    mode_map: &FxHashMap<String, String>,
 ) -> anyhow::Result<DataFrame> {
     let lf = LazyFrame::scan_parquet(
         PlPath::new(&moving_path.to_string_lossy()),
@@ -238,7 +238,7 @@ pub fn observed_transport_leg_records(
     lng_col: Option<&str>,
     transport_col: Option<&str>,
     duration_col: Option<&str>,
-    mode_map: &HashMap<String, String>,
+    mode_map: &FxHashMap<String, String>,
 ) -> anyhow::Result<DataFrame> {
     let col_names: Vec<&str> = observed_df
         .get_column_names()
@@ -348,7 +348,9 @@ pub fn observed_transport_leg_records(
                 this_lat.get(i),
                 this_lng.get(i),
             ) {
-                (Some(a), Some(b), Some(c), Some(d)) => haversine_km(a, b, c, d),
+                (Some(a), Some(b), Some(c), Some(d)) => {
+                    fastmob_core::utils::haversine::haversine_km(a, b, c, d)
+                }
                 _ => f64::NAN,
             }
         })
@@ -421,8 +423,8 @@ pub struct SourceSummary {
 /// Mirrors `comparison.py::_transport_spatial_summary`.
 pub fn transport_spatial_summary(
     records: &DataFrame,
-) -> anyhow::Result<HashMap<String, SourceSummary>> {
-    let mut out = HashMap::new();
+) -> anyhow::Result<FxHashMap<String, SourceSummary>> {
+    let mut out = FxHashMap::default();
     if records.height() == 0 {
         return Ok(out);
     }
@@ -510,7 +512,7 @@ mod tests {
 
     #[test]
     fn normalize_mode_lowercases_and_maps() {
-        let mut map = HashMap::new();
+        let mut map = FxHashMap::default();
         map.insert("driving".to_string(), "car".to_string());
         assert_eq!(
             normalize_transport_mode(Some("Driving"), &map),
@@ -585,7 +587,7 @@ mod tests {
         let path = repo_root.join(
             "data/gparis/results/gparis_simulation_core_trajectories_20260710T073952_moving.parquet",
         );
-        let legs = synthetic_transport_leg_records(&path, &HashMap::new()).unwrap();
+        let legs = synthetic_transport_leg_records(&path, &FxHashMap::default()).unwrap();
         assert_eq!(legs.height(), 37934);
 
         let summary = transport_spatial_summary(&legs).unwrap();

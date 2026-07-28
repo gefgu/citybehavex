@@ -9,8 +9,9 @@ use crate::comparison::transport::{
     transport_spatial_summary,
 };
 use crate::payload::{ComparisonContext, duration_col, empty_chart_payload};
+use rustc_hash::FxHashMap;
 use serde_json::{Value, json};
-use std::collections::{BTreeSet, HashMap};
+use std::collections::BTreeSet;
 
 pub fn transport_spatial_section_payload(ctx: &ComparisonContext) -> anyhow::Result<Value> {
     let mut payload = empty_chart_payload(ctx, Vec::new());
@@ -83,7 +84,7 @@ pub fn transport_spatial_section_payload(ctx: &ComparisonContext) -> anyhow::Res
         let Some(source_summary) = summary.get(source) else {
             continue;
         };
-        let by_mode: HashMap<&str, f64> = source_summary
+        let by_mode: FxHashMap<&str, f64> = source_summary
             .modes
             .iter()
             .map(|row| (row.mode.as_str(), row.percent))

@@ -5,7 +5,7 @@
 //! `fastmob-core`'s `co_presence_network` module (which supplies the actual
 //! `build_co_presence_edges`/`compute_graph_metrics` kernels).
 //!
-//! Node/day/location identifiers are factorized via plain `HashMap`s rather
+//! Node/day/location identifiers are factorized via plain `FxHashMap`s rather
 //! than Polars group-by/join (as the Python port does), which is simpler and
 //! avoids join overhead at observed-graph scale (tens of millions of rows for
 //! Shanghai/yjmob) -- the resulting node ordering isn't required to match
@@ -18,7 +18,7 @@ use crate::comparison::util::to_datetime_expr;
 use crate::settings::reports::LocationMode;
 use fastmob_core::measures::collective::co_presence_network::build_co_presence_edges;
 use polars::prelude::*;
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 
 #[derive(Debug)]
 pub struct ObservedGraph {
@@ -119,9 +119,9 @@ pub fn observed_edges_and_persistence(
     let day_ca = day_i64.i64()?;
     let loc_ca = location_str.str()?;
 
-    let mut uid_codes: HashMap<String, i64> = HashMap::new();
-    let mut day_codes_map: HashMap<i64, i64> = HashMap::new();
-    let mut loc_codes_map: HashMap<String, i64> = HashMap::new();
+    let mut uid_codes: FxHashMap<String, i64> = FxHashMap::default();
+    let mut day_codes_map: FxHashMap<i64, i64> = FxHashMap::default();
+    let mut loc_codes_map: FxHashMap<String, i64> = FxHashMap::default();
 
     let mut nodes: Vec<i64> = Vec::new();
     let mut day_codes: Vec<i64> = Vec::new();

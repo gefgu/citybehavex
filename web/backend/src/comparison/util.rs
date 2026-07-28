@@ -2,6 +2,7 @@
 //! engine's submodules.
 
 use polars::prelude::*;
+use rustc_hash::FxHashMap;
 
 /// Mirrors `comparison.py::_to_datetime`: coerce a datetime-ish column
 /// (string or already-parsed) to a `Datetime` dtype, coercing unparsable
@@ -52,22 +53,6 @@ pub fn haversine_km_expr(lat1: Expr, lng1: Expr, lat2: Expr, lng2: Expr) -> Expr
     lit(6371.0088) * lit(2.0) * a.sqrt().clip_max(lit(1.0)).arcsin()
 }
 
-/// Plain-`f64`-slice haversine, mirrors `comparison.py::_haversine_km_np`
-/// (used where callers already have materialized numpy-equivalent arrays,
-/// e.g. `_observed_transport_leg_records`).
-pub fn haversine_km(lat1: f64, lng1: f64, lat2: f64, lng2: f64) -> f64 {
-    let (lat1_r, lng1_r, lat2_r, lng2_r) = (
-        lat1.to_radians(),
-        lng1.to_radians(),
-        lat2.to_radians(),
-        lng2.to_radians(),
-    );
-    let dlat = lat2_r - lat1_r;
-    let dlng = lng2_r - lng1_r;
-    let a = (dlat / 2.0).sin().powi(2) + lat1_r.cos() * lat2_r.cos() * (dlng / 2.0).sin().powi(2);
-    6371.0088 * 2.0 * a.sqrt().min(1.0).asin()
-}
-
 /// `BooleanChunked::fill_null` takes a `FillNullStrategy`, not a raw value,
 /// so filling nulls with a literal `false` (the `~(...).fill_null(False)`
 /// pattern used throughout `comparison.py`'s window-function boolean masks)
@@ -112,7 +97,7 @@ pub fn canonical_user_ids(uid: &Series) -> anyhow::Result<Series> {
 
     let uid = uid.cast(&DataType::String)?;
     let uid = uid.str()?;
-    let mut labels = std::collections::HashMap::<String, i64>::new();
+    let mut labels = FxHashMap::<String, i64>::default();
     let mut next = 0i64;
     let values: Vec<Option<i64>> = uid
         .into_iter()
@@ -139,16 +124,4 @@ pub fn canonical_user_ids_vec(uid: &Series) -> anyhow::Result<Vec<i64>> {
         .into_iter()
         .map(|v| v.unwrap_or(i64::MIN))
         .collect())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn haversine_known_distance() {
-        // San Francisco to Los Angeles, ~559 km great-circle.
-        let d = haversine_km(37.7749, -122.4194, 34.0522, -118.2437);
-        assert!((d - 559.0).abs() < 5.0, "got {d}");
-    }
 }

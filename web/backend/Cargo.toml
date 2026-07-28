@@ -17,6 +17,7 @@ path = "src/bin/export_static_demo.rs"
 
 [dependencies]
 fastmob-core = { path = "../../../fastmob/fastmob-core" }
+rustc-hash = "2"
 # skmob-vis is NOT yet a dependency here: its `[lib] crate-type = ["cdylib",
 # "rlib"]` means any consumer needing the rlib output also forces a build of
 # the cdylib target in the same rustc invocation, which unconditionally links

@@ -9,8 +9,9 @@ use crate::datasource::quote_path;
 use crate::payload::{ComparisonContext, choose_regular_filter, empty_chart_payload};
 use chrono::{Datelike, NaiveDateTime};
 use polars::prelude::*;
+use rustc_hash::FxHashMap;
 use serde_json::{Value, json};
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeSet, HashSet};
 use std::path::{Path, PathBuf};
 
 /// Mirrors `legacy.py`'s `TIME_USE_CATEGORIES` exactly -- the 25 raw MTUS
@@ -84,7 +85,7 @@ fn observed_time_use_minutes(
     path: &Path,
     ctx: &ComparisonContext,
     filter_key: &str,
-) -> anyhow::Result<HashMap<String, f64>> {
+) -> anyhow::Result<FxHashMap<String, f64>> {
     let scan = duckdb_scan_expr(path)?;
     let conn = duckdb::Connection::open_in_memory()?;
     let columns: HashSet<String> = conn
@@ -135,7 +136,7 @@ fn observed_time_use_minutes(
     let sql = format!("SELECT {} FROM {scan} {where_sql}", select_cols.join(", "));
     let mut stmt = conn.prepare(&sql)?;
     let mut rows = stmt.query([])?;
-    let mut weighted = HashMap::<String, f64>::new();
+    let mut weighted = FxHashMap::<String, f64>::default();
     let mut total_weight = 0.0;
     while let Some(row) = rows.next()? {
         let day = row.get::<_, Option<String>>(0)?.unwrap_or_default();
@@ -165,7 +166,7 @@ fn observed_time_use_minutes(
 }
 
 fn add_synthetic_time_use_segment(
-    totals: &mut HashMap<String, f64>,
+    totals: &mut FxHashMap<String, f64>,
     agent_days: &mut BTreeSet<(i64, chrono::NaiveDate)>,
     uid: i64,
     category: &str,
@@ -287,7 +288,7 @@ pub fn time_use_section_payload(
         .cast(&DataType::Datetime(TimeUnit::Microseconds, None))?;
     let arr = arrival.datetime()?;
     let dep = departure.datetime()?;
-    let mut totals: HashMap<String, f64> = HashMap::new();
+    let mut totals: FxHashMap<String, f64> = FxHashMap::default();
     let mut agent_days = std::collections::BTreeSet::<(i64, chrono::NaiveDate)>::new();
     for i in 0..activities.height() {
         let (Some(uid), Some(act), Some(a), Some(d)) = (
