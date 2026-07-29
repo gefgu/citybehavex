@@ -482,99 +482,13 @@ pub fn bin_visitation_law_data(
     n_bins: usize,
     distance_bin_width_km: f64,
 ) -> anyhow::Result<(Vec<f64>, Vec<f64>)> {
-    if distance_bin_width_km <= 0.0 {
-        anyhow::bail!("distance_bin_width_km must be > 0");
-    }
-    if n_bins == 0 {
-        anyhow::bail!("n_bins must be > 0");
-    }
-
-    let user_id = law_data.column("user_id")?.i64()?;
-    let location_id = law_data.column("location_id")?.str()?;
-    let r_km = law_data.column("r_km")?.f64()?;
-    let f = law_data.column("f")?.cast(&DataType::Float64)?;
-    let f = f.f64()?;
-
-    use rustc_hash::FxHashMap;
-    use std::collections::HashSet;
-    // key: (location_id, r_center_bits, f_bits) -> set of user ids
-    let mut groups: FxHashMap<(String, u64, u64), HashSet<i64>> = FxHashMap::default();
-    for i in 0..law_data.height() {
-        let (Some(uid), Some(loc), Some(r), Some(freq)) =
-            (user_id.get(i), location_id.get(i), r_km.get(i), f.get(i))
-        else {
-            continue;
-        };
-        if !(r.is_finite() && r > 0.0 && freq.is_finite() && freq > 0.0) {
-            continue;
-        }
-        let r_center = (r / distance_bin_width_km).floor() * distance_bin_width_km
-            + distance_bin_width_km / 2.0;
-        groups
-            .entry((loc.to_string(), r_center.to_bits(), freq.to_bits()))
-            .or_default()
-            .insert(uid);
-    }
-
-    let mut rf_values = Vec::new();
-    let mut rho_values = Vec::new();
-    for ((_, r_center_bits, f_bits), users) in &groups {
-        let r_center = f64::from_bits(*r_center_bits);
-        let freq = f64::from_bits(*f_bits);
-        let annulus_area = 2.0 * std::f64::consts::PI * r_center * distance_bin_width_km;
-        if annulus_area <= 0.0 {
-            continue;
-        }
-        let rho = users.len() as f64 / annulus_area;
-        let rf = r_center * freq;
-        if rf > 0.0 && rho > 0.0 {
-            rf_values.push(rf);
-            rho_values.push(rho);
-        }
-    }
-
-    if rf_values.is_empty() {
-        return Ok((Vec::new(), Vec::new()));
-    }
-    let rf_min = rf_values.iter().cloned().fold(f64::INFINITY, f64::min);
-    let rf_max = rf_values.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
-    if rf_min == rf_max {
-        let mean_rho = rho_values.iter().sum::<f64>() / rho_values.len() as f64;
-        return Ok((vec![rf_min], vec![mean_rho]));
-    }
-
-    let log_min = rf_min.log10();
-    let log_max = rf_max.log10();
-    let edges: Vec<f64> = (0..=n_bins)
-        .map(|i| 10f64.powf(log_min + (log_max - log_min) * (i as f64) / (n_bins as f64)))
-        .collect();
-    let centers: Vec<f64> = (0..n_bins)
-        .map(|i| (edges[i] * edges[i + 1]).sqrt())
-        .collect();
-
-    let mut rf_out = Vec::new();
-    let mut rho_out = Vec::new();
-    for idx in 0..n_bins {
-        let lo = edges[idx];
-        let hi = edges[idx + 1];
-        let is_last = idx == n_bins - 1;
-        let mut bucket = Vec::new();
-        for (&rf, &rho) in rf_values.iter().zip(rho_values.iter()) {
-            let in_bin = if is_last {
-                rf >= lo && rf <= hi
-            } else {
-                rf >= lo && rf < hi
-            };
-            if in_bin {
-                bucket.push(rho);
-            }
-        }
-        if !bucket.is_empty() {
-            rf_out.push(centers[idx]);
-            rho_out.push(bucket.iter().sum::<f64>() / bucket.len() as f64);
-        }
-    }
-    Ok((rf_out, rho_out))
+    Ok(fastmob_rs::bin_visitation_law_data(
+        law_data,
+        "user_id",
+        "location_id",
+        n_bins,
+        distance_bin_width_km,
+    )?)
 }
 
 /// Mirrors fastmob's `fit_visitation_law`: OLS fit of `log(rho)` on `log(rf)`
@@ -584,46 +498,7 @@ pub fn fit_visitation_law(
     rf_values: &[f64],
     rho_values: &[f64],
 ) -> anyhow::Result<(f64, f64, f64)> {
-    if rf_values.len() != rho_values.len() {
-        anyhow::bail!("rf_values and rho_values must have the same length");
-    }
-    let xy: Vec<(f64, f64)> = rf_values
-        .iter()
-        .zip(rho_values.iter())
-        .filter(|pair: &(&f64, &f64)| {
-            pair.0.is_finite() && pair.1.is_finite() && *pair.0 > 0.0 && *pair.1 > 0.0
-        })
-        .map(|(&rf, &rho)| (rf.ln(), rho.ln()))
-        .collect();
-    if xy.len() < 2 {
-        anyhow::bail!("At least two positive finite data points are required to fit.");
-    }
-    let n = xy.len() as f64;
-    let x_mean = xy.iter().map(|(x, _)| x).sum::<f64>() / n;
-    let y_mean = xy.iter().map(|(_, y)| y).sum::<f64>() / n;
-    let mut sxy = 0.0;
-    let mut sxx = 0.0;
-    for (x, y) in &xy {
-        sxy += (x - x_mean) * (y - y_mean);
-        sxx += (x - x_mean).powi(2);
-    }
-    let slope = sxy / sxx;
-    let intercept = y_mean - slope * x_mean;
-    let eta = -slope;
-    let mu = intercept.exp();
-
-    let ss_res: f64 = xy
-        .iter()
-        .map(|(x, y)| (y - (intercept + slope * x)).powi(2))
-        .sum();
-    let ss_tot: f64 = xy.iter().map(|(_, y)| (y - y_mean).powi(2)).sum();
-    let r2 = if ss_tot == 0.0 {
-        1.0
-    } else {
-        1.0 - ss_res / ss_tot
-    };
-
-    Ok((eta, mu, r2))
+    Ok(fastmob_rs::fit_visitation_law(rf_values, rho_values)?)
 }
 
 /// Mirrors `comparison.py::_distance_frequency_dataset`.
