@@ -2,6 +2,7 @@
 name = "citybehavex-web"
 version = "0.1.0"
 edition = "2024"
+default-run = "citybehavex-web"
 
 [lib]
 name = "citybehavex_web"
@@ -18,6 +19,7 @@ path = "src/bin/export_static_demo.rs"
 [dependencies]
 fastmob-core = { path = "../../../fastmob/fastmob-core" }
 fastmob-vis = { path = "../../../fastmob/fastmob-vis" }
+fastmob-rs = { path = "../../../fastmob/fastmob-rs" }
 rustc-hash = "2"
 
 axum = "0.8"

@@ -1,22 +1,29 @@
 //! Mirrors `legacy Python backend/features.py`'s per-file jump-length/radius-of-
 //! gyration computation (`get_jumps_rog`) -- the caching wrapper isn't
 //! ported yet (a performance optimization, not a correctness requirement:
-//! every call recomputes), but the core per-pair distance calls straight into
-//! fastmob-core's presorted individual-measure kernels rather than this
-//! crate's former local per-pair loops.
+//! every call recomputes).
 //!
-//! **This distinction matters, unlike most other "either formula works"
-//! spots**: Python's `fastmob.TrajDataFrame.jump_lengths(merge=True)` calls
-//! straight into this exact `fastmob_core` kernel via PyO3, so using a
-//! different (if mathematically equivalent) hand-rolled formula produces
-//! different floating-point rounding at the near-zero-distance boundary --
-//! confirmed on real `gparis_simulation` observed data: of 13293 raw
-//! consecutive-row pairs, this crate's own `util::haversine_km` classified
-//! 503 fewer of them as exactly zero-length than `fastmob_core`'s kernel
-//! does (10832 vs 10329 non-zero jumps), which is large enough to visibly
-//! shift the jump-length ECDF. Switching to `fastmob_core`'s kernel directly
-//! resolves it, matching Python's actual code path bit-for-bit rather than
-//! merely approximating the same formula.
+//! The whole pipeline -- column resolution, cleaning, arranging by
+//! `(uid, datetime)`, group boundaries and the distance kernels -- now lives in
+//! `fastmob-rs`, fastmob's public Rust DataFrame API, rather than being
+//! re-derived here. That crate's `prepare()` replaces the local
+//! select/drop_nulls/sort/materialize block and beats it by ~1.6x at 4M rows
+//! (127 ms vs 206 ms), because it arranges via a counting sort over user codes
+//! plus a parallel per-group timestamp sort instead of a whole-frame Polars
+//! sort. See `fastmob-rs/BENCHMARKS.md`.
+//!
+//! **Bit-exactness matters here, unlike most other "either formula works"
+//! spots**: Python's `fastmob.TrajDataFrame.jump_lengths(merge=True)` reaches
+//! the same `fastmob_core` kernel via PyO3, so a different (if mathematically
+//! equivalent) hand-rolled formula produces different floating-point rounding
+//! at the near-zero-distance boundary -- confirmed on real `gparis_simulation`
+//! observed data: of 13293 raw consecutive-row pairs, this crate's own
+//! `util::haversine_km` classified 503 fewer of them as exactly zero-length
+//! than `fastmob_core`'s kernel does (10832 vs 10329 non-zero jumps), which is
+//! large enough to visibly shift the jump-length ECDF. `fastmob-rs` is pinned
+//! to the same kernel *and* the same cargo features as the Python extension, so
+//! it reproduces Python's output bit-for-bit; its test suite asserts exactly
+//! that against dumps generated from the Python path.
 //!
 //! **Not yet ported**: the road-network-aware variant
 //! (`fastmob.measures.individual.network_distance`, used when
@@ -89,10 +96,9 @@ pub fn jumps_rog_for_filters(
 /// Mirrors the non-road-aware branch of `features.py::get_jumps_rog`'s
 /// `build()` closure for a single (already filtered/adapted) dataframe.
 ///
-/// The dataframe is physically sorted once, then handed to fastmob-core's
-/// presorted contiguous-range kernels. This matches the fast path used by
-/// `fastmob.TrajDataFrame(..., sort=True).jump_lengths()`/
-/// `.radius_of_gyration()` without carrying a local duplicate of the kernels.
+/// `fastmob_rs::prepare` cleans and arranges the frame once; both measures then
+/// read the same arrangement, so the expensive part is paid a single time per
+/// call rather than once per measure.
 pub fn jumps_rog(
     df: &DataFrame,
     uid_col: &str,
@@ -106,54 +112,27 @@ pub fn jumps_rog(
             rog: Vec::new(),
         });
     }
-    let schema = df.schema();
-    let dt_expr = super::util::to_datetime_expr(&schema, datetime_col);
-    let sorted = df
-        .clone()
-        .lazy()
-        .select([
-            col(uid_col),
-            col(lat_col).cast(DataType::Float64),
-            col(lng_col).cast(DataType::Float64),
-            dt_expr.alias(datetime_col),
-        ])
-        .drop_nulls(Some(cols([uid_col, lat_col, lng_col, datetime_col])))
-        .filter(col(lat_col).is_finite().and(col(lng_col).is_finite()))
-        .sort([uid_col, datetime_col], SortMultipleOptions::default())
-        .collect()?;
-    if sorted.height() == 0 {
+
+    let prepared = fastmob_rs::prepare(
+        df,
+        fastmob_rs::Cols::auto()
+            .uid(uid_col)
+            .lat(lat_col)
+            .lng(lng_col)
+            .datetime(datetime_col),
+    )?;
+    if prepared.is_empty() {
         return Ok(JumpsRog {
             jumps: Vec::new(),
             rog: Vec::new(),
         });
     }
 
-    let uid: Vec<i64> =
-        super::util::canonical_user_ids_vec(sorted.column(uid_col)?.as_materialized_series())?;
-    let lat: Vec<f64> = sorted
-        .column(lat_col)?
-        .f64()?
+    let jumps = fastmob_rs::jump_lengths_flat(&prepared)?
         .into_iter()
-        .map(|v| v.unwrap_or(f64::NAN))
+        .filter(|d| *d > 0.0)
         .collect();
-    let lng: Vec<f64> = sorted
-        .column(lng_col)?
-        .f64()?
-        .into_iter()
-        .map(|v| v.unwrap_or(f64::NAN))
-        .collect();
-
-    let (_indices, ends) = super::activity::contiguous_user_ranges(&uid);
-    let (_starts, _ends, jumps_all) =
-        fastmob_core::measures::individual::jump_lengths::jump_lengths_presorted_impl(
-            &lat, &lng, &ends,
-        )
-        .map_err(|e| anyhow::anyhow!(e))?;
-    let jumps = jumps_all.into_iter().filter(|d| *d > 0.0).collect();
-    let (rog_all, valid) =
-        fastmob_core::measures::individual::radius_of_gyration::radius_of_gyration_presorted_impl(
-            &lat, &lng, &ends,
-        );
+    let (rog_all, valid) = fastmob_rs::radius_of_gyration_flat(&prepared);
     let rog = rog_all
         .into_iter()
         .zip(valid)
