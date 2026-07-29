@@ -114,14 +114,3 @@ pub fn canonical_user_ids(uid: &Series) -> anyhow::Result<Series> {
     Ok(Series::new("user_id".into(), values))
 }
 
-/// Convenience wrapper returning plain `i64`s (nulls as `i64::MIN`, matching
-/// how callers already treated unparseable/missing uids) for call sites that
-/// just need a `Vec<i64>` for boundary detection rather than a `Series`
-/// column.
-pub fn canonical_user_ids_vec(uid: &Series) -> anyhow::Result<Vec<i64>> {
-    Ok(canonical_user_ids(uid)?
-        .i64()?
-        .into_iter()
-        .map(|v| v.unwrap_or(i64::MIN))
-        .collect())
-}

@@ -1,36 +1,14 @@
 //! Mirrors fastmob's `activity_transition_matrix`, `daily_activity_distribution`,
-//! and `discover_daily_motifs_from_agents` -- the data-prep (factorization,
-//! indexed/sorted per-user row ranges) lives here in Rust; the actual
-//! counting/graph-canonicalization algorithms are `fastmob-core` kernels,
-//! called directly with no PyO3 in the loop.
+//! and `discover_daily_motifs_from_agents`.
+//!
+//! The first two are now thin re-exports of `fastmob-rs`, which owns the
+//! factorization and per-user grouping they used to do here. Motif discovery
+//! still builds its own per-agent day tables locally, since that shaping is
+//! specific to this crate's visit model; the canonicalization itself is a
+//! `fastmob-core` kernel, called directly with no PyO3 in the loop.
 
 use polars::prelude::*;
 use rustc_hash::FxHashMap;
-use std::collections::BTreeSet;
-
-/// Mirrors `fastmob`'s `_factorize_activities`: dense integer codes for each
-/// distinct string value, categories sorted lexicographically (matching
-/// Python's `sorted(set(values), key=str)` for string-typed columns).
-pub struct Factorized {
-    pub categories: Vec<String>,
-    pub codes: Vec<u64>,
-}
-
-pub fn factorize(values: &[String]) -> Factorized {
-    let categories: Vec<String> = values
-        .iter()
-        .cloned()
-        .collect::<BTreeSet<_>>()
-        .into_iter()
-        .collect();
-    let index: FxHashMap<&str, u64> = categories
-        .iter()
-        .enumerate()
-        .map(|(i, c)| (c.as_str(), i as u64))
-        .collect();
-    let codes = values.iter().map(|v| index[v.as_str()]).collect();
-    Factorized { categories, codes }
-}
 
 /// Contiguous per-user `(start, end)` row ranges, assuming `uid` is already
 /// grouped (physically sorted by user, and by whatever secondary order the
@@ -54,51 +32,20 @@ pub fn contiguous_user_ranges<T: PartialEq>(sorted_uid: &[T]) -> (Vec<usize>, Ve
 }
 
 /// Mirrors fastmob's `activity_transition_matrix`: `df` must already be
-/// sorted by `[uid_col, timestamp_col]` (the physical-sort equivalent of
-/// fastmob's `_build_indexed_user_ranges_fast` over an already-time-sorted
-/// frame). Returns `(categories, matrix)` where `matrix[from][to]` is the
-/// percentage of all consecutive-visit transitions (summed across every
-/// user) that went from activity `categories[from]` to `categories[to]`.
+/// grouped by user and ordered within each user. Returns `(categories,
+/// matrix)` where `matrix[from][to]` is the percentage of all
+/// consecutive-visit transitions (summed across every user) that went from
+/// activity `categories[from]` to `categories[to]`.
 pub fn activity_transition_matrix(
     sorted_df: &DataFrame,
     uid_col: &str,
     activity_col: &str,
 ) -> anyhow::Result<(Vec<String>, Vec<Vec<f64>>)> {
-    let activities: Vec<String> = sorted_df
-        .column(activity_col)?
-        .as_materialized_series()
-        .cast(&DataType::String)?
-        .str()?
-        .into_iter()
-        .map(|v| v.unwrap_or("UNKNOWN").to_string())
-        .collect();
-    let factorized = factorize(&activities);
-    let n = factorized.categories.len();
-    if n == 0 {
-        return Ok((factorized.categories, Vec::new()));
-    }
-
-    let uid: Vec<i64> =
-        super::util::canonical_user_ids_vec(sorted_df.column(uid_col)?.as_materialized_series())?;
-    let (indices, ends) = contiguous_user_ranges(&uid);
-
-    let counts = fastmob_core::measures::individual::activity::activity_transition_counts(
-        &factorized.codes,
-        &indices,
-        &ends,
-        n,
-    )
-    .map_err(|e| anyhow::anyhow!(e))?;
-    let total: u64 = counts.iter().sum();
-    let mut matrix = vec![vec![0.0f64; n]; n];
-    if total > 0 {
-        for from in 0..n {
-            for to in 0..n {
-                matrix[from][to] = counts[from * n + to] as f64 / total as f64 * 100.0;
-            }
-        }
-    }
-    Ok((factorized.categories, matrix))
+    Ok(fastmob_rs::activity_transition_matrix(
+        sorted_df,
+        uid_col,
+        activity_col,
+    )?)
 }
 
 /// Mirrors fastmob's `daily_activity_distribution`. `start_minutes`/`end_minutes`
@@ -114,27 +61,14 @@ pub fn daily_activity_distribution(
     valid_rows: &[bool],
     bin_size_minutes: usize,
 ) -> anyhow::Result<(Vec<String>, Vec<Vec<f64>>)> {
-    let factorized = factorize(activity);
-    let n = factorized.categories.len();
-    let n_bins = 1440 / bin_size_minutes;
-    if n == 0 {
-        return Ok((factorized.categories, Vec::new()));
-    }
-
-    let flat = fastmob_core::measures::individual::activity::daily_activity_percentages(
-        &factorized.codes,
+    let activities = Series::new("activity".into(), activity);
+    Ok(fastmob_rs::daily_activity_distribution(
+        &activities,
         start_minutes,
         end_minutes,
         valid_rows,
-        n,
         bin_size_minutes,
-    )
-    .map_err(|e| anyhow::anyhow!(e))?;
-
-    let matrix = (0..n)
-        .map(|a| flat[a * n_bins..(a + 1) * n_bins].to_vec())
-        .collect();
-    Ok((factorized.categories, matrix))
+    )?)
 }
 
 #[derive(Debug, Clone)]
@@ -280,19 +214,6 @@ fn decode_motif_id(motif_id: i64) -> (i32, i32) {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn factorize_sorts_categories_lexicographically() {
-        let values = vec![
-            "b".to_string(),
-            "a".to_string(),
-            "c".to_string(),
-            "a".to_string(),
-        ];
-        let f = factorize(&values);
-        assert_eq!(f.categories, vec!["a", "b", "c"]);
-        assert_eq!(f.codes, vec![1, 0, 2, 0]);
-    }
 
     #[test]
     fn contiguous_user_ranges_groups_correctly() {
