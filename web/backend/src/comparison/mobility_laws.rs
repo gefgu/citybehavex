@@ -17,128 +17,22 @@ use polars::prelude::*;
 /// Bounded least-squares approximation of fastmob's
 /// `fit_values_to_truncated_powerlaw`.
 ///
-/// Python uses scipy's Trust-Region-Reflective `curve_fit`. To keep the web
-/// backend Python-free, this builds the same log-spaced density histogram and
-/// fits `log(y) = log(c) - beta*log(x+r0) - x/kappa`. Bounds are enforced by
-/// a deterministic coarse-to-fine grid over `(r0, beta, kappa)`, with the
-/// optimal `c` solved in closed form in log-space for every candidate. This is
-/// intentionally conservative: stable, dependency-free, and close enough for
-/// the rendered reference curves without blocking the migration on scipy.
+/// Python's default path uses scipy's Trust-Region-Reflective `curve_fit`.
+/// To keep the web backend Python-free this uses the deterministic
+/// coarse-to-fine grid search instead, which now lives in `fastmob-core` and
+/// backs fastmob's own `fit_values_to_truncated_powerlaw(method="grid")` --
+/// so this is a shared implementation of a documented alternative estimator,
+/// not a private re-derivation. It is intentionally conservative: stable,
+/// dependency-free, and close enough for the rendered reference curves.
 pub fn truncated_powerlaw_dataset(
     values: &[f64],
     label: &str,
 ) -> anyhow::Result<(Vec<f64>, Vec<f64>, Vec<f64>, String)> {
-    let mut clean: Vec<f64> = values
-        .iter()
-        .copied()
-        .filter(|v| v.is_finite() && *v > 0.0)
-        .collect();
-    if clean.len() < 2 {
-        anyhow::bail!("at least two positive finite values are required");
-    }
-    clean.sort_by(|a, b| a.total_cmp(b));
-    let min_x = clean[0].max(1.0e-9);
-    let max_x = *clean.last().unwrap();
-    if max_x <= min_x {
-        anyhow::bail!("positive values must span a non-zero range");
-    }
-
-    let n_bins = 30usize.min(clean.len().max(2));
-    let log_min = min_x.log10();
-    let log_max = max_x.log10();
-    let edges: Vec<f64> = (0..=n_bins)
-        .map(|i| 10f64.powf(log_min + (log_max - log_min) * (i as f64) / (n_bins as f64)))
-        .collect();
-    let mut x = Vec::new();
-    let mut y = Vec::new();
-    for i in 0..n_bins {
-        let lo = edges[i];
-        let hi = edges[i + 1];
-        let count = clean
-            .iter()
-            .filter(|&&v| {
-                if i == n_bins - 1 {
-                    v >= lo && v <= hi
-                } else {
-                    v >= lo && v < hi
-                }
-            })
-            .count();
-        if count == 0 {
-            continue;
-        }
-        let width = hi - lo;
-        if width > 0.0 {
-            x.push((lo * hi).sqrt());
-            y.push(count as f64 / (clean.len() as f64 * width));
-        }
-    }
-    if x.len() < 2 {
-        anyhow::bail!("not enough occupied histogram bins to fit");
-    }
-
-    fn geom_grid(lo: f64, hi: f64, n: usize) -> Vec<f64> {
-        let log_lo = lo.ln();
-        let log_hi = hi.ln();
-        (0..n)
-            .map(|i| (log_lo + (log_hi - log_lo) * (i as f64) / ((n - 1).max(1) as f64)).exp())
-            .collect()
-    }
-    fn lin_grid(lo: f64, hi: f64, n: usize) -> Vec<f64> {
-        (0..n)
-            .map(|i| lo + (hi - lo) * (i as f64) / ((n - 1).max(1) as f64))
-            .collect()
-    }
-
-    let fit_once = |r0_values: Vec<f64>, beta_values: Vec<f64>, kappa_values: Vec<f64>| {
-        let log_y: Vec<f64> = y.iter().map(|v| v.ln()).collect();
-        let mut best = (f64::INFINITY, 1.0, 1.0, 1.5, 100.0);
-        for r0 in r0_values {
-            for beta in &beta_values {
-                for kappa in &kappa_values {
-                    let shape_log: Vec<f64> = x
-                        .iter()
-                        .map(|&xi| -beta * (xi + r0).ln() - xi / kappa)
-                        .collect();
-                    let log_c = log_y
-                        .iter()
-                        .zip(shape_log.iter())
-                        .map(|(ly, sl)| ly - sl)
-                        .sum::<f64>()
-                        / log_y.len() as f64;
-                    let sse = log_y
-                        .iter()
-                        .zip(shape_log.iter())
-                        .map(|(ly, sl)| (ly - (log_c + sl)).powi(2))
-                        .sum::<f64>();
-                    if sse < best.0 {
-                        best = (sse, log_c.exp(), r0, *beta, *kappa);
-                    }
-                }
-            }
-        }
-        best
-    };
-
-    let coarse = fit_once(
-        geom_grid(0.01, max_x.max(1.0), 10),
-        lin_grid(0.2, 4.0, 16),
-        geom_grid(1.0, (max_x * 20.0).max(10.0), 14),
-    );
-    let (_, _c0, r00, beta0, kappa0) = coarse;
-    let r0_lo = (r00 / 3.0).max(0.001);
-    let r0_hi = (r00 * 3.0).max(r0_lo * 1.01);
-    let beta_lo = (beta0 - 0.6).max(0.01);
-    let beta_hi = beta0 + 0.6;
-    let kappa_lo = (kappa0 / 3.0).max(0.1);
-    let kappa_hi = (kappa0 * 3.0).max(kappa_lo * 1.01);
-    let (_sse, c, r0, beta, kappa) = fit_once(
-        geom_grid(r0_lo, r0_hi, 12),
-        lin_grid(beta_lo, beta_hi, 14),
-        geom_grid(kappa_lo, kappa_hi, 12),
-    );
-
-    Ok((vec![c, r0, beta, kappa], x, y, label.to_string()))
+    let fit = fastmob_core::measures::fitting::truncated_powerlaw::fit_truncated_powerlaw_grid(
+        values, 30,
+    )
+    .map_err(|e| anyhow::anyhow!(e))?;
+    Ok((fit.parameters.to_vec(), fit.x, fit.y, label.to_string()))
 }
 
 /// Mirrors `comparison.py::_mobility_law_visits`.
