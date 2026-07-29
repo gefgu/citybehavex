@@ -6,62 +6,15 @@
 use crate::comparison::features::{JumpsRog, jumps_rog_for_filters};
 use crate::comparison::filters::{FilterMeta, filter_df};
 use crate::comparison::metric_row::{MetricRow, metric_row};
-use crate::comparison::metrics::{common_part_of_commuters, wasserstein_distance};
+use crate::comparison::metrics::{
+    TrajectoryColumns, common_part_of_commuters, wasserstein_distance,
+};
 use crate::comparison::panel::{AdaptationMode, adapt_evaluation_dataframe};
 use crate::comparison::stvd::stvd_hourly_histogram;
-use crate::comparison::util::{canonical_user_ids_vec, to_datetime_expr};
 use crate::comparison::{CAR_SPEED_KMH, CPC_H3_RESOLUTIONS, panel::collapse_to_stays};
 use polars::prelude::*;
 use rustc_hash::FxHashMap;
 
-/// Extracts `(lat, lng, uid, timestamp)` parallel arrays for
-/// `common_part_of_commuters`. Timestamps only need to sort consistently
-/// with real time (not any particular unit), so microseconds work fine here
-/// -- matching the codebase's existing `to_datetime_expr` convention rather
-/// than converting to true milliseconds.
-fn cpc_arrays(
-    df: &DataFrame,
-    lat_col: &str,
-    lng_col: &str,
-    uid_col: &str,
-    datetime_col: &str,
-) -> anyhow::Result<(Vec<f64>, Vec<f64>, Vec<i64>, Vec<i64>)> {
-    let schema = df.schema();
-    let dt_expr = to_datetime_expr(&schema, datetime_col);
-    let prepared = df
-        .clone()
-        .lazy()
-        .select([
-            col(uid_col),
-            col(lat_col).cast(DataType::Float64),
-            col(lng_col).cast(DataType::Float64),
-            dt_expr.alias(datetime_col),
-        ])
-        .drop_nulls(Some(cols([uid_col, lat_col, lng_col, datetime_col])))
-        .collect()?;
-    let uid = canonical_user_ids_vec(prepared.column(uid_col)?.as_materialized_series())?;
-    let lat: Vec<f64> = prepared
-        .column(lat_col)?
-        .f64()?
-        .into_iter()
-        .map(|v| v.unwrap_or(f64::NAN))
-        .collect();
-    let lng: Vec<f64> = prepared
-        .column(lng_col)?
-        .f64()?
-        .into_iter()
-        .map(|v| v.unwrap_or(f64::NAN))
-        .collect();
-    let ts: Vec<i64> = prepared
-        .column(datetime_col)?
-        .cast(&DataType::Datetime(TimeUnit::Microseconds, None))?
-        .datetime()?
-        .phys
-        .into_iter()
-        .map(|v| v.unwrap_or(0))
-        .collect();
-    Ok((lat, lng, uid, ts))
-}
 
 /// EPSG:4326 -> EPSG:3857 (Web Mercator), closed-form -- matches
 /// `legacy.py`'s `Transformer.from_crs("EPSG:4326", "EPSG:3857", always_xy=True)`
@@ -406,29 +359,21 @@ pub fn metrics_section_payload(
         )?;
         let real_filtered = filter_df(&obs_traj.df, Some(&obs_traj.datetime_col), &filter)?;
         if synth_filtered.height() > 0 && real_filtered.height() > 0 {
-            let (lat_a, lng_a, uid_a, ts_a) = cpc_arrays(
-                &synth_filtered,
-                &synthetic_traj.lat_col,
-                &synthetic_traj.lng_col,
-                &synthetic_traj.uid_col,
-                &synthetic_traj.datetime_col,
-            )?;
-            let (lat_b, lng_b, uid_b, ts_b) = cpc_arrays(
-                &real_filtered,
-                &obs_traj.lat_col,
-                &obs_traj.lng_col,
-                &obs_traj.uid_col,
-                &obs_traj.datetime_col,
-            )?;
             let cpc = common_part_of_commuters(
-                &lat_a,
-                &lng_a,
-                &uid_a,
-                &ts_a,
-                &lat_b,
-                &lng_b,
-                &uid_b,
-                &ts_b,
+                &synth_filtered,
+                TrajectoryColumns {
+                    uid: &synthetic_traj.uid_col,
+                    lat: &synthetic_traj.lat_col,
+                    lng: &synthetic_traj.lng_col,
+                    datetime: &synthetic_traj.datetime_col,
+                },
+                &real_filtered,
+                TrajectoryColumns {
+                    uid: &obs_traj.uid_col,
+                    lat: &obs_traj.lat_col,
+                    lng: &obs_traj.lng_col,
+                    datetime: &obs_traj.datetime_col,
+                },
                 &CPC_H3_RESOLUTIONS,
             )?;
             for (resolution, value) in cpc {

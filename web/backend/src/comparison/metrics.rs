@@ -1,207 +1,106 @@
-//! Numeric primitives comparison.py imports from `fastmob`: `wasserstein_distance`
-//! and `jensen_shannon_divergence` are pure-Python wrappers in fastmob's Python
-//! layer around a narrow Rust kernel (or, for JSD, no Rust at all) -- ported
-//! here to call `fastmob-core` directly where a kernel exists, and to
-//! reimplement the plain numpy formula otherwise. `trajectory_common_part_of_commuters_multi`
-//! and `waiting_times` are fully Rust-backed in fastmob-core; called directly.
+//! Numeric primitives `comparison.py` imports from `fastmob`.
+//!
+//! Every one of these now delegates to `fastmob-rs`, fastmob's public Rust
+//! DataFrame API, rather than re-deriving the formula or the data prep here.
+//! That includes the pieces fastmob previously had only in Python: the
+//! Jensen-Shannon divergence lives in `fastmob-core` now, so this crate and the
+//! Python layer share one definition instead of two that have to be kept in
+//! step by hand.
+//!
+//! The functions keep their original signatures so call sites are unaffected.
 
 use polars::prelude::*;
 
-/// Mirrors `fastmob/measures/evaluation/metrics.py::_finite_array` +
-/// `wasserstein_distance`: drop non-finite values, return `NaN` if either
-/// side is empty, otherwise the Rust-backed empirical 1D Wasserstein
-/// distance (`fastmob-core`'s `empirical_wasserstein_1d`: mean absolute
-/// order-statistic difference when sample sizes match, else the general
-/// merge-sweep CDF-area formula).
+/// Wasserstein distance between two samples, ignoring non-finite values and
+/// returning `NaN` when either side ends up empty.
 pub fn wasserstein_distance(values1: &[f64], values2: &[f64]) -> f64 {
-    let v1: Vec<f64> = values1.iter().copied().filter(|v| v.is_finite()).collect();
-    let v2: Vec<f64> = values2.iter().copied().filter(|v| v.is_finite()).collect();
-    if v1.is_empty() || v2.is_empty() {
-        return f64::NAN;
-    }
-    fastmob_core::measures::evaluation::wasserstein::empirical_wasserstein_1d(&v1, &v2)
-        .unwrap_or(f64::NAN)
+    fastmob_rs::wasserstein_distance(values1, values2)
 }
 
-fn normalize_distribution(values: &[f64]) -> Vec<f64> {
-    let mut out: Vec<f64> = values
-        .iter()
-        .map(|v| if v.is_finite() { *v } else { 0.0 })
-        .collect();
-    let total: f64 = out.iter().sum();
-    if total > 0.0 {
-        for v in &mut out {
-            *v /= total;
-        }
-    }
-    out
-}
-
-/// Mirrors `fastmob/measures/evaluation/metrics.py::jensen_shannon_divergence`.
-/// fastmob's Python version tries a SIMD-accelerated path first and falls back
-/// to this same reference formula on mismatch; since the two only diverge
-/// under numerical-stability edge cases (and the reference formula IS the
-/// canonical JS-divergence definition), computing it directly here matches
-/// fastmob's result for the overwhelming common case.
+/// Jensen-Shannon divergence between two distributions, normalising first.
 pub fn jensen_shannon_divergence(
     distribution1: &[f64],
     distribution2: &[f64],
 ) -> anyhow::Result<f64> {
-    let p = normalize_distribution(distribution1);
-    let q = normalize_distribution(distribution2);
-    if p.len() != q.len() {
-        anyhow::bail!(
-            "distribution shapes must match, got {} and {}",
-            p.len(),
-            q.len()
-        );
-    }
-    if p.is_empty() || (p.iter().sum::<f64>() == 0.0 && q.iter().sum::<f64>() == 0.0) {
-        return Ok(0.0);
-    }
-    let mut left = 0.0;
-    let mut right = 0.0;
-    for (pi, qi) in p.iter().zip(q.iter()) {
-        let m = 0.5 * (pi + qi);
-        if *pi > 0.0 {
-            left += pi * (pi / m).ln();
-        }
-        if *qi > 0.0 {
-            right += qi * (qi / m).ln();
-        }
-    }
-    Ok(0.5 * (left + right))
+    Ok(fastmob_rs::jensen_shannon_divergence(
+        distribution1,
+        distribution2,
+    )?)
 }
 
-/// Mirrors `fastmob/measures/evaluation/metrics.py::time_bin_matrix_jensen_shannon_divergence`:
-/// mean per-column (time-bin) JSD between two `[n_categories, n_bins]`
-/// matrices, skipping columns where both sides are entirely zero. Assumes
-/// callers have already aligned both matrices to the same category rows
-/// (the Python version's `categories1`/`categories2` re-alignment isn't
-/// needed here since `daily_activity_distribution`'s Rust port always
-/// produces both matrices over the same catalog-wide category set).
+/// Mean per-column (time-bin) JSD between two `[n_categories, n_bins]`
+/// matrices.
+///
+/// Callers must already have aligned both matrices to the same category rows;
+/// `daily_activity_distribution` always produces both over the same
+/// catalog-wide category set, so the Python version's `categories1`/
+/// `categories2` re-alignment is not needed here.
 pub fn time_bin_matrix_jsd(matrix1: &[Vec<f64>], matrix2: &[Vec<f64>]) -> anyhow::Result<f64> {
-    if matrix1.len() != matrix2.len() {
-        anyhow::bail!("matrix1/matrix2 must have the same number of category rows");
-    }
-    let n_bins = matrix1.first().map(|r| r.len()).unwrap_or(0);
-    if matrix2.first().map(|r| r.len()).unwrap_or(0) != n_bins {
-        anyhow::bail!("Number of time bins must match");
-    }
-    let nan_to_zero = |v: f64| if v.is_nan() { 0.0 } else { v };
-    let mut values = Vec::new();
-    for col in 0..n_bins {
-        let left: Vec<f64> = matrix1.iter().map(|row| nan_to_zero(row[col])).collect();
-        let right: Vec<f64> = matrix2.iter().map(|row| nan_to_zero(row[col])).collect();
-        if left.iter().sum::<f64>() == 0.0 && right.iter().sum::<f64>() == 0.0 {
-            continue;
-        }
-        values.push(jensen_shannon_divergence(&left, &right)?);
-    }
-    if values.is_empty() {
-        Ok(0.0)
-    } else {
-        Ok(values.iter().sum::<f64>() / values.len() as f64)
-    }
-}
-
-/// Builds `(indices, ends)` for `trajectory_common_part_of_commuters_impl`:
-/// a stable permutation of row positions sorted by `(uid, timestamp)`, plus
-/// the cumulative per-user boundary offsets into that permutation -- mirrors
-/// fastmob's Python `_build_time_ordered_user_ranges` helper.
-fn time_ordered_user_ranges(uid: &[i64], timestamp_ms: &[i64]) -> (Vec<usize>, Vec<usize>) {
-    let mut indices: Vec<usize> = (0..uid.len()).collect();
-    indices.sort_by(|&a, &b| (uid[a], timestamp_ms[a]).cmp(&(uid[b], timestamp_ms[b])));
-    let mut ends = Vec::new();
-    let mut i = 0;
-    while i < indices.len() {
-        let mut j = i + 1;
-        while j < indices.len() && uid[indices[j]] == uid[indices[i]] {
-            j += 1;
-        }
-        ends.push(j);
-        i = j;
-    }
-    (indices, ends)
+    Ok(fastmob_rs::time_bin_matrix_jsd(matrix1, matrix2)?)
 }
 
 /// Mirrors `comparison.py::_common_part_of_commuters` /
-/// `trajectory_common_part_of_commuters_multi`: CPC at several H3
-/// resolutions, sharing one time-ordering pass per trajectory across all
-/// requested resolutions.
+/// `trajectory_common_part_of_commuters_multi`: CPC at several H3 resolutions.
+///
+/// Takes the two frames directly rather than pre-extracted arrays: each side is
+/// arranged once by `fastmob_rs::prepare` and that single arrangement is shared
+/// across every requested resolution.
+#[allow(clippy::too_many_arguments)]
 pub fn common_part_of_commuters(
-    lat_a: &[f64],
-    lng_a: &[f64],
-    uid_a: &[i64],
-    ts_a_ms: &[i64],
-    lat_b: &[f64],
-    lng_b: &[f64],
-    uid_b: &[i64],
-    ts_b_ms: &[i64],
+    df_a: &DataFrame,
+    cols_a: TrajectoryColumns<'_>,
+    df_b: &DataFrame,
+    cols_b: TrajectoryColumns<'_>,
     resolutions: &[u8],
 ) -> anyhow::Result<Vec<(u8, f64)>> {
-    let (indices_a, ends_a) = time_ordered_user_ranges(uid_a, ts_a_ms);
-    let (indices_b, ends_b) = time_ordered_user_ranges(uid_b, ts_b_ms);
-    resolutions
-        .iter()
-        .map(|&res| {
-            let cpc = fastmob_core::measures::evaluation::trajectory_cpc::trajectory_common_part_of_commuters_impl(
-                lat_a, lng_a, &indices_a, &ends_a,
-                lat_b, lng_b, &indices_b, &ends_b,
-                res,
-            )
-            .map_err(|e| anyhow::anyhow!(e))?;
-            Ok((res, cpc))
-        })
-        .collect()
+    let a = fastmob_rs::prepare(df_a, cols_a.into())?;
+    let b = fastmob_rs::prepare(df_b, cols_b.into())?;
+    Ok(fastmob_rs::common_part_of_commuters_multi(
+        &a,
+        &b,
+        resolutions,
+    )?)
 }
 
-/// Mirrors `comparison.py::waiting_times_minutes`: per-user, time-sorted
-/// consecutive timestamp differences (in minutes), flattened across all
-/// users (`merge=True` in the Python version). Implemented directly via
-/// Polars group-by/sort/diff rather than calling fastmob-core's indexed-range
-/// kernel (`waiting_times_indexed_impl`) -- same math (group by user, sort
-/// by timestamp, consecutive differences, drop groups with &lt;2 points),
-/// without needing to replicate fastmob's permutation-index plumbing (that
-/// exists there purely to avoid a physical dataframe sort at fastmob's much
-/// larger internal call volume; irrelevant for this one metric).
+/// The four trajectory column names, grouped so multi-frame calls stay legible.
+#[derive(Debug, Clone, Copy)]
+pub struct TrajectoryColumns<'a> {
+    pub uid: &'a str,
+    pub lat: &'a str,
+    pub lng: &'a str,
+    pub datetime: &'a str,
+}
+
+impl From<TrajectoryColumns<'_>> for fastmob_rs::Cols {
+    fn from(value: TrajectoryColumns<'_>) -> Self {
+        fastmob_rs::Cols::auto()
+            .uid(value.uid)
+            .lat(value.lat)
+            .lng(value.lng)
+            .datetime(value.datetime)
+    }
+}
+
+/// Mirrors `comparison.py::waiting_times_minutes`: per-user consecutive
+/// timestamp differences in minutes, flattened across all users.
+///
+/// Uses `prepare_temporal` rather than `prepare` because this measure never
+/// reads coordinates, and dropping a fix with an unusable one would fuse the
+/// gaps on either side of it into a single longer gap. The frame need not carry
+/// coordinate columns at all.
 pub fn waiting_times_minutes(
     df: &DataFrame,
     uid_col: &str,
     datetime_col: &str,
 ) -> anyhow::Result<Vec<f64>> {
-    let schema = df.schema();
-    let dt_expr = super::util::to_datetime_expr(&schema, datetime_col);
-    let sorted = df
-        .clone()
-        .lazy()
-        .select([col(uid_col), dt_expr.alias(datetime_col)])
-        .drop_nulls(None)
-        .sort([uid_col, datetime_col], SortMultipleOptions::default())
-        .collect()?;
-
-    let uid = sorted.column(uid_col)?.as_materialized_series();
-    let ts = sorted
-        .column(datetime_col)?
-        .as_materialized_series()
-        .cast(&DataType::Datetime(TimeUnit::Microseconds, None))?;
-    let ts_us = ts.datetime()?.clone();
-
-    let mut waits = Vec::new();
-    let mut prev_uid: Option<AnyValue> = None;
-    let mut prev_ts: Option<i64> = None;
-    for i in 0..sorted.height() {
-        let this_uid = uid.get(i)?;
-        let this_ts = ts_us.phys.get(i);
-        if Some(&this_uid) == prev_uid.as_ref() {
-            if let (Some(p), Some(t)) = (prev_ts, this_ts) {
-                waits.push((t - p) as f64 / 1_000_000.0 / 60.0);
-            }
-        }
-        prev_uid = Some(this_uid);
-        prev_ts = this_ts;
-    }
-    Ok(waits)
+    let prepared = fastmob_rs::prepare_temporal(
+        df,
+        fastmob_rs::Cols::auto().uid(uid_col).datetime(datetime_col),
+    )?;
+    Ok(fastmob_rs::waiting_times_flat(&prepared)?
+        .into_iter()
+        .map(|seconds| seconds / 60.0)
+        .collect())
 }
 
 #[cfg(test)]
@@ -250,5 +149,48 @@ mod tests {
         assert!((waits[0] - 5.0).abs() < 1e-6);
         assert!((waits[1] - 10.0).abs() < 1e-6);
         assert!((waits[2] - 15.0).abs() < 1e-6);
+    }
+
+    /// Waiting times must not silently lengthen when a fix has no coordinates:
+    /// the row still marks a real observation time.
+    #[test]
+    fn waiting_times_keep_rows_with_missing_coordinates() {
+        let df = df![
+            "uid" => [1i64, 1, 1],
+            "lat" => [Some(48.85), None, Some(48.87)],
+            "lng" => [Some(2.35), Some(2.36), Some(2.37)],
+            "dt" => [
+                "2026-01-01T00:00:00", "2026-01-01T00:10:00", "2026-01-01T00:20:00",
+            ],
+        ]
+        .unwrap();
+        let mut waits = waiting_times_minutes(&df, "uid", "dt").unwrap();
+        waits.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        assert_eq!(waits, vec![10.0, 10.0]);
+    }
+
+    #[test]
+    fn cpc_of_a_trajectory_against_itself_is_one() {
+        let df = df![
+            "uid" => [1i64, 1, 2, 2],
+            "lat" => [48.85, 48.86, 40.71, 40.72],
+            "lng" => [2.35, 2.36, -74.01, -74.00],
+            "dt" => [
+                "2026-01-01T00:00:00", "2026-01-01T01:00:00",
+                "2026-01-01T00:00:00", "2026-01-01T01:00:00",
+            ],
+        ]
+        .unwrap();
+        let cols = TrajectoryColumns {
+            uid: "uid",
+            lat: "lat",
+            lng: "lng",
+            datetime: "dt",
+        };
+        let cpc = common_part_of_commuters(&df, cols, &df, cols, &[7, 8]).unwrap();
+        assert_eq!(cpc.len(), 2);
+        for (resolution, value) in cpc {
+            assert!((value - 1.0).abs() < 1e-12, "resolution {resolution}: {value}");
+        }
     }
 }
