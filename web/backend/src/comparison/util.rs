@@ -26,31 +26,21 @@ pub fn to_datetime_expr(schema: &Schema, name: &str) -> Expr {
 }
 
 /// Haversine great-circle distance (km) between two points, as a Polars
-/// expression -- mirrors `comparison.py::_haversine_km_expr`, staying inside
-/// the lazy/streaming engine instead of forcing eager numpy materialization.
+/// expression -- re-exported from `fastmob-rs`, which now owns this so it is
+/// a supported fastmob API rather than the local custom implementation
+/// `AGENTS.md` forbids.
 ///
-/// **Known, deliberate deviation**: the Python source clamps via
-/// `pl.min_horizontal(a.sqrt(), pl.lit(1.0))`, but `min_horizontal` skips
-/// nulls rather than propagating them (confirmed against the installed
-/// polars: `min_horizontal(None, 1.0) == 1.0`). Since `a` is null for every
-/// leg's first waypoint (no predecessor), that bug adds a spurious
+/// **Known, deliberate deviation from the Python source**: `comparison.py`
+/// clamps via `pl.min_horizontal(a.sqrt(), pl.lit(1.0))`, but `min_horizontal`
+/// skips nulls rather than propagating them. Since `a` is null for every leg's
+/// first waypoint (no predecessor), that bug adds a spurious
 /// `arcsin(1.0) -> ~20015.09 km` "jump" to every transport leg's total in
 /// `_synthetic_transport_leg_records`'s `mean_jump_km` output -- see
-/// `transport.rs`'s `gparis_moving_sidecar_matches_python_reference` test
-/// for the full writeup and a real-data cross-check confirming both this
-/// port's physically-correct numbers and the exact size of Python's bug.
-/// `.clip_max()` here correctly propagates null instead, so this port does
-/// NOT reproduce that bug.
+/// `transport.rs`'s `gparis_moving_sidecar_matches_python_reference` test for
+/// the full writeup and a real-data cross-check. The shared expression
+/// propagates nulls correctly, so this port does NOT reproduce that bug.
 pub fn haversine_km_expr(lat1: Expr, lng1: Expr, lat2: Expr, lng2: Expr) -> Expr {
-    let lat1_r = lat1.radians();
-    let lng1_r = lng1.radians();
-    let lat2_r = lat2.radians();
-    let lng2_r = lng2.radians();
-    let dlat = lat2_r.clone() - lat1_r.clone();
-    let dlng = lng2_r.clone() - lng1_r.clone();
-    let a = (dlat / lit(2.0)).sin().pow(2)
-        + lat1_r.cos() * lat2_r.cos() * (dlng / lit(2.0)).sin().pow(2);
-    lit(6371.0088) * lit(2.0) * a.sqrt().clip_max(lit(1.0)).arcsin()
+    fastmob_rs::haversine_km_expr(lat1, lng1, lat2, lng2)
 }
 
 /// `BooleanChunked::fill_null` takes a `FillNullStrategy`, not a raw value,
