@@ -759,6 +759,7 @@ dependencies = [
  "chrono",
  "duckdb",
  "fastmob-core",
+ "fastmob-rs",
  "fastmob-vis",
  "h3o",
  "hex",
@@ -1269,6 +1270,17 @@ dependencies = [
  "rayon",
  "rustc-hash",
  "wass",
+]
+
+[[package]]
+name = "fastmob-rs"
+version = "0.1.0"
+dependencies = [
+ "fastmob-core",
+ "polars",
+ "rayon",
+ "rustc-hash",
+ "thiserror 2.0.18",
 ]
 
 [[package]]
