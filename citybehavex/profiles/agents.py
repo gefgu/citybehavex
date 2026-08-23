@@ -2,7 +2,7 @@
 
 Each agent gets a rich persona (gender, age, education, health, household
 composition, job, transport modes, home tile, work tile) that drives:
-- which daily schedule it adopts (profile↔schedule ddCRP similarity)
+- which daily schedule it adopts (profile↔schedule SW-CRP similarity)
 - who its friends are (profile-embedding social graph)
 - which micro-activities it chooses (profile↔activity similarity in Rust)
 
@@ -101,7 +101,7 @@ def profile_to_narrative(profile: AgentProfile, *, include_transport: bool = Tru
     """Return a concise prose description of a profile for embedding.
 
     This is the single source of truth that all downstream modules embed:
-    the ddCRP (schedule similarity), the social graph, and the activity CRP
+    the SW-CRP (schedule similarity), the social graph, and the activity CRP
     all operate on embeddings of this text.
     """
     transport_str = ""

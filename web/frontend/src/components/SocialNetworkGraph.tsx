@@ -1,42 +1,42 @@
-import { useCallback, useMemo } from "react";
-import type * as echarts from "echarts";
+import { useMemo } from "react";
 import type { EChartsOption } from "echarts";
 import type { SocialNetworkBlock } from "../api";
 import { EChart } from "../charts/EChart";
 import { COLORS } from "../charts/theme";
 
-type GraphGLControl = {
-  minZoom?: number;
-  maxZoom?: number;
-};
-
-type GraphGLView = {
-  _control?: GraphGLControl;
-};
-
-type GraphRuntimeChart = {
-  getModel: () => {
-    getSeriesByIndex: (index: number) => unknown;
-  };
-  getViewOfSeriesModel: (model: unknown) => GraphGLView | undefined;
-};
-
 export function SocialNetworkGraph({ block, title }: { block: SocialNetworkBlock; title?: string }) {
-  const deepenGraphZoom = useCallback((chart: echarts.ECharts) => {
-    const runtimeChart = chart as unknown as GraphRuntimeChart;
-    const model = runtimeChart.getModel().getSeriesByIndex(0);
-    const view = model ? runtimeChart.getViewOfSeriesModel(model) : undefined;
-    if (!view?._control) return;
-    view._control.minZoom = 0.08;
-    view._control.maxZoom = 48;
-  }, []);
-
   const option = useMemo<EChartsOption>(() => {
+    // graphGL's camera becomes unreliable when a saved layout has a large
+    // absolute offset (for example, an uncentred TruncatedSVD projection).
+    // Keep the layout's relative geometry while putting every graph in a
+    // stable, renderer-friendly coordinate range.
+    let minX = Infinity;
+    let maxX = -Infinity;
+    let minY = Infinity;
+    let maxY = -Infinity;
+    for (const node of block.nodes) {
+      if (Number.isFinite(node[0])) {
+        minX = Math.min(minX, node[0]);
+        maxX = Math.max(maxX, node[0]);
+      }
+      if (Number.isFinite(node[1])) {
+        minY = Math.min(minY, node[1]);
+        maxY = Math.max(maxY, node[1]);
+      }
+    }
+    const centerX = Number.isFinite(minX) ? (minX + maxX) / 2 : 0;
+    const centerY = Number.isFinite(minY) ? (minY + maxY) / 2 : 0;
+    const span = Math.max(
+      Number.isFinite(minX) ? maxX - minX : 0,
+      Number.isFinite(minY) ? maxY - minY : 0,
+      1,
+    );
+    const coordinateScale = 600 / span;
     const data = block.nodes.map((node, index) => ({
       id: String(index),
       name: `agent ${node[3]}`,
-      x: node[0],
-      y: node[1],
+      x: Number.isFinite(node[0]) ? (node[0] - centerX) * coordinateScale : 0,
+      y: Number.isFinite(node[1]) ? (node[1] - centerY) * coordinateScale : 0,
       value: block.degrees?.[index] ?? 0,
       symbolSize: node[2],
       profileType: node[4] ?? null,
@@ -125,7 +125,6 @@ export function SocialNetworkGraph({ block, title }: { block: SocialNetworkBlock
         option={option}
         className="network-graph"
         preventPageScrollOnWheel
-        onOptionApplied={deepenGraphZoom}
       />
     </div>
   );

@@ -88,7 +88,7 @@ export function CrpSummaryPanel({
         onClick={() => setOpen((value) => !value)}
       >
         <span>
-          <span className="section-header">Diary selection (ddCRP)</span>
+          <span className="section-header">Diary selection (SW-CRP)</span>
           <span className="collapsible-panel-summary">{summary}</span>
         </span>
         <span className="collapsible-panel-chevron" aria-hidden="true">⌄</span>
@@ -101,7 +101,7 @@ export function CrpSummaryPanel({
           ) : !data ? (
             <div className="timeline-detail-empty">Loading diary selection...</div>
           ) : T_a == null || alpha_a == null || data.diaries.length === 0 ? (
-            <div className="timeline-detail-empty">No ddCRP diary selection data available for this run.</div>
+            <div className="timeline-detail-empty">No SW-CRP diary selection data available for this run.</div>
           ) : (
             <>
               {data.warnings.length > 0 && <div className="warnings">{data.warnings.join("; ")}</div>}

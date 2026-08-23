@@ -4,10 +4,10 @@ import react from "@vitejs/plugin-react";
 declare const process: { cwd: () => string };
 
 // The frontend calls relative `/api/...` URLs; in dev Vite proxies them to the
-// selected backend. Defaults to the Rust/axum port.
+// selected backend. Defaults to the FastAPI backend's port.
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), "");
-  const apiTarget = env.VITE_API_PROXY_TARGET || "http://localhost:8001";
+  const apiTarget = env.VITE_API_PROXY_TARGET || "http://localhost:8000";
   return {
     base: env.VITE_BASE_PATH || "/",
     plugins: [react()],

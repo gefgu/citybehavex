@@ -50,7 +50,7 @@ def run_simulation(config: CityBehavExConfig) -> fastmob.TrajDataFrame:
         crp_path = stamped_output.replace(".parquet", "_crp.parquet")
         _save_crp_artifact(crp_path, bank, chosen, crp_info)
         typer.echo(
-            f"Saved ddCRP diary selection state "
+            f"Saved SW-CRP diary selection state "
             f"({config.simulation.agents} agents x {len(bank.diaries)} diaries) -> {crp_path}"
         )
         traj, _synth_activity_col, already_written = _run_simulation_core(

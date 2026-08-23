@@ -7,7 +7,8 @@ from typing import Any
 import fastmob
 import numpy as np
 import polars as pl
-from fastmob.measures.collective.contact_network import (
+
+from citybehavex.reports._graph_metrics import (
     NetworkGraph,
     clustering_coefficients,
     co_presence_graph_from_visits,

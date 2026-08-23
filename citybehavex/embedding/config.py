@@ -7,7 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class EmbeddingConfig(BaseModel):
-    """Diary-embedding backend for the ddCRP schedule selector."""
+    """Diary-embedding backend for the SW-CRP schedule selector."""
 
     model_config = ConfigDict(extra="forbid")
 

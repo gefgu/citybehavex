@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 import numpy as np
-from skmob_vis.motifs import LITERATURE_MOTIF_PERCENTAGES
+from fastmob_vis.motifs import LITERATURE_MOTIF_PERCENTAGES
 
 from citybehavex.math import sample_multinomial_index
 
 # Literature ordinal (1-17, Schneider et al. 2013) -> distinct location count,
 # including HOME. Derived from the packed fastmob motif IDs in
-# ``skmob_vis.motifs.LITERATURE_TO_FASTMOB_MOTIF_ID`` (node count is
+# ``fastmob_vis.motifs.LITERATURE_TO_FASTMOB_MOTIF_ID`` (node count is
 # permutation-invariant, unlike node identity).
 MOTIF_LOCATION_COUNTS: dict[int, int] = {
     1: 1,

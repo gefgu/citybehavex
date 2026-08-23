@@ -668,13 +668,13 @@ def test_generate_comparison_report_sections_skip_expensive_blocks(tmp_path, mon
 
     called = {"motifs": False}
 
-    original_discover = comparison_module.discover_daily_motifs_from_agents
+    original_discover = comparison_module.daily_motifs
 
     def fake_discover(*args, **kwargs):
         called["motifs"] = True
         return original_discover(*args, **kwargs)
 
-    monkeypatch.setattr(comparison_module, "discover_daily_motifs_from_agents", fake_discover)
+    monkeypatch.setattr(comparison_module, "daily_motifs", fake_discover)
 
     generate_comparison_report(
         traj=traj,

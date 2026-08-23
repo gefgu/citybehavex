@@ -30,14 +30,14 @@ dependencies = [
     "scipy>=1.17.1",
     "seaborn>=0.13.2",
     "shapely>=2.1.2",
-    "skmob-vis",
-    "fastmob[data,generation,tessellation,diversity]",
+    "fastmob-vis>=0.1.0",
+    "fastmob[data,generation,tessellation,diversity]>=0.1.1",
     "tqdm>=4.67.3",
     "typer>=0.12.0",
 ]
 
 [project.optional-dependencies]
-# Auto-launching a local embedding server for ddCRP schedule selection needs vLLM
+# Auto-launching a local embedding server for SW-CRP schedule selection needs vLLM
 # (heavy, GPU). Without this extra, set `embedding.base_url` to a running server,
 # rely on cached `diary_embeddings.npz`, or set `embedding.enabled: false` to fall
 # back to identity similarity (exact preferential return).
@@ -85,6 +85,20 @@ extend-exclude = ["citybehavex-py", "notebooks", "checkpoints", "target"]
 [tool.ruff.lint]
 select = ["E4", "E7", "E9", "F", "I"]
 
-[tool.uv.sources]
-fastmob = { path = "../fastmob", editable = true }
-skmob-vis = { path = "../skmob-vis", editable = true }
+# `fastmob`/`fastmob-vis` are versioned PyPI dependencies above (pending
+# publication). Until they're published, `uv sync`/`uv run` cannot resolve
+# them (there's nothing on PyPI yet to satisfy the version constraint), and
+# uv refuses a `sources` path override in a sibling `uv.toml` once a
+# `pyproject.toml` with `[project]` already exists in the same directory
+# ("sources is only applicable in the context of a project, and should be
+# placed in a pyproject.toml file instead"). For local development against
+# a sibling `../fastmob` checkout, install them directly into `.venv` once
+# and then use `.venv/bin/python` directly rather than `uv sync`/`uv run`
+# (see the `dev-env-gotchas` note on why `uv sync` is best avoided here
+# anyway):
+#
+#   uv pip install --no-config -e ../fastmob
+#   uv pip install --no-config -e ../fastmob/fastmob-vis
+#
+# Do not add a `[tool.uv.sources]` path override here — this file must
+# resolve for outside contributors once the packages are on PyPI.

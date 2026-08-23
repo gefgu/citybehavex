@@ -1,4 +1,12 @@
-# Rust/axum backend migration
+# Rust/axum backend migration (reverted, historical)
+
+> **This migration was reverted.** `web/backend/src/` (the `citybehavex-web`
+> axum crate) has been deleted and the FastAPI backend
+> (`web/backend/app/`) restored as the sole web backend — fastmob's Python
+> API is the better fit here than driving `fastmob-rs`/`fastmob-core`
+> directly from Rust. This file is kept only as a historical record of the
+> migration's design decisions and fastmob-kernel mapping notes; nothing
+> below describes the current state of the repository.
 
 ## Goal
 
