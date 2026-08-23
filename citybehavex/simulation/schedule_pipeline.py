@@ -13,7 +13,7 @@ from citybehavex.config import CityBehavExConfig
 from citybehavex.embedding import embed_profiles
 from citybehavex.llm_diaries import DiaryBatch
 from citybehavex.profiles import AgentProfile, profile_to_narrative
-from citybehavex.schedules import DdcrpAgentInfo, DiaryBank, build_ddcrp_diary, build_diary_bank, score_alignment_matrix
+from citybehavex.schedules import DiaryBank, SwCrpAgentInfo, build_diary_bank, build_sw_crp_diary, score_alignment_matrix
 from citybehavex.utils import ProgressReporter
 
 _PROGRESS_INTERVAL_SECONDS = 5.0
@@ -23,7 +23,7 @@ def _build_schedule(
     diary_batches: dict[str, DiaryBatch],
     start_date: pd.Timestamp,
     profiles: Optional[list[AgentProfile]] = None,
-) -> tuple[DiaryBank, tuple, np.ndarray, Optional[np.ndarray], DdcrpAgentInfo, Optional[ProfileClusters]]:
+) -> tuple[DiaryBank, tuple, np.ndarray, Optional[np.ndarray], SwCrpAgentInfo, Optional[ProfileClusters]]:
     """Build the diary bank and run profile-driven CRP schedule selection.
 
     Returns (bank, diary_arrays, chosen, profile_embeddings, crp_info).
@@ -36,7 +36,7 @@ def _build_schedule(
     )
     counts = Counter(bank.day_type.tolist())
     typer.echo(
-        f"ddCRP schedule bank: {len(bank.diaries)} diaries "
+        f"SW-CRP schedule bank: {len(bank.diaries)} diaries "
         f"({', '.join(f'{n} {t}' for t, n in counts.items())}), "
         f"embeddings={'on' if bank.embedded else 'off (popularity CRP, no profile similarity)'}"
     )
@@ -127,25 +127,25 @@ def _build_schedule(
         for d in range(config.simulation.days)
     ]
     typer.echo(
-        f"ddCRP schedule selection: assigning diaries for "
+        f"SW-CRP schedule selection: assigning diaries for "
         f"{config.simulation.agents} agents x {config.simulation.days} days ..."
     )
-    ddcrp_started = time.perf_counter()
-    ddcrp_progress = ProgressReporter(
-        "ddCRP schedule selection",
+    sw_crp_started = time.perf_counter()
+    sw_crp_progress = ProgressReporter(
+        "SW-CRP schedule selection",
         config.simulation.agents,
         "agents",
         rate_precision=1,
         min_interval_seconds=_PROGRESS_INTERVAL_SECONDS,
         emit=typer.echo,
-        started=ddcrp_started,
+        started=sw_crp_started,
     )
 
-    def _report_ddcrp_progress(done: int, total: int) -> None:
-        ddcrp_progress.total = total
-        ddcrp_progress.report(done)
+    def _report_sw_crp_progress(done: int, total: int) -> None:
+        sw_crp_progress.total = total
+        sw_crp_progress.report(done)
 
-    diary_arrays, chosen, crp_info = build_ddcrp_diary(
+    diary_arrays, chosen, crp_info = build_sw_crp_diary(
         bank,
         start_date,
         config.simulation.days,
@@ -155,7 +155,7 @@ def _build_schedule(
         config.schedule,
         profile_embeddings=profile_embeddings,
         agent_diary_sim=agent_diary_sim,
-        progress_callback=_report_ddcrp_progress,
+        progress_callback=_report_sw_crp_progress,
     )
     return bank, diary_arrays, chosen, profile_embeddings, crp_info, profile_clusters
 
@@ -164,11 +164,11 @@ def _save_crp_artifact(
     path: str,
     bank: DiaryBank,
     chosen: np.ndarray,
-    crp_info: DdcrpAgentInfo,
+    crp_info: SwCrpAgentInfo,
 ) -> None:
-    """Persist per-(agent, diary) ddCRP state next to the trajectory output.
+    """Persist per-(agent, diary) SW-CRP state next to the trajectory output.
 
-    ``build_ddcrp_diary`` computes T_a/alpha_a/similarity/usage-counts and then
+    ``build_sw_crp_diary`` computes T_a/alpha_a/similarity/usage-counts and then
     throws them away once the diary picks are baked into ``diary_arrays`` — the
     web UI's diary-selection debug panel needs them to reconstruct "what would
     this agent pick next", so they're written out in long form (one row per

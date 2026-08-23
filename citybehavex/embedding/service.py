@@ -1,4 +1,4 @@
-"""Text embeddings for the ddCRP schedule selector and profile similarity graph.
+"""Text embeddings for the SW-CRP schedule selector and profile similarity graph.
 
 All text types (diary schedules, agent profile narratives, activity descriptions)
 are embedded by a single shared model via an OpenAI-compatible ``/v1/embeddings``

@@ -1,4 +1,5 @@
-"""Profile-driven CRP schedule selection.
+"""Profile-driven semantically weighted Chinese Restaurant Process (SW-CRP)
+schedule selection.
 
 Customers = days, tables = whole LLM diaries. Each simulated day an agent selects
 one diary from a bank, weighted by:
@@ -11,7 +12,8 @@ The weight for candidate k is: ``w_k = count_k * exp(s_k / T)``
 where:
 - ``count_k = n_k`` if the agent has used diary k before, else ``alpha``
 - ``s_k = cosine(agent_profile_embedding, diary_embedding[k])``
-- ``T`` and ``alpha`` are drawn per-agent from Beta distributions
+- ``T`` and ``alpha`` are drawn per-agent from a configurable distribution
+  (Beta or LogNormal, see ``ScheduleConfig``)
 
 This is a Chinese Restaurant Process with semantic smoothing. Day types are
 **hard-separated**: a day only draws from its own day type's bank (e.g. weekday,
@@ -163,8 +165,8 @@ def build_diary_bank(
 
 
 @dataclass
-class DdcrpAgentInfo:
-    """Per-agent CRP state that would otherwise be discarded after selection.
+class SwCrpAgentInfo:
+    """Per-agent SW-CRP state that would otherwise be discarded after selection.
 
     Kept around so callers (e.g. the web app's diary-selection debug panel)
     can reconstruct "what would this agent pick next" without re-running CRP.
@@ -175,7 +177,21 @@ class DdcrpAgentInfo:
     agent_diary_sim: np.ndarray  # float64[n_agents, K]
 
 
-def build_ddcrp_diary(
+def _sample_beta_or_lognormal(
+    rng: np.random.Generator,
+    *,
+    distribution: str,
+    beta_a: float,
+    beta_b: float,
+    mu_ln: float,
+    sigma_ln: float,
+) -> float:
+    if distribution == "lognormal":
+        return float(rng.lognormal(mu_ln, sigma_ln))
+    return float(rng.beta(beta_a, beta_b))
+
+
+def build_sw_crp_diary(
     bank: DiaryBank,
     start_date: pd.Timestamp,
     days: int,
@@ -186,7 +202,7 @@ def build_ddcrp_diary(
     profile_embeddings: np.ndarray | None = None,
     agent_diary_sim: np.ndarray | None = None,
     progress_callback: Callable[[int, int], None] | None = None,
-) -> tuple[DiaryArrays, np.ndarray, DdcrpAgentInfo]:
+) -> tuple[DiaryArrays, np.ndarray, SwCrpAgentInfo]:
     """Run profile-driven CRP schedule selection for every agent and day.
 
     Weight formula per candidate k on day t for agent a:
@@ -249,9 +265,23 @@ def build_ddcrp_diary(
 
     def _process_agent(agent: int) -> tuple[int, np.ndarray, np.ndarray, np.ndarray, np.ndarray, float, float]:
         rng = np.random.default_rng(np.random.SeedSequence([int(random_state), agent]))
-        T_a = float(rng.beta(params.temperature_beta_a, params.temperature_beta_b))
+        T_a = _sample_beta_or_lognormal(
+            rng,
+            distribution=params.temperature_distribution,
+            beta_a=params.temperature_beta_a,
+            beta_b=params.temperature_beta_b,
+            mu_ln=params.temperature_mu_ln,
+            sigma_ln=params.temperature_sigma_ln,
+        )
         T_a = max(T_a, 1e-6)
-        alpha_a = float(rng.beta(params.alpha_beta_a, params.alpha_beta_b))
+        alpha_a = _sample_beta_or_lognormal(
+            rng,
+            distribution=params.alpha_distribution,
+            beta_a=params.alpha_beta_a,
+            beta_b=params.alpha_beta_b,
+            mu_ln=params.alpha_mu_ln,
+            sigma_ln=params.alpha_sigma_ln,
+        )
         alpha_a = max(alpha_a, 1e-6)
 
         usage_counts = np.zeros(K, dtype=np.float64)
@@ -323,7 +353,7 @@ def build_ddcrp_diary(
         d_ends,
         diary_block_ids,
     )
-    info = DdcrpAgentInfo(
+    info = SwCrpAgentInfo(
         T_per_agent=T_per_agent,
         alpha_per_agent=alpha_per_agent,
         agent_diary_sim=agent_diary_sim,

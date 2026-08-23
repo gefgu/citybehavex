@@ -64,7 +64,7 @@ citybehavex/                 Python package and report/evaluation logic
 citybehavex-py/              Rust simulation core exposed as citybehavex._core
 configs/                     Reproducible scenario and ablation configurations
 scripts/                     Simulation, training, serving, and sweep utilities
-web/backend/                 Rust/axum backend for experiment discovery and charts
+web/backend/                 FastAPI backend for experiment discovery and charts
 web/frontend/                React/Vite validation and trajectory-replay UI
 data/                        Input/output location for scenarios and runs
 models/                      Optional fine-tuned alignment models
@@ -72,7 +72,7 @@ models/                      Optional fine-tuned alignment models
 
 The simulator reads scenario settings from `configs/*.yaml`. The web UI discovers
 those configs, finds their generated runs, and builds validation views on demand.
-The web backend is the Rust/axum crate in `web/backend`; see
+The web backend is the FastAPI app in `web/backend/app`; see
 [`web/README.md`](web/README.md) for development and deployment commands.
 
 ## Requirements
@@ -80,7 +80,8 @@ The web backend is the Rust/axum crate in `web/backend`; see
 Core requirements:
 
 - Python 3.11+
-- Rust toolchain
+- Rust toolchain, for the simulation core (`citybehavex._core`) — not needed
+  for the web backend, which is pure Python
 - `uv`
 - Node.js 18+ and npm, for the web frontend
 
@@ -91,19 +92,28 @@ Optional requirements:
 - An OpenAI-compatible LLM endpoint when regenerating diaries or training
   semantic aligners
 
-The Python package uses `maturin` to build the Rust extension. CityBehavEx builds
-on two companion mobility libraries, both now public:
+The Python package uses `maturin` to build the Rust extension (the core
+simulation engine only — the web backend is pure Python/FastAPI and needs no
+Rust toolchain). CityBehavEx builds on two companion mobility libraries:
 
 - [`fastmob`](https://github.com/gefgu/fastmob) — Rust-accelerated mobility
-  analysis, also installable standalone via `pip install fastmob`.
-- [`skmob-vis`](https://github.com/gefgu/skmob-vis) — Rust-backed ECharts
-  visualizations for scikit-mobility and `fastmob` results.
+  analysis, installable standalone via `pip install fastmob` once published.
+- [`fastmob-vis`](https://github.com/gefgu/fastmob) (the `fastmob-vis` crate
+  inside the `fastmob` monorepo, successor to the old standalone `skmob-vis`)
+  — Rust-backed ECharts visualizations for `fastmob` results, installable via
+  `pip install fastmob-vis` once published.
 
-During development, this repository consumes both as local editable path
-dependencies declared in `pyproject.toml`'s `[tool.uv.sources]`, so make sure
-`fastmob` and `skmob-vis` are checked out as sibling directories (`../fastmob`,
-`../skmob-vis`), or update those entries to point at installed/vendored copies
-included with the artifact.
+`pyproject.toml` declares both as plain versioned dependencies. **Publication
+to PyPI is pending** — until then, `uv sync` will fail to resolve them for
+anyone without a local checkout. If you have `fastmob` checked out as a
+sibling directory (`../fastmob`), add a *gitignored* `uv.toml` next to this
+file:
+
+```toml
+[sources]
+fastmob = { path = "../fastmob", editable = true }
+fastmob-vis = { path = "../fastmob/fastmob-vis", editable = true }
+```
 
 ## Quick Start
 
@@ -126,10 +136,10 @@ available.
 
 ## Web Demo
 
-Start the Rust/axum backend:
+Start the FastAPI backend:
 
 ```bash
-cargo run -p citybehavex-web
+uv run uvicorn app.main:app --app-dir web/backend --port 8000
 ```
 
 Start the frontend:
@@ -146,15 +156,16 @@ Open:
 http://localhost:5173
 ```
 
-By default the frontend talks directly to the Rust backend on port `8001`. The
-Experiments page is populated from `configs/*.yaml`. Opening charts for a run
-builds the validation payload on first request and caches it under
+By default the frontend talks directly to the FastAPI backend on port `8000`.
+The Experiments page is populated from `configs/*.yaml`. Opening charts for a
+run builds the validation payload on first request and caches it under
 `data/.web_cache/`.
 
-The Rust binary can also single-origin-serve the built frontend (`npm run build`
-in `web/frontend/`, then `cargo run -p citybehavex-web` serves both the API and
-the static SPA). See [`web/README.md`](web/README.md) for the full endpoint list,
-static-demo export command, and single-origin deployment notes.
+The FastAPI app can also single-origin-serve the built frontend (`npm run build`
+in `web/frontend/`, then restart uvicorn — it serves both the API and the
+static SPA whenever `web/frontend/dist` exists). See
+[`web/README.md`](web/README.md) for the full endpoint list and deployment
+notes.
 
 ### Timeline Map
 
@@ -303,13 +314,12 @@ timeline replay, metrics, and cached comparison payloads.
 ## Troubleshooting
 
 - **Rust extension not found:** rerun `./scripts/update_local_citybehavex.sh`.
-- **Editable `fastmob` or `skmob-vis` not found:** make sure `../fastmob` and
-  `../skmob-vis` are checked out as sibling directories, or update
-  `pyproject.toml` to point to installed versions.
-- **Frontend cannot reach the API:** confirm the backend is running (Python on
-  `http://localhost:8000` or Rust on `http://localhost:8001`) and the frontend on
-  `http://localhost:5173`, and that `VITE_API_PROXY_TARGET` matches the backend
-  you started.
+- **`fastmob`/`fastmob-vis` not found:** these aren't on PyPI yet. Add a
+  gitignored `uv.toml` with a local path override to your `../fastmob`
+  checkout (see above), or run `./scripts/update_local_fastmob.sh`.
+- **Frontend cannot reach the API:** confirm the FastAPI backend is running on
+  `http://localhost:8000` and the frontend on `http://localhost:5173`, and
+  that `VITE_API_PROXY_TARGET` matches the backend you started.
 - **Timeline map is blank:** set `VITE_MAPBOX_TOKEN` in
   `web/frontend/.env.local` and restart Vite.
 - **Alignment endpoint errors:** either start the configured reranker/LLM service

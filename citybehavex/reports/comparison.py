@@ -11,20 +11,16 @@ import numpy as np
 import polars as pl
 import typer
 from fastmob import (
-    activity_distribution_jensen_shannon_divergence,
     activity_transition_matrix,
-    activity_transition_matrix_jensen_shannon_divergence,
-    bin_visitation_law_data,
-    compute_visitation_law_data,
+    common_part_of_commuters,
     daily_activity_distribution,
-    daily_location_lognormal_fit,
-    discover_daily_motifs_from_agents,
+    daily_motifs,
+    fit_daily_location_lognormal,
     fit_values_to_truncated_powerlaw,
     fit_visitation_law,
     jensen_shannon_divergence,
-    time_bin_matrix_jensen_shannon_divergence,
-    trajectory_common_part_of_commuters_multi,
-    visits_per_user_wasserstein_distance,
+    motif_distribution,
+    visit_purpose_distribution,
     waiting_times,
     wasserstein_distance,
 )
@@ -35,6 +31,7 @@ from fastmob.measures.individual.network_distance import (
     radius_of_gyration_km as road_radius_of_gyration_km,
 )
 from fastmob.network import RoadNetwork, haversine_m_batch
+from fastmob.preprocessing import trajectory_to_od
 
 from citybehavex.activities import build_catalog
 from citybehavex.reports.network_validation import build_network_validation
@@ -944,6 +941,71 @@ def _motif_distribution_jsd(
     )
 
 
+def _activity_distribution_jsd(
+    visits1: pl.DataFrame,
+    visits2: pl.DataFrame,
+    activity_col: str = "purpose",
+) -> float:
+    dist1 = visit_purpose_distribution(visits1, activity_col=activity_col, normalize=False)
+    dist2 = visit_purpose_distribution(visits2, activity_col=activity_col, normalize=False)
+    counts1 = dict(zip(dist1["activity"], dist1["count"]))
+    counts2 = dict(zip(dist2["activity"], dist2["count"]))
+    labels = sorted(set(counts1) | set(counts2), key=str)
+    return jensen_shannon_divergence(
+        [counts1.get(label, 0) for label in labels],
+        [counts2.get(label, 0) for label in labels],
+    )
+
+
+def _transition_matrix_jsd(
+    matrix1: pl.DataFrame,
+    categories1: list[Any] | None,
+    matrix2: pl.DataFrame,
+    categories2: list[Any] | None,
+) -> float:
+    """JSD between two activity-transition matrices (from
+    ``fastmob.activity_transition_matrix``, with the ``activity`` label
+    column split out via :func:`_split_transition_matrix_categories`),
+    aligned over the union of (source, target) activity pairs so that
+    activities present on only one side count as zero on the other."""
+    all_cols = sorted(set(matrix1.columns) | set(matrix2.columns), key=str)
+    rows1 = {cat: matrix1.row(i, named=True) for i, cat in enumerate(categories1 or [])}
+    rows2 = {cat: matrix2.row(i, named=True) for i, cat in enumerate(categories2 or [])}
+    all_rows = sorted(set(rows1) | set(rows2), key=str)
+    v1: list[float] = []
+    v2: list[float] = []
+    for row in all_rows:
+        r1 = rows1.get(row, {})
+        r2 = rows2.get(row, {})
+        for col in all_cols:
+            v1.append(float(r1.get(col, 0.0) or 0.0))
+            v2.append(float(r2.get(col, 0.0) or 0.0))
+    return jensen_shannon_divergence(v1, v2)
+
+
+def _time_bin_matrix_jsd(
+    matrix1: np.ndarray,
+    categories1: list[Any],
+    matrix2: np.ndarray,
+    categories2: list[Any],
+) -> float:
+    """JSD between two (category x time-bin) matrices from
+    ``fastmob.daily_activity_distribution``, aligned over the union of
+    activity categories (time-bin axes are assumed to already match, since
+    both sides use the same ``bin_size_minutes``)."""
+    n_bins = matrix1.shape[1] if matrix1.size else (matrix2.shape[1] if matrix2.size else 0)
+    lookup1 = {cat: matrix1[i] for i, cat in enumerate(categories1)}
+    lookup2 = {cat: matrix2[i] for i, cat in enumerate(categories2)}
+    all_cats = sorted(set(categories1) | set(categories2), key=str)
+    v1: list[float] = []
+    v2: list[float] = []
+    zeros = np.zeros(n_bins)
+    for cat in all_cats:
+        v1.extend(lookup1.get(cat, zeros).tolist())
+        v2.extend(lookup2.get(cat, zeros).tolist())
+    return jensen_shannon_divergence(v1, v2)
+
+
 def _activities_sidecar_path(synthetic_path: str) -> str:
     path = Path(synthetic_path)
     return str(path.with_name(f"{path.stem}_activities{path.suffix}"))
@@ -1090,10 +1152,10 @@ def _daily_location_lognormal_dataset(
     visits: pl.DataFrame,
     label: str,
 ) -> tuple[np.ndarray, np.ndarray, float, float, str]:
-    x_points, y_points, mu, sigma = daily_location_lognormal_fit(
+    x_points, y_points, mu, sigma = fit_daily_location_lognormal(
         visits, user_id_col="user_id", location_id_col="location_id", timestamp_col="timestamp"
     )
-    return x_points, y_points, mu, sigma, label
+    return np.asarray(x_points, dtype=float), np.asarray(y_points, dtype=float), mu, sigma, label
 
 
 def _truncated_powerlaw_dataset(
@@ -1114,25 +1176,59 @@ def _distance_frequency_dataset(
     visits: pl.DataFrame,
     label: str,
 ) -> tuple[np.ndarray, np.ndarray, float, float, str]:
-    purpose_col = "purpose" if "purpose" in visits.columns else None
-    law_data = compute_visitation_law_data(
+    fit = fit_visitation_law(
         visits,
         user_id_col="user_id",
-        location_id_col="location_id",
         timestamp_col="timestamp",
-        purpose_col=purpose_col,
         lat_col="lat",
         lng_col="lng",
     )
-    rf_points, rho_points, _ = bin_visitation_law_data(
-        law_data,
-        user_id_col="user_id",
-        location_id_col="location_id",
-    )
-    eta, mu, _ = fit_visitation_law(rf_points, rho_points)
-    if eta <= 0 or mu <= 0:
+    if fit.eta <= 0 or fit.mu <= 0:
         raise ValueError("distance-frequency fit parameters must be positive")
-    return rf_points, rho_points, eta, mu, label
+    spectrum = pl.DataFrame(fit.spectrum) if not isinstance(fit.spectrum, pl.DataFrame) else fit.spectrum
+    return (
+        spectrum["rf"].to_numpy(),
+        spectrum["rho"].to_numpy(),
+        fit.eta,
+        fit.mu,
+        label,
+    )
+
+
+def trajectory_common_part_of_commuters_multi(
+    traj: fastmob.TrajDataFrame,
+    real_traj: fastmob.TrajDataFrame,
+    *,
+    resolutions: tuple[int, ...],
+) -> list[tuple[int, float]]:
+    """Common Part of Commuters between two raw trajectories at multiple H3
+    resolutions -- fastmob no longer exposes this directly (its CPC now
+    operates on ``Trips``/``FlowDataFrame`` objects), so this builds an
+    origin-destination flow at each resolution via
+    ``fastmob.preprocessing.trajectory_to_od`` first.
+    """
+    rows: list[tuple[int, float]] = []
+    for resolution in resolutions:
+        synth_od = trajectory_to_od(
+            traj.df,
+            resolution,
+            uid_col=traj.uid_col,
+            datetime_col=traj.datetime_col,
+            lat_col=traj.lat_col,
+            lng_col=traj.lng_col,
+        )
+        real_od = trajectory_to_od(
+            real_traj.df,
+            resolution,
+            uid_col=real_traj.uid_col,
+            datetime_col=real_traj.datetime_col,
+            lat_col=real_traj.lat_col,
+            lng_col=real_traj.lng_col,
+        )
+        synth_flow = fastmob.FlowDataFrame(synth_od, flow="count")
+        real_flow = fastmob.FlowDataFrame(real_od, flow="count")
+        rows.append((resolution, common_part_of_commuters(real_flow, synth_flow)))
+    return rows
 
 
 def load_trajectory(path: str) -> fastmob.TrajDataFrame:
@@ -1374,12 +1470,9 @@ def generate_comparison_report(
         lng_col=real_metric_traj.lng_col,
         datetime_col=real_metric_traj.datetime_col,
     )
-    w_visits, _ = visits_per_user_wasserstein_distance(
-        synth_stays,
-        real_stays,
-        user_id_col1=traj.uid_col,
-        user_id_col2=real_metric_traj.uid_col,
-    )
+    synth_visit_counts = synth_stays.group_by(traj.uid_col).len()["len"].to_numpy()
+    real_visit_counts = real_stays.group_by(real_metric_traj.uid_col).len()["len"].to_numpy()
+    w_visits = wasserstein_distance(synth_visit_counts, real_visit_counts)
     metrics["wasserstein"]["visits_per_user"] = w_visits
 
     if road_network is not None:
@@ -1407,11 +1500,7 @@ def generate_comparison_report(
 
     if "cpc" in enabled_sections:
         typer.echo("Computing Common Part of Commuters ...")
-        cpc_rows = trajectory_common_part_of_commuters_multi(
-            traj,
-            real_traj,
-            resolutions=CPC_H3_RESOLUTIONS,
-        )
+        cpc_rows = trajectory_common_part_of_commuters_multi(traj, real_traj, resolutions=CPC_H3_RESOLUTIONS)
     else:
         cpc_rows = []
     metrics["cpc"] = {f"h3_{resolution}": value for resolution, value in cpc_rows}
@@ -1440,12 +1529,16 @@ def generate_comparison_report(
         synth_trip = [t for t in traj.df["trip_duration_minutes"].drop_nulls().to_list() if t > 0]
         real_trip = [(j / CAR_SPEED_KMH) * 60.0 for j in real_jumps if j > 0]
         w_trip = wasserstein_distance(synth_trip, real_trip) if synth_trip and real_trip else None
-    elif duration_col:
-        real_trip = real_df[duration_col].drop_nulls().to_list()
-        synth_trip = waiting_times_minutes(traj)
-        w_trip = wasserstein_distance(synth_trip, real_trip)
     else:
-        real_trip = synth_trip = w_trip = None
+        # No genuine travel-time ground truth on the synthetic side either
+        # (e.g. two real halves compared against each other for the Ref.
+        # baseline) -- derive the same car-time proxy from jump lengths on
+        # BOTH sides instead of comparing a real stay/dwell-duration column
+        # against synthetic inter-event waiting-time gaps, which isn't
+        # "trip duration" on either side.
+        synth_trip = [(j / CAR_SPEED_KMH) * 60.0 for j in synth_jumps if j > 0]
+        real_trip = [(j / CAR_SPEED_KMH) * 60.0 for j in real_jumps if j > 0]
+        w_trip = wasserstein_distance(synth_trip, real_trip) if synth_trip and real_trip else None
     if w_trip is not None:
         metrics["wasserstein"]["trip_duration_min"] = w_trip
 
@@ -1530,7 +1623,7 @@ def generate_comparison_report(
         and synthetic_visits is not None
         and observed_visits is not None
     ):
-        activity_distribution_jsd = activity_distribution_jensen_shannon_divergence(
+        activity_distribution_jsd = _activity_distribution_jsd(
             synthetic_visits, observed_visits
         )
         metrics["jsd"]["activity_distribution"] = activity_distribution_jsd
@@ -1547,11 +1640,11 @@ def generate_comparison_report(
         real_transition, real_transition_categories = _split_transition_matrix_categories(
             activity_transition_matrix(observed_visits)
         )
-        activity_transitions_jsd = activity_transition_matrix_jensen_shannon_divergence(
+        activity_transitions_jsd = _transition_matrix_jsd(
             synth_transition,
+            synth_transition_categories,
             real_transition,
-            categories1=synth_transition_categories,
-            categories2=real_transition_categories,
+            real_transition_categories,
         )
         metrics["jsd"]["activity_transitions"] = activity_transitions_jsd
         js_rows.append(
@@ -1567,8 +1660,8 @@ def generate_comparison_report(
         real_daily, real_categories, _ = daily_activity_distribution(
             observed_visits
         )
-        daily_activity_profile_jsd = time_bin_matrix_jensen_shannon_divergence(
-            synth_daily, real_daily, synth_categories, real_categories
+        daily_activity_profile_jsd = _time_bin_matrix_jsd(
+            synth_daily, synth_categories, real_daily, real_categories
         )
         metrics["jsd"]["daily_activity_profile"] = daily_activity_profile_jsd
         js_rows.append(
@@ -1583,13 +1676,16 @@ def generate_comparison_report(
         try:
             if observed_visits is not None:
                 observed_motif_visits = _motif_visits(observed_visits)
-                _, real_motif_dist = discover_daily_motifs_from_agents(
-                    observed_motif_visits,
-                    user_id_col="uid",
-                    location_id_col="location_id",
-                    purpose_col="purpose",
-                    timestamp_col="start_timestamp",
-                    end_timestamp_col="end_timestamp",
+                real_motif_dist = motif_distribution(
+                    daily_motifs(
+                        observed_motif_visits,
+                        uid_col="uid",
+                        location_col="location_id",
+                        purpose_col="purpose",
+                        datetime_col="start_timestamp",
+                        end_datetime_col="end_timestamp",
+                    ),
+                    motif_id_col="motif_id",
                 )
             else:
                 real_motif_dist = None
@@ -1597,13 +1693,16 @@ def generate_comparison_report(
             synth_motif_dist = None
             if synthetic_visits is not None:
                 synthetic_motif_visits = _motif_visits(synthetic_visits)
-                _, synth_motif_dist = discover_daily_motifs_from_agents(
-                    synthetic_motif_visits,
-                    user_id_col="uid",
-                    location_id_col="location_id",
-                    purpose_col="purpose",
-                    timestamp_col="start_timestamp",
-                    end_timestamp_col="end_timestamp",
+                synth_motif_dist = motif_distribution(
+                    daily_motifs(
+                        synthetic_motif_visits,
+                        uid_col="uid",
+                        location_col="location_id",
+                        purpose_col="purpose",
+                        datetime_col="start_timestamp",
+                        end_datetime_col="end_timestamp",
+                    ),
+                    motif_id_col="motif_id",
                 )
                 if real_motif_dist is not None:
                     daily_motifs_jsd = _motif_distribution_jsd(synth_motif_dist, real_motif_dist)

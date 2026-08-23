@@ -94,13 +94,18 @@ def extract_metric(report: dict, metric_key: str) -> float | None:
         return _finite_or_none(transform(v) if v is not None else None)
     if metric_key in NETWORK_METRICS:
         (sub,) = NETWORK_METRICS[metric_key]
-        # Model columns (full, no_profile, ...) carry synthetic_vs_random;
-        # the Ref. column's real-vs-real half-A-vs-half-B comparison
-        # (built by build_observed_pair_network_validation) carries
-        # observed_vs_observed instead -- mutually exclusive per report,
-        # so trying both is safe.
+        # Model columns (full, no_profile, ...) carry synthetic_vs_observed --
+        # the simulated graph vs. the *same* co-presence-built observed graph
+        # used for the Ref. column, so both sides of the table are the same
+        # comparison type (see network_validation.py). The Ref. column's
+        # real-vs-real half-A-vs-half-B comparison (built by
+        # build_observed_pair_network_validation) carries observed_vs_observed
+        # instead -- mutually exclusive per report, so trying both is safe.
+        # (synthetic_vs_random -- simulated graph vs. a degree-preserving
+        # random rewiring of itself -- is a different, near-tautological
+        # comparison type and is intentionally not read here.)
         v = _get_nested(
-            report, ("network_validation", "synthetic_vs_random", "wasserstein", sub)
+            report, ("network_validation", "synthetic_vs_observed", "wasserstein", sub)
         )
         if v is None:
             v = _get_nested(

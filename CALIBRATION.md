@@ -13,7 +13,7 @@ closer to the observed distribution in the metric's native unit.
 | Metric | What it represents | Calibration levers |
 | --- | --- | --- |
 | Jump lengths | Trip-to-trip movement distance. | Tune `simulation.gravity_deterrence_exponent` for distance decay, `simulation.rho` for exploration, `simulation.gamma` for preferential return, and `comparison.road_network_distance`/`road_network.enabled` when road distance should replace straight-line distance. Fine-tune the schedule aligner if diaries choose too many far or local stops for a profile. |
-| Visits per user | Number of visits or stays generated per user. | Tune `diaries.location_count_mu`, `diaries.location_count_sigma`, `diaries.max_locations`, `schedule.alpha_beta_a`, `schedule.alpha_beta_b`, and `simulation.gamma`. These control daily stop complexity and reuse. |
+| Visits per user | Number of visits or stays generated per user. | Tune `diaries.location_count_mu`, `diaries.location_count_sigma`, `diaries.max_locations`, `schedule.alpha_distribution` (`alpha_beta_a`/`alpha_beta_b` or `alpha_mu_ln`/`alpha_sigma_ln`, depending on the choice), and `simulation.gamma`. These control daily stop complexity and reuse. |
 | Radius of gyration | Spatial spread of each user's activity space. | Tune `simulation.gravity_deterrence_exponent`, `profiles.work_distance_model`, `profiles.work_distance_exponential_lambda`, `profiles.work_distance_max_km`, and `simulation.rho`. These control commute span and exploratory range. |
 | Dwell time | Time spent at stops. | Tune `activities.durations.*`, `activities.act_dur_scale`, `activities.act_dur_sigma_scale`, and `simulation.granularity_minutes`. Duration overrides directly reshape stay lengths. |
 | Trip duration | Travel time, especially car-trip duration when available. | Tune `simulation.car_speed_kmh`, `simulation.walking_speed_kmh`, `simulation.bike_speed_kmh`, `road_network.enabled`, `rail_network.enabled`, and routing sidecar availability. Travel time follows path length and speed assumptions. |
@@ -26,9 +26,9 @@ categorical probability mass is more similar.
 | Metric | What it represents | Calibration levers |
 | --- | --- | --- |
 | Activity distribution | Overall share of visits by activity purpose/category. | Tune diary prompts in `diaries.city_profile_*`, `activities.kappa`, `activities.temperature`, and `activities.alignment_backend`. Fine-tune the activity aligner when semantically wrong activities are selected. |
-| Activity transitions | Probability of moving from one activity category to another. | Tune schedule diary pools, `schedule.similarity_backend`, `schedule.temperature_beta_*`, and `schedule.alpha_beta_*`. Fine-tune the schedule aligner if profile-to-diary matching produces unrealistic sequences. |
+| Activity transitions | Probability of moving from one activity category to another. | Tune schedule diary pools, `schedule.similarity_backend`, `schedule.temperature_distribution` (with `temperature_beta_*` or `temperature_mu_ln`/`temperature_sigma_ln`), and `schedule.alpha_distribution` (with `alpha_beta_*` or `alpha_mu_ln`/`alpha_sigma_ln`). Fine-tune the schedule aligner if profile-to-diary matching produces unrealistic sequences. |
 | Daily activity profile | Activity mix by time of day. | Tune `simulation.granularity_minutes`, `activities.durations.*`, `activities.temperature`, and schedule aligner scores. Timing improves when macro diaries and micro durations agree with observed rhythms. |
-| Daily motifs | Compact daily sequence patterns. | Tune `diaries.motif_exploration_rate`, `diaries.location_count_*`, `diaries.max_one_location_diaries`, and `schedule.alpha_beta_*`. Motifs improve when daily complexity and repeated routines match observed or literature patterns. |
+| Daily motifs | Compact daily sequence patterns. | Tune `diaries.motif_exploration_rate`, `diaries.location_count_*`, `diaries.max_one_location_diaries`, and `schedule.alpha_distribution`/`alpha_beta_*`/`alpha_mu_ln`/`alpha_sigma_ln`. Motifs improve when daily complexity and repeated routines match observed or literature patterns. |
 
 ## Spatial Metrics
 
@@ -51,7 +51,7 @@ curve and literature reference where appropriate.
 | Travel-distance mobility law | Distribution tail of travel distances. | Tune `simulation.gravity_deterrence_exponent`, `simulation.rho`, `simulation.gamma`, and road/rail routing. These set short-vs-long trip frequency. |
 | Radius-of-gyration mobility law | Distribution of user activity-space radii. | Tune `profiles.work_distance_*`, `simulation.gravity_deterrence_exponent`, and `simulation.rho`. These set the spread of home/work and exploratory locations. |
 | Daily visited locations | Log-normal-like distribution of daily distinct locations. | Tune `diaries.location_count_mu`, `diaries.location_count_sigma`, `diaries.max_locations`, `diaries.max_one_location_diaries`, and schedule exploration. |
-| Distance-frequency visitation law | Relationship between travel distance and visit frequency. | Tune `simulation.gamma`, `schedule.alpha_beta_*`, and `simulation.alpha`. Preferential return and social location choice affect repeated nearby visits. |
+| Distance-frequency visitation law | Relationship between travel distance and visit frequency. | Tune `simulation.gamma`, `schedule.alpha_distribution`/`alpha_beta_*`/`alpha_mu_ln`/`alpha_sigma_ln`, and `simulation.alpha`. Preferential return and social location choice affect repeated nearby visits. |
 
 ## Transport Metrics
 
@@ -94,8 +94,8 @@ Shape-match is the goal across synthetic and observed profile groups.
 
 | Metric | What it represents | Calibration levers |
 | --- | --- | --- |
-| Intermittency | Irregularity in a user's movement rhythm. | Tune `schedule.alpha_beta_*`, `simulation.gamma`, and diary diversity. More schedule reuse usually lowers intermittency. |
-| Degree of return | Tendency to revisit the same locations. | Tune `simulation.gamma`, `schedule.alpha_beta_b`, and `diaries.location_count_*`. Stronger preferential return increases repeat visits. |
+| Intermittency | Irregularity in a user's movement rhythm. | Tune `schedule.alpha_distribution`/`alpha_beta_*`/`alpha_mu_ln`/`alpha_sigma_ln`, `simulation.gamma`, and diary diversity. More schedule reuse usually lowers intermittency. |
+| Degree of return | Tendency to revisit the same locations. | Tune `simulation.gamma`, `schedule.alpha_distribution`/`alpha_beta_b`/`alpha_mu_ln`, and `diaries.location_count_*`. Stronger preferential return increases repeat visits. |
 | Jump length | Movement distance within profile groups. | Tune gravity distance decay, routing, and transport thresholds. |
 | Radius of gyration | Activity-space spread within profile groups. | Tune work-distance placement, gravity, and exploration. |
 | Visits | Visit count within profile groups. | Tune daily location-count distribution, schedule exploration, and activity materialization. |

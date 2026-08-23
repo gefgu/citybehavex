@@ -9,7 +9,7 @@ tessellation:
   relevance_column: relevance
   output: data/gparis/results/gparis_poi_tessellation.parquet
 simulation:
-  agents: 550
+  agents: 500
   days: 7
   output: data/gparis/results/gparis_simulation_core_trajectories.parquet
   random_state: 42
@@ -78,8 +78,10 @@ schedule:
   alignment_model: models/modernbert-schedule-aligner
   alignment_batch_size: 32
   alignment_cache_path: data/llm_diaries_gparis/schedule_alignment_scores_cache.npz
+  temperature_distribution: beta
   temperature_beta_a: 3.0
   temperature_beta_b: 4.0
+  alpha_distribution: beta
   alpha_beta_a: 1.0
   alpha_beta_b: 6.0
 social:

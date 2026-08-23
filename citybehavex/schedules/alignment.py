@@ -49,7 +49,7 @@ def score_alignment_matrix(
 
     The expected inference server is a TEI reranker/sequence-classification
     endpoint accepting ``/rerank`` requests with one profile query and many diary
-    texts. Scores are clipped to [0, 1] before ddCRP consumes them.
+    texts. Scores are clipped to [0, 1] before SW-CRP consumes them.
 
     Diary chunks are scored with up to ``config.alignment_concurrency`` requests
     in flight at once (one request per profile row per diary chunk), mirroring

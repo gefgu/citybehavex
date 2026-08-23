@@ -12,7 +12,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-# Fixed purpose codes (matches _PURPOSE_CODE in schedule_ddcrp.py and WORK_CODE in Rust)
+# Fixed purpose codes (matches _PURPOSE_CODE in schedules/crp.py and WORK_CODE in Rust)
 N_PURPOSES = 3
 
 # MTUS HAF top-level activities: (name, description, mu_ln, sigma_ln, eligible_purpose_codes)

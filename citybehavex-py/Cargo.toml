@@ -10,7 +10,12 @@ crate-type = ["cdylib"]
 [dependencies]
 # default-features = false drops the C/SIMD-backed crates (numkong, wass); the
 # trip-DITRAS only needs the pure-Rust models/utils (od, shared, haversine).
-fastmob-core = { path = "../../fastmob/fastmob-core", default-features = false }
+# Pending crates.io publication (mirrors the fastmob/fastmob-vis PyPI
+# situation in pyproject.toml); local dev needs a `.cargo/config.toml`
+# (gitignored) with:
+#   [patch.crates-io]
+#   fastmob-core = { path = "../../fastmob/fastmob-core" }
+fastmob-core = { version = "0.1.1", default-features = false }
 pyo3 = "0.28.2"
 numpy = "0.28.0"
 rand = "0.8"

@@ -23,7 +23,7 @@ data/llm_diaries_gparis/prompt*.txt
 data/llm_diaries_gparis/raw_response*.json
 data/llm_diaries_gparis/markov_training.parquet
 
-# Default ddCRP embedding cache + vLLM logs
+# Default SW-CRP embedding cache + vLLM logs
 .citybehavex/
 
 
@@ -74,3 +74,9 @@ data/.web_cache_rs
 .finetuning
 .pytest_cache
 .uv-cache
+
+# Local path-source overrides for the not-yet-published fastmob/fastmob-vis
+# packages (see pyproject.toml's [tool.ruff.lint] comment above [tool.uv.sources])
+uv.toml
+# Local crates.io patch for the not-yet-published fastmob-core crate
+.cargo/config.toml

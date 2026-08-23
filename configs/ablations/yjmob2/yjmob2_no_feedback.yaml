@@ -87,8 +87,10 @@ embedding:
   cache_dir: data/llm_diaries_yjmob2
   cache_path: data/llm_diaries_yjmob2/diary_embeddings.npz
 schedule:
+  temperature_distribution: beta
   temperature_beta_a: 2.0
   temperature_beta_b: 5.0
+  alpha_distribution: beta
   alpha_beta_a: 2.0
   alpha_beta_b: 5.0
   similarity_backend: alignment_model
@@ -148,7 +150,7 @@ comparison:
     h3_resolution: 5
   network_validation:
     enabled: true
-    observed_enabled: false
+    observed_enabled: true
     synthetic_enabled: true
     location_mode: h3
     h3_resolution: 9

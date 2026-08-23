@@ -1,14 +1,14 @@
 # CityBehavEx web app
 
-Interactive comparison UI for CityBehavEx runs. The Rust/axum backend turns a
-simulation's parquet outputs into JSON plot data; the React + Vite frontend
-renders it with ECharts, Leaflet, and Mapbox GL.
+Interactive comparison UI for CityBehavEx runs. The FastAPI backend turns a
+simulation's parquet outputs into JSON plot data (reusing
+`citybehavex.reports.comparison`/`network_validation`); the React + Vite
+frontend renders it with ECharts, Leaflet, and Mapbox GL.
 
 ```text
 web/
-├── backend/            Rust/axum crate (`citybehavex-web`)
-│   ├── src/            API routes, payload builders, and static demo exporter
-│   └── assets/         bundled motif assets
+├── backend/            FastAPI app (`app/`)
+│   └── app/             API routers, payload builders, and cache/executor infra
 └── frontend/           React + Vite + TS
     └── src/
         ├── pages/      Home, Experiments, Charts, Timeline
@@ -21,7 +21,7 @@ web/
 Start the backend from the repository root:
 
 ```bash
-cargo run -p citybehavex-web
+uv run uvicorn app.main:app --app-dir web/backend --port 8000
 ```
 
 Start the frontend:
@@ -33,11 +33,11 @@ npm run dev
 ```
 
 In development, browser API calls default directly to the backend at
-`http://127.0.0.1:8001`. To use another backend URL:
+`http://127.0.0.1:8000`. To use another backend URL:
 
 ```bash
 cd web/frontend
-VITE_API_BASE_URL=http://127.0.0.1:8001 npm run dev
+VITE_API_BASE_URL=http://127.0.0.1:8000 npm run dev
 ```
 
 Open http://localhost:5173.
@@ -45,25 +45,8 @@ Open http://localhost:5173.
 ## Backend Checks
 
 ```bash
-cargo build -p citybehavex-web
-cargo test -p citybehavex-web --bin citybehavex-web
-cargo test -p citybehavex-web --bin citybehavex-web -- --ignored
+uv run pytest tests/test_reports.py
 ```
-
-## Static Demo
-
-Export endpoint-shaped JSON into the Vite public directory:
-
-```bash
-cargo run -p citybehavex-web --bin export_static_demo -- --manifest web/demo_export.yaml
-cd web/frontend
-VITE_STATIC_DEMO=true VITE_BASE_PATH=/citybehavex/ npm run build
-```
-
-The exporter writes `web/frontend/public/demo-data/`. In static mode the
-frontend reads those files instead of `/api/...`, uses hash routing for GitHub
-Pages deep links, and keeps the regular local API behavior unchanged when
-`VITE_STATIC_DEMO` is unset.
 
 ## Timeline View
 
@@ -90,9 +73,33 @@ Restart `npm run dev` after creating or editing this file.
 - `GET /api/experiments/{id}/timeline/meta[?run=<id>]`
 - `GET /api/experiments/{id}/timeline/legs?since=&until=&min_lat=&min_lng=&max_lat=&max_lng=[&run=&max_agents=2000]`
 - `GET /api/experiments/{id}/timeline/agents/{uid}[?run=<id>]`
+- `GET /api/experiments/{id}/timeline/agents/{uid}/crp[?run=<id>]`
+- `GET /api/experiments/{id}/timeline/agents/{uid}/social[?run=<id>]`
+
+## Static Demo
+
+Export endpoint-shaped JSON into the Vite public directory:
+
+```bash
+uv run python scripts/export_static_web_demo.py --manifest web/demo_export.yaml
+cd web/frontend
+VITE_STATIC_DEMO=true VITE_BASE_PATH=/citybehavex/ npm run build
+```
+
+The exporter writes `web/frontend/public/demo-data/`. In static mode the
+frontend reads those files instead of `/api/...`, uses hash routing for GitHub
+Pages deep links, and keeps the regular local API behavior unchanged when
+`VITE_STATIC_DEMO` is unset.
 
 ## Production
 
 `npm run build` emits `web/frontend/dist`. When that directory exists, the
 backend serves it as static files with an SPA fallback, so the app runs from the
 backend origin alone.
+
+## Note on the previous Rust/axum backend
+
+An earlier iteration of this backend was rewritten in Rust (axum,
+`citybehavex-web`). That rewrite has been reverted in favor of this FastAPI
+backend -- fastmob's Python API is the better fit here than driving
+`fastmob-rs`/`fastmob-core` directly from Rust.
