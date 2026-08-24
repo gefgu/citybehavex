@@ -12,6 +12,17 @@ from citybehavex.config import CityBehavExConfig
 from citybehavex.simulation.spatial import _lng_column, _resolve_spatial_bounds
 
 
+def _as_numpy(values: object, dtype: np.dtype) -> np.ndarray:
+    """Normalize pandas and Arrow columns at the simulator boundary."""
+    to_numpy = getattr(values, "to_numpy", None)
+    if to_numpy is not None:
+        try:
+            values = to_numpy(zero_copy_only=False)
+        except TypeError:
+            values = to_numpy()
+    return np.asarray(values, dtype=dtype)
+
+
 def _build_road_graph_for_config(config: CityBehavExConfig, tessellation_df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
     rn = config.road_network
     min_lon, min_lat, max_lon, max_lat = _resolve_spatial_bounds(config, tessellation_df)
@@ -72,6 +83,7 @@ def _maybe_snap_to_network(
         lat_col="lat",
         lng_col=lng_col,
     )
+    snapped = _as_numpy(snapped, np.dtype(np.int64))
     n_unsnapped = int((snapped < 0).sum())
     if n_unsnapped:
         typer.echo(
@@ -118,12 +130,12 @@ def build_road_network_kwargs(config: CityBehavExConfig, tessellation_df: pd.Dat
         f"max {rn.max_leg_waypoints} waypoints/leg"
     )
     return dict(
-        edge_from=edges_df["from_node"].to_numpy(dtype=np.int64),
-        edge_to=edges_df["to_node"].to_numpy(dtype=np.int64),
-        edge_weight_ds=edges_df["weight_ds"].to_numpy(dtype=np.int64),
-        node_lats=nodes_df["lat"].to_numpy(dtype=np.float64),
-        node_lngs=nodes_df["lng"].to_numpy(dtype=np.float64),
-        location_node=tessellation_df["road_node"].to_numpy(dtype=np.int64),
+        edge_from=_as_numpy(edges_df["from_node"], np.dtype(np.int64)),
+        edge_to=_as_numpy(edges_df["to_node"], np.dtype(np.int64)),
+        edge_weight_ds=_as_numpy(edges_df["weight_ds"], np.dtype(np.int64)),
+        node_lats=_as_numpy(nodes_df["lat"], np.dtype(np.float64)),
+        node_lngs=_as_numpy(nodes_df["lng"], np.dtype(np.float64)),
+        location_node=_as_numpy(tessellation_df["road_node"], np.dtype(np.int64)),
         max_leg_waypoints=rn.max_leg_waypoints,
     )
 
@@ -138,11 +150,11 @@ def build_rail_network_kwargs(config: CityBehavExConfig, tessellation_df: pd.Dat
         f"max {rn.max_leg_waypoints} waypoints/leg"
     )
     return dict(
-        edge_from=edges_df["from_node"].to_numpy(dtype=np.int64),
-        edge_to=edges_df["to_node"].to_numpy(dtype=np.int64),
-        edge_weight_ds=edges_df["weight_ds"].to_numpy(dtype=np.int64),
-        node_lats=nodes_df["lat"].to_numpy(dtype=np.float64),
-        node_lngs=nodes_df["lng"].to_numpy(dtype=np.float64),
-        location_node=tessellation_df["rail_node"].to_numpy(dtype=np.int64),
+        edge_from=_as_numpy(edges_df["from_node"], np.dtype(np.int64)),
+        edge_to=_as_numpy(edges_df["to_node"], np.dtype(np.int64)),
+        edge_weight_ds=_as_numpy(edges_df["weight_ds"], np.dtype(np.int64)),
+        node_lats=_as_numpy(nodes_df["lat"], np.dtype(np.float64)),
+        node_lngs=_as_numpy(nodes_df["lng"], np.dtype(np.float64)),
+        location_node=_as_numpy(tessellation_df["rail_node"], np.dtype(np.int64)),
         max_leg_waypoints=rn.max_leg_waypoints,
     )
