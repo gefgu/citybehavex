@@ -1,0 +1,113 @@
+tessellation:
+  path: data/la/la_poi_tessellation.parquet
+  min_poi_count: 0
+  relevance_column: relevance
+  overture_release: 2026-08-19.0
+simulation:
+  agents: 132026
+  days: 7
+  start_date: '2021-07-19'
+  output: data/la/results/la_1pct_simulation_trajectories.parquet
+  random_state: 20210719
+  relevance_column: relevance
+  granularity_minutes: 15
+  stream_output: true
+  car_speed_kmh: 50.0
+  rho: 0.6
+  gamma: 0.21
+  alpha: 0.2
+road_network:
+  enabled: true
+  nodes_output: data/la/results/la_road_graph_nodes.parquet
+  edges_output: data/la/results/la_road_graph_edges.parquet
+  snap_output: data/la/results/la_road_graph_snap.parquet
+  max_leg_waypoints: 128
+rail_network:
+  enabled: false
+llm:
+  base_url: http://200.134.10.65:8081
+  api_key: none
+  model: cyankiwi/gemma-4-26B-A4B-it-qat-AWQ-INT4
+  diary_count: 30
+  max_tokens: 768
+  concurrency: 8
+  cache_dir: data/llm_diaries_la
+  validated_diaries_path: data/llm_diaries_la/validated_diaries.json
+diaries:
+  city_profile: 'Los Angeles and Orange County, California, with car-oriented metropolitan travel, commuting, errands, leisure, healthcare, studies, and home routines.'
+  city_profile_weekday: 'Los Angeles and Orange County weekday routines: commuting, school, errands, services, evening leisure, and home.'
+  city_profile_weekend: 'Los Angeles and Orange County weekend routines: later mornings at home, shopping, recreation, social visits, fewer work and study trips.'
+  representative_day: '2021-07-19'
+  location_count_mu: 1.0
+  location_count_sigma: 0.75
+  max_locations: 6
+  max_one_location_diaries: 1
+  motif_exploration_rate: 0.5
+embedding:
+  enabled: true
+  model: nomic-ai/nomic-embed-text-v1.5
+  base_url: http://localhost:8001
+  task_prefix: 'clustering: '
+  dimensions: 768
+  auto_launch: true
+  vllm_executable: /home/gustavo/vllm/.venv/bin/vllm
+  vllm_port: 8001
+  vllm_extra_args:
+  - --gpu-memory-utilization
+  - '0.08'
+  - --enforce-eager
+  - --max-model-len
+  - '512'
+  cache_dir: data/llm_diaries_la
+  cache_path: data/llm_diaries_la/diary_embeddings.npz
+schedule:
+  similarity_backend: alignment_model
+  alignment_base_url: http://localhost:8082
+  alignment_model: models/modernbert-schedule-aligner
+  alignment_batch_size: 32
+  alignment_concurrency: 4
+  alignment_cache_path: data/llm_diaries_la/schedule_alignment_scores_cache.npz
+  temperature_distribution: beta
+  temperature_beta_a: 3.0
+  temperature_beta_b: 4.0
+  alpha_distribution: beta
+  alpha_beta_a: 1.0
+  alpha_beta_b: 6.0
+profiles:
+  enabled: true
+  output: data/la/results/la_1pct_agent_profiles.parquet
+  home_anchors_path: data/la/la_home_anchors_1pct.parquet
+  overture_building_features_path: data/la/la_building_features_h3r10.parquet
+  work_distance_model: none
+  work_from_home_probability: 0.02
+  coherence_alignment_backend: none
+  ownership_alignment_backend: rerank
+  ownership_alignment_base_url: http://localhost:8084
+  ownership_alignment_model: models/modernbert-vehicle-ownership-aligner
+  ownership_alignment_batch_size: 256
+  ownership_alignment_concurrency: 4
+  ownership_alignment_cache_path: data/llm_diaries_la/vehicle_ownership_alignment_cache.npz
+activities:
+  enabled: true
+  materialize_travel: true
+  kappa: 0.3
+  temperature: 0.25
+  embed_activities: true
+  alignment_backend: rerank
+  alignment_base_url: http://localhost:8083
+  alignment_model: models/modernbert-activity-aligner
+  alignment_batch_size: 512
+  alignment_concurrency: 4
+  alignment_retries: 2
+  alignment_checkpoint_every: 20
+  alignment_cache_path: data/llm_diaries_la/activity_alignment_cache.npz
+  poi_type_choice_enabled: true
+  poi_type_choice_temperature: 0.5
+  poi_type_choice_alpha: 1.0
+social:
+  home_h3_resolution: 7
+  work_h3_resolution: 7
+  social_graph_k: 20
+  profile_graph_exact_threshold: 10000
+  dynamic_friendships_enabled: true
+  max_colocation_group_size: 50
