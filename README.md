@@ -94,26 +94,11 @@ Optional requirements:
 
 The Python package uses `maturin` to build the Rust extension (the core
 simulation engine only — the web backend is pure Python/FastAPI and needs no
-Rust toolchain). CityBehavEx builds on two companion mobility libraries:
+Rust toolchain). CityBehavEx builds on `fastmob`:
 
 - [`fastmob`](https://github.com/gefgu/fastmob) — Rust-accelerated mobility
-  analysis, installable standalone via `pip install fastmob` once published.
-- [`fastmob-vis`](https://github.com/gefgu/fastmob) (the `fastmob-vis` crate
-  inside the `fastmob` monorepo, successor to the old standalone `skmob-vis`)
-  — Rust-backed ECharts visualizations for `fastmob` results, installable via
-  `pip install fastmob-vis` once published.
-
-`pyproject.toml` declares both as plain versioned dependencies. **Publication
-to PyPI is pending** — until then, `uv sync` will fail to resolve them for
-anyone without a local checkout. If you have `fastmob` checked out as a
-sibling directory (`../fastmob`), add a *gitignored* `uv.toml` next to this
-file:
-
-```toml
-[sources]
-fastmob = { path = "../fastmob", editable = true }
-fastmob-vis = { path = "../fastmob/fastmob-vis", editable = true }
-```
+  analysis and visualization, available from PyPI as `fastmob==0.1.2`. Its
+  `visualization` extra provides the Rust-backed ECharts visualizations.
 
 ## Quick Start
 
@@ -314,9 +299,9 @@ timeline replay, metrics, and cached comparison payloads.
 ## Troubleshooting
 
 - **Rust extension not found:** rerun `./scripts/update_local_citybehavex.sh`.
-- **`fastmob`/`fastmob-vis` not found:** these aren't on PyPI yet. Add a
-  gitignored `uv.toml` with a local path override to your `../fastmob`
-  checkout (see above), or run `./scripts/update_local_fastmob.sh`.
+- **`fastmob` not found:** install the project dependencies with `uv sync`.
+  The required `fastmob` features, including visualization, are installed from
+  PyPI as extras.
 - **Frontend cannot reach the API:** confirm the FastAPI backend is running on
   `http://localhost:8000` and the frontend on `http://localhost:5173`, and
   that `VITE_API_PROXY_TARGET` matches the backend you started.
@@ -329,13 +314,19 @@ timeline replay, metrics, and cached comparison payloads.
 
 ## Citation
 
-In the future...
+If you use CityBehavEx, please cite:
 
-<!-- ```bibtex
-@inproceedings{santos2026citybehavex,
+```bibtex
+@misc{santos2026citybehavex,
   title     = {CityBehavEx: A Scalable and Empirically Validated LLM-Assisted Urban Simulation Platform},
-  author    = {Santos, Gustavo H. and Viana, Aline Carneiro and Silva, Thiago H.},
-  booktitle = {Proceedings of the EMNLP Demo Track},
-  year      = {2026}
+  author    = {Santos, Gustavo H. and Viana, Aline and Silva, Thiago H.},
+  year      = {2026},
+  eprint    = {2607.12086},
+  archivePrefix = {arXiv},
+  primaryClass  = {cs.CL},
+  url       = {https://arxiv.org/abs/2607.12086}
 }
-``` -->
+```
+
+CityBehavEx depends on [`fastmob` 0.1.2](https://pypi.org/project/fastmob/0.1.2/)
+with its `visualization` extra.
