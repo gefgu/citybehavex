@@ -7,9 +7,9 @@ from serve_cross_encoder import run_server
 def main(argv: list[str] | None = None) -> None:
     run_server(
         argv,
-        role="schedule",
-        default_model="models/modernbert-schedule-aligner",
-        default_port=8082,
+        role="activity",
+        default_model="models/modernbert-activity-aligner",
+        default_port=8083,
     )
 
 
