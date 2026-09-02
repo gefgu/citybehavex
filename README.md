@@ -222,14 +222,44 @@ uv run --extra embeddings vllm serve nomic-ai/nomic-embed-text-v1.5 \
   --port 8001
 ```
 
-To serve a fine-tuned cross-encoder reranker:
+The schedule and activity rerankers are separate services. Each serving script
+accepts `--model-path`, which may be a local SentenceTransformers CrossEncoder
+directory or a Hugging Face model identifier. The default models are the
+fine-tuned ModernBERT checkpoints shown below:
 
 ```bash
 .venv/bin/python scripts/serve_schedule_aligner.py \
+  --model-path models/modernbert-schedule-aligner \
+  --port 8082 \
+  --device cuda \
+  --predict-batch-size 128
+```
+
+```bash
+.venv/bin/python scripts/serve_activity_aligner.py \
   --model-path models/modernbert-activity-aligner \
   --port 8083 \
   --device cuda \
   --predict-batch-size 128
+```
+
+For example, a compatible custom checkpoint can be selected directly:
+
+```bash
+.venv/bin/python scripts/serve_activity_aligner.py \
+  --model-path /path/to/my-modernbert-cross-encoder \
+  --port 8083
+```
+
+The fine-tuning scripts expose the corresponding model flags. Use
+`--base-model` to select the ModernBERT (or other compatible) starting model
+and `--output-model-path` to choose where the fine-tuned CrossEncoder is saved.
+For example:
+
+```bash
+.venv/bin/python scripts/train_modernbert_activity_aligner.py \
+  --base-model nomic-ai/modernbert-embed-base \
+  --output-model-path models/my-activity-aligner
 ```
 
 Disable these services in YAML when running without the corresponding models or
