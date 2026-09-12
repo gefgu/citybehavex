@@ -23,6 +23,7 @@ from citybehavex.activities import (
 from citybehavex.config import CityBehavExConfig
 from citybehavex.embedding import embed_texts
 from citybehavex.schedules import DiaryBank
+from citybehavex.utils.alignment import post_unload
 
 def _configured_activity_duration_arrays(config: ActivitiesConfig) -> tuple[np.ndarray, np.ndarray]:
     act_dur_mu, act_dur_sigma = activity_duration_arrays()
@@ -149,6 +150,11 @@ def _build_activity_data(
                         typer.echo(f"Saved POI type alignment scores -> {poi_type_alignment_path}")
                 else:
                     typer.echo("POI type scorer unavailable — using legacy unrestricted OTHER location choice")
+                post_unload(
+                    config.activities.alignment_base_url,
+                    config.activities.poi_type_alignment_model or config.activities.alignment_model,
+                )
+        post_unload(config.activities.alignment_base_url, config.activities.alignment_model)
     typer.echo(f"Activities enabled: {len(act_dur_mu)} activities, kappa={config.activities.kappa}, T={config.activities.temperature}")
     return (
         act_embs,

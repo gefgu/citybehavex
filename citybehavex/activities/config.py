@@ -36,6 +36,7 @@ class ActivitiesConfig(BaseModel):
     poi_type_choice_enabled: bool = False
     poi_type_choice_temperature: float = Field(default=0.5, gt=0)
     poi_type_choice_alpha: float = Field(default=1.0, ge=0.0)
+    poi_type_alignment_model: Optional[str] = None
 
     # Uniform tuning knobs over the MTUS catalog's per-activity log-normal
     # duration params (citybehavex.activities.catalog._CATALOG_RAW). `mu_ln`

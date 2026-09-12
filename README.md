@@ -206,49 +206,36 @@ CityBehavEx can run with cached alignment scores, simple fallbacks, or live
 alignment services. The convention used by the project is:
 
 ```text
-8081  diary-generation LLM, OpenAI-compatible chat endpoint
-8082  macro-schedule alignment reranker
-8083  activity alignment reranker
-8001  optional embedding server for schedule-selection embeddings
+8081  diary-generation LLM, OpenAI-compatible chat endpoint (a sibling host)
+8090  consolidated aligner + embedding server (scripts/serve_aligners.py)
 ```
 
-If `embedding.auto_launch: true` is enabled and embeddings are missing,
-CityBehavEx can launch the embedding server on demand. To serve it manually:
+All five ModernBERT CrossEncoder aligners (schedule, activity,
+vehicle-ownership, profile-coherence, POI-type) and the diary/profile
+embedding model are served by **one process** on port 8090. It lazily loads
+whichever model a request names — the `model` field every request already
+carries, taken directly from each config's `*_alignment_model` /
+`embedding.model` field — evicts a model after `--idle-ttl-s` (default 600s)
+of no requests, and exposes `POST /unload {"model": "..."}` for an immediate
+evict:
 
 ```bash
-uv run --extra embeddings vllm serve nomic-ai/nomic-embed-text-v1.5 \
-  --runner pooling \
-  --trust-remote-code \
-  --port 8001
-```
-
-The schedule and activity rerankers are separate services. Each serving script
-accepts `--model-path`, which may be a local SentenceTransformers CrossEncoder
-directory or a Hugging Face model identifier. The default models are the
-fine-tuned ModernBERT checkpoints shown below:
-
-```bash
-.venv/bin/python scripts/serve_schedule_aligner.py \
-  --model-path models/modernbert-schedule-aligner \
-  --port 8082 \
+.venv/bin/python scripts/serve_aligners.py \
+  --port 8090 \
   --device cuda \
   --predict-batch-size 128
 ```
 
-```bash
-.venv/bin/python scripts/serve_activity_aligner.py \
-  --model-path models/modernbert-activity-aligner \
-  --port 8083 \
-  --device cuda \
-  --predict-batch-size 128
-```
+Point every config's `*_alignment_base_url` and `embedding.base_url` at this
+one port; only the `*_alignment_model` / `embedding.model` fields select which
+checkpoint gets loaded for a given request — no separate service or port per
+aligner. For example, a compatible custom checkpoint can be selected directly
+in YAML without restarting the server:
 
-For example, a compatible custom checkpoint can be selected directly:
-
-```bash
-.venv/bin/python scripts/serve_activity_aligner.py \
-  --model-path /path/to/my-modernbert-cross-encoder \
-  --port 8083
+```yaml
+activities:
+  alignment_base_url: http://localhost:8090
+  alignment_model: /path/to/my-modernbert-cross-encoder
 ```
 
 The fine-tuning scripts expose the corresponding model flags. Use

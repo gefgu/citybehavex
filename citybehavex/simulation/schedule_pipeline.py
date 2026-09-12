@@ -15,6 +15,7 @@ from citybehavex.llm_diaries import DiaryBatch
 from citybehavex.profiles import AgentProfile, profile_to_narrative
 from citybehavex.schedules import DiaryBank, SwCrpAgentInfo, build_diary_bank, build_sw_crp_diary, score_alignment_matrix
 from citybehavex.utils import ProgressReporter
+from citybehavex.utils.alignment import post_unload
 
 _PROGRESS_INTERVAL_SECONDS = 5.0
 
@@ -121,6 +122,7 @@ def _build_schedule(
             typer.echo(f"Macro-schedule alignment scores: {agent_diary_sim.shape}")
         else:
             typer.echo("Alignment scorer unavailable — falling back to embedding cosine")
+        post_unload(config.schedule.alignment_base_url, config.schedule.alignment_model)
 
     day_types = [
         config.diaries.resolve_day_type((start_date + pd.Timedelta(days=d)).date())
