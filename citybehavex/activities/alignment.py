@@ -258,7 +258,7 @@ def _poi_query_text(
     )
 
 
-def _poi_type_query_text(profile_text: str, block: ActivityBlock) -> str:
+def poi_type_query_text(profile_text: str, block: ActivityBlock) -> str:
     return (
         f"{profile_text}\n"
         f"Schedule block: diary {block.diary_id}, block {block.episode_index}, "
@@ -267,7 +267,7 @@ def _poi_type_query_text(profile_text: str, block: ActivityBlock) -> str:
     )
 
 
-def _poi_type_candidate_text(semantic_cluster: str, example_categories: Sequence[str]) -> str:
+def poi_type_candidate_text(semantic_cluster: str, example_categories: Sequence[str]) -> str:
     examples = ", ".join(example_categories[:12]) if example_categories else "unknown POI types"
     return f"{semantic_cluster}: public place type with example Overture categories {examples}"
 
@@ -605,6 +605,7 @@ def score_poi_type_alignment(
     scores = np.zeros((len(cluster_narratives), len(blocks), n_clusters), dtype=np.float64)
     rows: list[dict[str, object]] = []
     examples = example_categories_by_semantic_cluster(poi_data)
+    model = config.poi_type_alignment_model or config.alignment_model
 
     if available_cluster_ids is None:
         cluster_ids = list(range(n_clusters))
@@ -623,15 +624,15 @@ def score_poi_type_alignment(
             for block in blocks:
                 if block.purpose != "OTHER":
                     continue
-                query = _poi_type_query_text(profile_text, block)
+                query = poi_type_query_text(profile_text, block)
                 for semantic_cluster_id in cluster_ids:
                     semantic_cluster = poi_data.semantic_clusters[semantic_cluster_id]
-                    text = _poi_type_candidate_text(
+                    text = poi_type_candidate_text(
                         semantic_cluster,
                         examples.get(semantic_cluster, []),
                     )
                     key = _poi_type_cache_key(
-                        config.alignment_model,
+                        model,
                         profile_text,
                         block,
                         semantic_cluster,
@@ -641,7 +642,7 @@ def score_poi_type_alignment(
         cache = score_cached_alignment_pairs(
             pairs,
             base_url=config.alignment_base_url,
-            model=config.alignment_model,
+            model=model,
             batch_size=config.alignment_batch_size,
             cache_path=config.alignment_cache_path,
             concurrency=config.alignment_concurrency,
@@ -659,7 +660,7 @@ def score_poi_type_alignment(
                 for semantic_cluster_id in cluster_ids:
                     semantic_cluster = poi_data.semantic_clusters[semantic_cluster_id]
                     key = _poi_type_cache_key(
-                        config.alignment_model,
+                        model,
                         profile_text,
                         block,
                         semantic_cluster,

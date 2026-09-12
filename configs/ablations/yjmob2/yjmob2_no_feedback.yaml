@@ -72,7 +72,7 @@ diaries:
 embedding:
   enabled: true
   model: nomic-ai/nomic-embed-text-v1.5
-  base_url: http://localhost:8001
+  base_url: http://localhost:8090
   task_prefix: 'clustering: '
   dimensions: 768
   auto_launch: true
@@ -94,7 +94,7 @@ schedule:
   alpha_beta_a: 2.0
   alpha_beta_b: 5.0
   similarity_backend: alignment_model
-  alignment_base_url: http://localhost:8082
+  alignment_base_url: http://localhost:8090
   alignment_model: models/modernbert-schedule-aligner
   alignment_cache_path: data/llm_diaries_yjmob2/alignment_cache.npz
 activities:
@@ -104,7 +104,7 @@ activities:
   temperature: 0.5
   embed_activities: false
   alignment_backend: rerank
-  alignment_base_url: http://localhost:8083
+  alignment_base_url: http://localhost:8090
   alignment_model: models/modernbert-activity-aligner
   alignment_batch_size: 512
   alignment_cache_path: data/llm_diaries_yjmob2/activity_alignment_cache.npz
@@ -126,7 +126,7 @@ profiles:
   work_distance_density_correction_power: 1.0
   work_from_home_probability: 0.05
   coherence_alignment_backend: none
-  coherence_alignment_base_url: http://localhost:8085
+  coherence_alignment_base_url: http://localhost:8090
   coherence_alignment_model: models/modernbert-profile-coherence-aligner
   coherence_alignment_batch_size: 256
   coherence_alignment_cache_path: data/llm_diaries_yjmob2/profile_coherence_alignment_cache.npz
@@ -134,7 +134,7 @@ profiles:
   coherence_rerun_rounds: 3
   coherence_rerun_threshold: 0.6
   ownership_alignment_backend: none
-  ownership_alignment_base_url: http://localhost:8084
+  ownership_alignment_base_url: http://localhost:8090
   ownership_alignment_model: models/modernbert-vehicle-ownership-aligner
   ownership_alignment_batch_size: 256
   ownership_alignment_cache_path: data/llm_diaries_yjmob2/vehicle_ownership_alignment_cache.npz

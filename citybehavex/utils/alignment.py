@@ -135,6 +135,33 @@ def post_pair_scores(
     return scores
 
 
+def post_unload(
+    base_url: str,
+    model: str | None,
+    *,
+    timeout: float = 10.0,
+    requests_module=requests,
+) -> bool:
+    """Best-effort request to evict ``model`` from a serve_aligners.py registry.
+
+    Returns False (never raises) on any failure -- an old-style single-model
+    server without an /unload route, an unreachable server, or a server that
+    reports the model wasn't loaded/was busy are all just "nothing to do here".
+    """
+    if not base_url or not model:
+        return False
+    try:
+        response = requests_module.post(
+            base_url.rstrip("/") + "/unload",
+            json={"model": model},
+            timeout=timeout,
+        )
+        response.raise_for_status()
+        return bool(response.json().get("unloaded", False))
+    except Exception:  # noqa: BLE001 - unload is an optimization, never fatal.
+        return False
+
+
 def score_chunk_with_retries(
     base_url: str,
     model: str | None,

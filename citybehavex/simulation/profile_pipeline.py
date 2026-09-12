@@ -28,6 +28,7 @@ from citybehavex.profiles import (
     score_profile_coherence_alignment,
     score_vehicle_ownership_alignment,
 )
+from citybehavex.utils.alignment import post_unload
 
 
 def resolve_calibrated_profiles_config(
@@ -248,6 +249,10 @@ def maybe_build_profiles(
     profiles, protected_fields = apply_profile_overrides(profiles, overrides)
     profiles = _apply_profile_coherence_alignment(profiles, config, protected_fields)
     profiles = _apply_vehicle_ownership_alignment(profiles, config, protected_fields)
+    if pc.coherence_alignment_backend == "rerank" and pc.coherence_alignment_base_url:
+        post_unload(pc.coherence_alignment_base_url, pc.coherence_alignment_model)
+    if pc.ownership_alignment_backend == "rerank" and pc.ownership_alignment_base_url:
+        post_unload(pc.ownership_alignment_base_url, pc.ownership_alignment_model)
     typer.echo(f"Generated {len(profiles)} agent profiles")
     if pc.output:
         out = Path(pc.output)
