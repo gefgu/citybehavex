@@ -6,11 +6,16 @@ from .agents import (
     HOUSEHOLD_TYPES,
     ILOSTAT_JOBS,
     AgentProfile,
+    PartialAgentProfile,
+    apply_profile_overrides,
     generate_profiles,
+    load_profile_overrides,
     load_profiles,
     profile_to_narrative,
     profiles_to_frame,
     reroll_profile_demographics,
+    resolve_profile_override_tiles,
+    validate_profile_override_tiles,
 )
 from .calibration import WEIGHT_GROUPS, calibrate_demographic_weights
 from .coherence_alignment import (
@@ -28,6 +33,7 @@ from .ownership_alignment import (
 
 __all__ = [
     "AgentProfile",
+    "PartialAgentProfile",
     "AgentProfilesConfig",
     "EDUCATION_LEVELS",
     "HEALTH_LEVELS",
@@ -38,10 +44,14 @@ __all__ = [
     "calibrate_demographic_weights",
     "compute_profiles",
     "generate_profiles",
+    "apply_profile_overrides",
     "load_profiles",
+    "load_profile_overrides",
     "profile_to_narrative",
     "profiles_to_frame",
     "reroll_profile_demographics",
+    "resolve_profile_override_tiles",
+    "validate_profile_override_tiles",
     "COHERENCE_CANDIDATE_TEXT",
     "expand_coherence_scores",
     "score_profile_coherence_alignment",

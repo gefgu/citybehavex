@@ -18,6 +18,7 @@ from typing import Optional
 import numpy as np
 import pandas as pd
 from fastmob.network import haversine_m_batch
+from fastmob.utils._common import _factorize_arrow_values
 from pydantic import BaseModel, ConfigDict, Field
 
 from citybehavex.math import (
@@ -88,6 +89,32 @@ class AgentProfile(BaseModel):
     bike_ownership_score: Optional[float] = Field(default=None, ge=0.0, le=1.0)
     home_tile: int  # index into tessellation DataFrame
     work_tile: int  # index into tessellation DataFrame
+
+
+class PartialAgentProfile(BaseModel):
+    """A user-supplied subset of fields for one generated agent profile.
+
+    ``uid`` identifies the simulated agent.  Every other field is optional:
+    non-null values override the generated profile while omitted/null values
+    retain their generated value.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    uid: int
+    gender: str | None = None
+    name: str | None = None
+    age: int | None = None
+    education: str | None = None
+    health: int | None = None
+    household: str | None = None
+    job: str | None = None
+    has_car: bool | None = None
+    has_bike: bool | None = None
+    car_ownership_score: float | None = Field(default=None, ge=0.0, le=1.0)
+    bike_ownership_score: float | None = Field(default=None, ge=0.0, le=1.0)
+    home_tile: int | str | None = None
+    work_tile: int | str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -318,11 +345,13 @@ def reroll_profile_demographics(
     indices: np.ndarray | list[int],
     config: AgentProfilesConfig,
     rng: np.random.Generator,
+    protected_fields: list[set[str]] | None = None,
 ) -> list[AgentProfile]:
     """Resample demographic attributes for selected profiles.
 
     Spatial anchors and transport ownership are intentionally preserved so this
     can be used as a coherence repair step before vehicle ownership alignment.
+    Fields present in ``protected_fields`` are also retained for their agent.
     """
     selected = np.asarray(indices, dtype=np.int64)
     if len(selected) == 0:
@@ -347,19 +376,23 @@ def reroll_profile_demographics(
 
     updated = list(profiles)
     for local_idx, profile_idx in enumerate(selected):
-        profile = updated[int(profile_idx)]
+        idx = int(profile_idx)
+        profile = updated[idx]
+        protected = protected_fields[idx] if protected_fields is not None else set()
         is_male = bool(genders[local_idx])
-        pool = male_pool if is_male else female_pool
-        updated[int(profile_idx)] = profile.model_copy(
-            update={
-                "gender": "male" if is_male else "female",
-                "name": pool[int(rng.integers(0, len(pool)))],
-                "age": int(ages[local_idx]),
-                "education": EDUCATION_LEVELS[educations[local_idx]],
-                "health": HEALTH_LEVELS[healths[local_idx]],
-                "household": HOUSEHOLD_TYPES[households[local_idx]],
-                "job": ILOSTAT_JOBS[jobs[local_idx]],
-            }
+        effective_is_male = profile.gender == "male" if "gender" in protected else is_male
+        pool = male_pool if effective_is_male else female_pool
+        candidates = {
+            "gender": "male" if is_male else "female",
+            "name": pool[int(rng.integers(0, len(pool)))],
+            "age": int(ages[local_idx]),
+            "education": EDUCATION_LEVELS[educations[local_idx]],
+            "health": HEALTH_LEVELS[healths[local_idx]],
+            "household": HOUSEHOLD_TYPES[households[local_idx]],
+            "job": ILOSTAT_JOBS[jobs[local_idx]],
+        }
+        updated[idx] = profile.model_copy(
+            update={field: value for field, value in candidates.items() if field not in protected}
         )
     return updated
 
@@ -386,6 +419,148 @@ def load_profiles(path: str, n: int) -> Optional[list[AgentProfile]]:
         return [AgentProfile.model_validate(entry) for entry in raw[:n]]
     except Exception:  # noqa: BLE001
         return None
+
+
+def _profile_override_records(path: Path) -> list[dict]:
+    if path.suffix.lower() == ".parquet":
+        return pd.read_parquet(path).to_dict(orient="records")
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(raw, list):
+        raise ValueError("profile overrides JSON must contain a list of records")
+    if not all(isinstance(entry, dict) for entry in raw):
+        raise ValueError("profile overrides must contain object records")
+    return raw
+
+
+def _null_to_none(value: object) -> object:
+    """Normalize pandas' missing scalars without treating containers as null."""
+    if value is None:
+        return None
+    try:
+        missing = pd.isna(value)
+    except (TypeError, ValueError):
+        return value
+    return None if isinstance(missing, (bool, np.bool_)) and missing else value
+
+
+def load_profile_overrides(path: str, n: int) -> dict[int, dict[str, object]] | None:
+    """Load strict, sparse profile overrides keyed by one-based agent ``uid``.
+
+    Missing files retain the historical fallback-to-generation behavior.  A
+    present but malformed file is an error, so a requested fixed location can
+    never be silently ignored.
+    """
+    p = Path(path)
+    if not p.exists():
+        return None
+
+    try:
+        records = _profile_override_records(p)
+    except Exception as exc:  # noqa: BLE001
+        raise ValueError(f"could not read profile overrides from {p}: {exc}") from exc
+
+    overrides: dict[int, dict[str, object]] = {}
+    for row_number, record in enumerate(records, start=1):
+        cleaned = {key: _null_to_none(value) for key, value in record.items()}
+        try:
+            parsed = PartialAgentProfile.model_validate(cleaned)
+        except Exception as exc:  # noqa: BLE001
+            raise ValueError(f"invalid profile override at row {row_number}: {exc}") from exc
+
+        uid = parsed.uid
+        if not 1 <= uid <= n:
+            raise ValueError(f"profile override uid {uid} must be in 1..{n}")
+        if uid in overrides:
+            raise ValueError(f"duplicate profile override uid {uid}")
+        overrides[uid] = parsed.model_dump(exclude_unset=True, exclude_none=True)
+    return overrides
+
+
+def apply_profile_overrides(
+    profiles: list[AgentProfile],
+    overrides: dict[int, dict[str, object]],
+) -> tuple[list[AgentProfile], list[set[str]]]:
+    """Overlay supplied fields and return their per-agent protection masks."""
+    updated: list[AgentProfile] = []
+    protected_fields: list[set[str]] = []
+    for profile in profiles:
+        supplied = overrides.get(profile.uid, {})
+        protected = set(supplied).difference({"uid"})
+        updated.append(profile.model_copy(update={key: supplied[key] for key in protected}))
+        protected_fields.append(protected)
+    return updated, protected_fields
+
+
+def resolve_profile_override_tiles(
+    overrides: dict[int, dict[str, object]], tessellation_df: pd.DataFrame
+) -> dict[int, dict[str, object]]:
+    """Resolve integer indices and string ``tile_id`` values to row indices.
+
+    The runtime core addresses locations by row index.  String IDs are
+    factorized with fastmob's Rust-backed helper to keep the ID normalization
+    path efficient while retaining the tessellation's canonical row order.
+    """
+    n_tiles = len(tessellation_df)
+    resolved = {uid: dict(supplied) for uid, supplied in overrides.items()}
+    string_references = [
+        value
+        for supplied in resolved.values()
+        for field in ("home_tile", "work_tile")
+        if isinstance(value := supplied.get(field), str)
+    ]
+
+    id_to_index: dict[str, int] = {}
+    if string_references:
+        if "tile_id" not in tessellation_df.columns:
+            raise ValueError("string profile location IDs require a tessellation tile_id column")
+        raw_ids = tessellation_df["tile_id"]
+        if raw_ids.isna().any():
+            raise ValueError("tessellation tile_id contains missing values")
+        normalized_ids = raw_ids.map(str).to_numpy(dtype=object)
+        if len(set(normalized_ids)) != len(normalized_ids):
+            raise ValueError("tessellation tile_id values must be unique for profile ID lookup")
+        _, representatives = _factorize_arrow_values(normalized_ids.tolist(), sort=False)
+        for representative in np.asarray(representatives, dtype=np.int64):
+            id_to_index[normalized_ids[representative]] = int(representative)
+
+    for uid, supplied in resolved.items():
+        for field in ("home_tile", "work_tile"):
+            if field not in supplied:
+                continue
+            tile = supplied[field]
+            if isinstance(tile, str):
+                try:
+                    supplied[field] = id_to_index[tile]
+                except KeyError as exc:
+                    raise ValueError(
+                        f"profile override uid {uid} has unknown {field} ID {tile!r}"
+                    ) from exc
+                continue
+            if not isinstance(tile, (int, np.integer)) or isinstance(tile, bool):
+                raise ValueError(f"profile override uid {uid} has non-integer {field}: {tile!r}")
+            if not 0 <= int(tile) < n_tiles:
+                raise ValueError(
+                    f"profile override uid {uid} has {field}={tile}; "
+                    f"expected an index in 0..{n_tiles - 1}"
+                )
+            supplied[field] = int(tile)
+    return resolved
+
+
+def validate_profile_override_tiles(overrides: dict[int, dict[str, object]], n_tiles: int) -> None:
+    """Ensure explicitly supplied legacy integer indices address the table."""
+    for uid, supplied in overrides.items():
+        for field in ("home_tile", "work_tile"):
+            if field not in supplied:
+                continue
+            tile = supplied[field]
+            if not isinstance(tile, (int, np.integer)) or isinstance(tile, bool):
+                raise ValueError(f"profile override uid {uid} has non-integer {field}: {tile!r}")
+            if not 0 <= int(tile) < n_tiles:
+                raise ValueError(
+                    f"profile override uid {uid} has {field}={tile}; "
+                    f"expected an index in 0..{n_tiles - 1}"
+                )
 
 
 def profiles_to_frame(profiles: list[AgentProfile]) -> pd.DataFrame:

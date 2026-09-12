@@ -288,6 +288,23 @@ The major configurable modules are:
 - `social`: initial friendship formation and co-location-based tie updates
 - `embedding`: optional embedding backend and cache behavior
 
+To fix locations while retaining generated demographics, set
+`profiles.profiles_path` to a JSON or Parquet table keyed by one-based `uid`.
+Only supplied, non-null fields override generation. Integer locations are
+legacy 0-based tessellation row indices; string locations are matched against
+the tessellation's `tile_id` column, so POI IDs, UUIDs, H3 IDs, and HOME-anchor
+IDs can be supplied directly:
+
+```json
+[
+  {"uid": 1, "home_tile": "home_anchor_17", "work_tile": "88309959d1fffff"},
+  {"uid": 2, "home_tile": "home_anchor_42", "work_tile": "aadfd6a4-ba82-46ae-92da-973e3c91aaee"}
+]
+```
+
+Tile indices address the runtime tessellation, after any configured residential
+home anchors are appended.
+
 ## Data Notes
 
 The paper evaluates CityBehavEx with Greater Paris, Shanghai, and YJMOB mobility
