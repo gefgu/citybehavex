@@ -15,17 +15,20 @@ from citybehavex.llm_diaries import DiariesConfig, DiaryValidationError
 from citybehavex.profiles import (
     AgentProfile,
     AgentProfilesConfig,
+    apply_profile_overrides,
     calibrate_demographic_weights,
     expand_coherence_scores,
     expand_vehicle_scores,
     generate_profiles,
-    load_profiles,
+    load_profile_overrides,
     profile_to_narrative,
     profiles_to_frame,
     reroll_profile_demographics,
+    resolve_profile_override_tiles,
     score_profile_coherence_alignment,
     score_vehicle_ownership_alignment,
 )
+
 
 def resolve_calibrated_profiles_config(
     pc: AgentProfilesConfig, llm_config: LLMConfig, diaries_config: DiariesConfig
@@ -65,6 +68,7 @@ def _profile_city_context(diaries_config: DiariesConfig) -> str | None:
 def _apply_vehicle_ownership_alignment(
     profiles: list[AgentProfile],
     config: CityBehavExConfig,
+    protected_fields: list[set[str]] | None = None,
 ) -> list[AgentProfile]:
     pc = config.profiles
     if (
@@ -105,17 +109,20 @@ def _apply_vehicle_ownership_alignment(
     bike_score = np.clip(agent_scores[:, 1], 0.0, 1.0)
     has_car = rng.random(len(profiles)) < car_score
     has_bike = rng.random(len(profiles)) < bike_score
-    updated = [
-        profile.model_copy(
-            update={
-                "has_car": bool(has_car[idx]),
-                "has_bike": bool(has_bike[idx]),
-                "car_ownership_score": float(car_score[idx]),
-                "bike_ownership_score": float(bike_score[idx]),
-            }
+    updated = []
+    for idx, profile in enumerate(profiles):
+        protected = protected_fields[idx] if protected_fields is not None else set()
+        candidates = {
+            "has_car": bool(has_car[idx]),
+            "has_bike": bool(has_bike[idx]),
+            "car_ownership_score": float(car_score[idx]),
+            "bike_ownership_score": float(bike_score[idx]),
+        }
+        updated.append(
+            profile.model_copy(
+                update={field: value for field, value in candidates.items() if field not in protected}
+            )
         )
-        for idx, profile in enumerate(profiles)
-    ]
     typer.echo(
         "Vehicle ownership alignment scores: "
         f"{len(clusters.narratives)} profile clusters for {len(profiles)} profiles; "
@@ -141,6 +148,7 @@ def _coherence_rerun_indices(scores: np.ndarray, threshold: float, rng: np.rando
 def _apply_profile_coherence_alignment(
     profiles: list[AgentProfile],
     config: CityBehavExConfig,
+    protected_fields: list[set[str]] | None = None,
 ) -> list[AgentProfile]:
     pc = config.profiles
     if (
@@ -199,7 +207,9 @@ def _apply_profile_coherence_alignment(
         )
         if len(rerun_indices) == 0:
             break
-        repaired = reroll_profile_demographics(repaired, rerun_indices, pc, rng)
+        repaired = reroll_profile_demographics(
+            repaired, rerun_indices, pc, rng, protected_fields=protected_fields
+        )
 
     if metadata_frames and pc.output:
         alignment_path = Path(pc.output).with_name(
@@ -222,25 +232,22 @@ def maybe_build_profiles(
         return None
     n = config.simulation.agents
     pc = config.profiles
+    overrides: dict[int, dict[str, object]] = {}
     if pc.profiles_path:
-        loaded = load_profiles(pc.profiles_path, n)
-        if loaded is not None:
-            typer.echo(f"Loaded {len(loaded)} agent profiles from {pc.profiles_path}")
-            loaded = _apply_profile_coherence_alignment(loaded, config)
-            loaded = _apply_vehicle_ownership_alignment(loaded, config)
-            if pc.output:
-                out = Path(pc.output)
-                out.parent.mkdir(parents=True, exist_ok=True)
-                profiles_to_frame(loaded).to_parquet(str(out), index=False)
-                typer.echo(f"Saved agent profiles -> {pc.output}")
-            return loaded
-        typer.echo(f"Warning: profiles_path {pc.profiles_path!r} not usable — generating")
+        loaded_overrides = load_profile_overrides(pc.profiles_path, n)
+        if loaded_overrides is None:
+            typer.echo(f"Warning: profiles_path {pc.profiles_path!r} not found — generating")
+        else:
+            overrides = loaded_overrides
+            overrides = resolve_profile_override_tiles(overrides, tessellation_df)
+            typer.echo(f"Loaded {len(overrides)} profile override records from {pc.profiles_path}")
     pc = resolve_calibrated_profiles_config(pc, config.llm, config.diaries)
     config = config.model_copy(update={"profiles": pc})
     rng = np.random.default_rng(config.simulation.random_state)
     profiles = generate_profiles(n, pc, rng, tessellation_df, relevance_column, home_tile_pool=home_tile_pool)
-    profiles = _apply_profile_coherence_alignment(profiles, config)
-    profiles = _apply_vehicle_ownership_alignment(profiles, config)
+    profiles, protected_fields = apply_profile_overrides(profiles, overrides)
+    profiles = _apply_profile_coherence_alignment(profiles, config, protected_fields)
+    profiles = _apply_vehicle_ownership_alignment(profiles, config, protected_fields)
     typer.echo(f"Generated {len(profiles)} agent profiles")
     if pc.output:
         out = Path(pc.output)

@@ -11,6 +11,7 @@ class AgentProfilesConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     enabled: bool = False
+    # Optional JSON/parquet full profiles or sparse, uid-keyed field overrides.
     profiles_path: Optional[str] = None
     output: str = "agent_profiles.parquet"
     # When true, education/health/household/job weights below are recalibrated by
