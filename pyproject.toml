@@ -31,6 +31,7 @@ dependencies = [
     "seaborn>=0.13.2",
     "shapely>=2.1.2",
     "fastmob[data,generation,tessellation,diversity,visualization]>=0.1.2",
+    "fastmob-vis",
     "tqdm>=4.67.3",
     "typer>=0.12.0",
 ]
@@ -41,18 +42,18 @@ dependencies = [
 # rely on cached `diary_embeddings.npz`, or set `embedding.enabled: false` to fall
 # back to identity similarity (exact preferential return).
 embeddings = [
-    # Keep vLLM on the CUDA 12.4/PyTorch 2.6 line for compatibility with
-    # systems whose NVIDIA driver reports CUDA driver API 12040.
-    "vllm>=0.8.5,<0.9.0",
-    "torch==2.6.0",
-    "transformers>=4.51.1,<5.0.0",
+    # vLLM 0.24 and PyTorch 2.11 provide CUDA 13 / RTX 5090 support.
+    "vllm>=0.24.0,<0.25.0",
+    "torch>=2.11.0,<2.12.0",
+    "transformers>=4.51.1,<6.0.0",
 ]
 finetuning = [
+    # CUDA 13 / PyTorch 2.11 includes sm_120 kernels required by RTX 5090.
     "accelerate>=0.26.0",
     "datasets>=3.0.0",
     "sentence-transformers>=3.0.0",
-    "torch>=2.6.0",
-    "transformers>=4.51.1,<5.0.0",
+    "torch>=2.11.0,<2.12.0",
+    "transformers>=4.51.1,<6.0.0",
 ]
 [project.scripts]
 citybehavex = "citybehavex.cli:app"
@@ -62,6 +63,20 @@ module-name = "citybehavex._core"
 python-source = "."
 manifest-path = "citybehavex-py/Cargo.toml"
 include = ["citybehavex/category/*.csv"]
+
+# PyPI's torch wheel is CPU-only. Pin the PyTorch CUDA 13 index so `uv sync`
+# installs a build that contains RTX 5090 (sm_120) kernels.
+[[tool.uv.index]]
+name = "pytorch-cu130"
+url = "https://download.pytorch.org/whl/cu130"
+explicit = true
+
+[tool.uv.sources]
+fastmob = { path = "../fastmob", editable = true }
+fastmob-vis = { path = "../fastmob/fastmob-vis", editable = true }
+torch = { index = "pytorch-cu130" }
+torchvision = { index = "pytorch-cu130" }
+torchaudio = { index = "pytorch-cu130" }
 
 [dependency-groups]
 dev = [
