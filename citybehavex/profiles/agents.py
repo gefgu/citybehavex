@@ -176,46 +176,62 @@ def _distance_friction_weights(dist_km: np.ndarray, config: AgentProfilesConfig)
     return friction
 
 
-def _sample_conditional_work_tiles(
-    home_tiles: np.ndarray,
+def _sample_work_tiles(
+    n: int,
     work_pool: np.ndarray,
     rel_vals: np.ndarray,
+    config: AgentProfilesConfig,
+    rng: np.random.Generator,
+) -> np.ndarray:
+    """Sample workplaces from the POI/building-derived work score."""
+    return work_pool[
+        sample_weighted_indices(
+            _work_attractiveness_weights(rel_vals[work_pool], config), n, rng
+        )
+    ]
+
+
+def _sample_conditional_home_tiles(
+    work_tiles: np.ndarray,
+    home_pool: np.ndarray,
     tessellation_df: pd.DataFrame,
     config: AgentProfilesConfig,
     rng: np.random.Generator,
 ) -> np.ndarray:
+    """Choose residential HOME anchors conditional on each sampled workplace."""
     if config.work_distance_model == "none":
-        return work_pool[sample_weighted_indices(rel_vals[work_pool], len(home_tiles), rng)]
+        sampled = home_pool[rng.integers(len(home_pool), size=len(work_tiles))]
+        works_from_home = rng.random(len(work_tiles)) < config.work_from_home_probability
+        sampled[works_from_home] = work_tiles[works_from_home]
+        return sampled
 
     lng_col = "lng" if "lng" in tessellation_df.columns else "lon"
     if "lat" not in tessellation_df.columns or lng_col not in tessellation_df.columns:
-        return work_pool[sample_weighted_indices(rel_vals[work_pool], len(home_tiles), rng)]
+        return home_pool[rng.integers(len(home_pool), size=len(work_tiles))]
 
     lat = pd.to_numeric(tessellation_df["lat"], errors="coerce").to_numpy(dtype=float)
     lng = pd.to_numeric(tessellation_df[lng_col], errors="coerce").to_numpy(dtype=float)
-    work_lat = lat[work_pool]
-    work_lng = lng[work_pool]
-    base_work_weights = rel_vals[work_pool].astype(float, copy=False)
-    adjusted_work_weights = _work_attractiveness_weights(base_work_weights, config)
-    sampled = np.empty(len(home_tiles), dtype=np.int64)
-    global_fallback = work_pool[sample_weighted_indices(adjusted_work_weights, len(home_tiles), rng)]
+    home_lat = lat[home_pool]
+    home_lng = lng[home_pool]
+    sampled = np.empty(len(work_tiles), dtype=np.int64)
+    global_fallback = home_pool[rng.integers(len(home_pool), size=len(work_tiles))]
 
-    for i, home_tile in enumerate(home_tiles):
+    for i, work_tile in enumerate(work_tiles):
         if rng.random() < config.work_from_home_probability:
-            sampled[i] = home_tile
+            sampled[i] = work_tile
             continue
 
-        home_lat = lat[home_tile]
-        home_lng = lng[home_tile]
-        if not np.isfinite(home_lat) or not np.isfinite(home_lng):
+        work_lat = lat[work_tile]
+        work_lng = lng[work_tile]
+        if not np.isfinite(work_lat) or not np.isfinite(work_lng):
             sampled[i] = global_fallback[i]
             continue
 
         dist_km = haversine_m_batch(
-            np.full_like(work_lat, home_lat, dtype=np.float64),
-            np.full_like(work_lng, home_lng, dtype=np.float64),
-            work_lat,
-            work_lng,
+            np.full_like(home_lat, work_lat, dtype=np.float64),
+            np.full_like(home_lng, work_lng, dtype=np.float64),
+            home_lat,
+            home_lng,
         ) / 1000.0
         finite = np.isfinite(dist_km)
         within = finite & (dist_km <= config.work_distance_max_km)
@@ -224,15 +240,12 @@ def _sample_conditional_work_tiles(
             sampled[i] = global_fallback[i]
             continue
 
-        candidate_weights = adjusted_work_weights[candidate_mask] * _distance_friction_weights(
-            dist_km[candidate_mask],
-            config,
-        )
+        candidate_weights = _distance_friction_weights(dist_km[candidate_mask], config)
         if candidate_weights.sum() <= 0:
             sampled[i] = global_fallback[i]
             continue
         choice = sample_weighted_indices(candidate_weights, 1, rng)[0]
-        sampled[i] = work_pool[candidate_mask][choice]
+        sampled[i] = home_pool[candidate_mask][choice]
     return sampled
 
 
@@ -247,10 +260,9 @@ def generate_profiles(
 ) -> list[AgentProfile]:
     """Generate ``n`` agent profiles using the distribution config.
 
-    Home tiles are sampled from `home_tile_pool` when provided (typically
-    synthetic residential anchors appended to the simulator location table),
-    otherwise uniformly for legacy/non-augmented runs.
-    Work tiles are sampled weighted by POI/relevance count (commercial bias).
+    WORK tiles are sampled first from the POI/building-derived relevance score.
+    HOME tiles are then sampled from `home_tile_pool` (typically synthetic,
+    building-backed residential anchors) using the configured commute prior.
     """
     n_tiles = len(tessellation_df)
     if n_tiles == 0:
@@ -274,16 +286,21 @@ def generate_profiles(
         rel_vals = np.ones(n_tiles, dtype=float)
 
     if home_tile_pool is not None:
-        pool = np.asarray(home_tile_pool, dtype=np.int64)
-        if len(pool) == 0:
+        home_pool = np.asarray(home_tile_pool, dtype=np.int64)
+        if len(home_pool) == 0:
             raise ValueError("home_tile_pool is empty — cannot assign home tiles")
-        home_tiles = rng.choice(pool, size=n, replace=len(pool) < n)
     else:
-        home_tiles = rng.integers(0, n_tiles, size=n)
-    work_tiles = _sample_conditional_work_tiles(
-        home_tiles,
+        home_pool = np.arange(n_tiles, dtype=np.int64)
+    work_tiles = _sample_work_tiles(
+        n,
         work_pool,
         rel_vals,
+        config,
+        rng,
+    )
+    home_tiles = _sample_conditional_home_tiles(
+        work_tiles,
+        home_pool,
         tessellation_df,
         config,
         rng,

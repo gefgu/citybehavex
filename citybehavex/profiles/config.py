@@ -25,10 +25,13 @@ class AgentProfilesConfig(BaseModel):
     overture_building_features_path: Optional[str] = None
     overture_building_features_output: Optional[str] = None
     overture_feature_h3_resolution: Optional[int] = Field(default=None, ge=0, le=15)
+    # Retained for YAML compatibility. HOME anchors now use building counts only;
+    # commute distance is applied after WORK is selected.
     home_poi_inverse_weight: float = Field(default=0.5, ge=0)
     home_building_weight: float = Field(default=1.0, ge=0)
     work_poi_weight: float = Field(default=0.75, ge=0)
     work_building_weight: float = Field(default=1.0, ge=0)
+    # Commute prior used to choose HOME conditional on the sampled WORK tile.
     work_distance_model: Literal["exponential", "none"] = "exponential"
     work_distance_exponential_lambda: float = Field(default=0.3, gt=0)
     work_distance_max_km: float = Field(default=60.0, gt=0)
