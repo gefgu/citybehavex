@@ -1429,7 +1429,7 @@ def test_home_anchors_are_appended_and_profiles_use_only_home_pool(tmp_path):
     assert {p.work_tile for p in profiles}.issubset({0, 1})
 
 
-def test_work_distance_model_none_preserves_relevance_weighted_sampling():
+def test_work_first_sampling_uses_relevance_when_commute_model_is_none():
     tess = pd.DataFrame(
         {
             "tile_id": ["near_work", "far_work", "home"],
@@ -1455,8 +1455,8 @@ def test_work_distance_model_none_preserves_relevance_weighted_sampling():
     )
     work_counts = pd.Series([p.work_tile for p in profiles]).value_counts()
 
-    assert work_counts.get(1, 0) > work_counts.get(0, 0) * 20
-    assert {p.home_tile for p in profiles} == {2}
+    assert work_counts.get(1, 0) > work_counts.get(0, 0) * 5
+    assert all(p.home_tile == p.work_tile for p in profiles)
 
 
 def test_conditional_work_sampling_excludes_home_rows_from_work_pool():
@@ -1513,7 +1513,7 @@ def test_conditional_work_sampling_expands_when_radius_has_no_candidates():
     assert {p.work_tile for p in profiles} == {0}
 
 
-def test_work_from_home_probability_assigns_work_to_home_tile():
+def test_work_from_home_probability_assigns_home_to_sampled_work_tile():
     tess = pd.DataFrame(
         {
             "tile_id": ["work", "home"],
@@ -1534,17 +1534,17 @@ def test_work_from_home_probability_assigns_work_to_home_tile():
         home_tile_pool=np.array([1]),
     )
 
-    assert {p.home_tile for p in profiles} == {1}
-    assert {p.work_tile for p in profiles} == {1}
+    assert {p.work_tile for p in profiles} == {0}
+    assert {p.home_tile for p in profiles} == {0}
 
 
-def test_exponential_work_distance_favors_nearer_candidates_monotonically():
+def test_exponential_commute_distance_favors_nearer_home_candidates_monotonically():
     tess = pd.DataFrame(
         {
-            "tile_id": ["near_work", "mid_work", "far_work", "home"],
-            "lat": [0.01, 0.05, 0.20, 0.0],
+            "tile_id": ["work", "near_home", "mid_home", "far_home"],
+            "lat": [0.0, 0.01, 0.05, 0.20],
             "lng": [0.0, 0.0, 0.0, 0.0],
-            "purpose": ["WORK", "WORK", "WORK", "HOME"],
+            "purpose": ["WORK", "HOME", "HOME", "HOME"],
             "relevance": [1.0, 1.0, 1.0, 1.0],
         }
     )
@@ -1562,20 +1562,21 @@ def test_exponential_work_distance_favors_nearer_candidates_monotonically():
         np.random.default_rng(11),
         tess,
         "relevance",
-        home_tile_pool=np.array([3]),
+        home_tile_pool=np.array([1, 2, 3]),
     )
-    counts = pd.Series([p.work_tile for p in profiles]).value_counts()
+    counts = pd.Series([p.home_tile for p in profiles]).value_counts()
 
-    assert counts.get(0, 0) > counts.get(1, 0) > counts.get(2, 0)
+    assert {p.work_tile for p in profiles} == {0}
+    assert counts.get(1, 0) > counts.get(2, 0) > counts.get(3, 0)
 
 
 def test_density_correction_reduces_far_ring_selection():
     tess = pd.DataFrame(
         {
-            "tile_id": ["near_work", "far_work_1", "far_work_2", "far_work_3", "home"],
-            "lat": [0.01, 0.20, 0.20, 0.20, 0.0],
-            "lng": [0.0, 0.00, 0.01, -0.01, 0.0],
-            "purpose": ["WORK", "WORK", "WORK", "WORK", "HOME"],
+            "tile_id": ["work", "near_home", "far_home_1", "far_home_2", "far_home_3"],
+            "lat": [0.0, 0.01, 0.20, 0.20, 0.20],
+            "lng": [0.0, 0.00, 0.00, 0.01, -0.01],
+            "purpose": ["WORK", "HOME", "HOME", "HOME", "HOME"],
             "relevance": [1.0, 1.0, 1.0, 1.0, 1.0],
         }
     )
@@ -1595,7 +1596,7 @@ def test_density_correction_reduces_far_ring_selection():
         np.random.default_rng(12),
         tess,
         "relevance",
-        home_tile_pool=np.array([4]),
+        home_tile_pool=np.array([1, 2, 3, 4]),
     )
     corrected_profiles = generate_profiles(
         1200,
@@ -1603,15 +1604,15 @@ def test_density_correction_reduces_far_ring_selection():
         np.random.default_rng(12),
         tess,
         "relevance",
-        home_tile_pool=np.array([4]),
+        home_tile_pool=np.array([1, 2, 3, 4]),
     )
-    base_far_share = np.mean([p.work_tile in {1, 2, 3} for p in base_profiles])
-    corrected_far_share = np.mean([p.work_tile in {1, 2, 3} for p in corrected_profiles])
+    base_far_share = np.mean([p.home_tile in {2, 3, 4} for p in base_profiles])
+    corrected_far_share = np.mean([p.home_tile in {2, 3, 4} for p in corrected_profiles])
 
     assert corrected_far_share < base_far_share * 0.5
 
 
-def test_log1p_attractiveness_keeps_local_work_competitive_with_far_megahub():
+def test_log1p_work_attractiveness_favors_higher_scoring_work_tile():
     tess = pd.DataFrame(
         {
             "tile_id": ["near_work", "far_megahub", "home"],
@@ -1639,7 +1640,7 @@ def test_log1p_attractiveness_keeps_local_work_competitive_with_far_megahub():
     )
     work_counts = pd.Series([p.work_tile for p in profiles]).value_counts()
 
-    assert work_counts.get(0, 0) > work_counts.get(1, 0)
+    assert work_counts.get(1, 0) > work_counts.get(0, 0)
 
 
 def test_poi_building_work_scores_favor_high_poi_and_building_cells(tmp_path):
@@ -1677,7 +1678,7 @@ def test_poi_building_work_scores_favor_high_poi_and_building_cells(tmp_path):
     assert enriched.loc[1, "work_score"] > enriched.loc[0, "work_score"]
 
 
-def test_poi_building_home_anchors_use_cached_buildings(tmp_path):
+def test_building_weighted_home_anchors_prefer_higher_building_counts(tmp_path):
     resolution = 8
     min_lng, min_lat, max_lng, max_lat = 2.30, 48.82, 2.53, 48.95
     boundary = h3.LatLngPoly(
@@ -1694,7 +1695,9 @@ def test_poi_building_home_anchors_use_cached_buildings(tmp_path):
     building_lat, building_lng = h3.cell_to_latlng(building_cell)
     poi_lat, poi_lng = h3.cell_to_latlng(poi_cell)
     building_path = tmp_path / "buildings.parquet"
-    pd.DataFrame({"h3_cell": [building_cell], "building_count": [100]}).to_parquet(building_path, index=False)
+    pd.DataFrame(
+        {"h3_cell": [building_cell, poi_cell], "building_count": [100, 1]}
+    ).to_parquet(building_path, index=False)
     tess = pd.DataFrame(
         {
             "tile_id": ["poi_dense", "residential_like"],
@@ -1717,7 +1720,6 @@ def test_poi_building_home_anchors_use_cached_buildings(tmp_path):
             "profiles": {
                 "enabled": True,
                 "home_anchor_h3_resolution": resolution,
-                "home_poi_inverse_weight": 0.0,
                 "overture_building_features_path": str(building_path),
             },
             "road_network": {"enabled": False},
@@ -1732,7 +1734,7 @@ def test_poi_building_home_anchors_use_cached_buildings(tmp_path):
 
     assert len(anchors) == 200
     assert anchor_cells.value_counts().idxmax() == building_cell
-    assert (anchor_cells == building_cell).sum() > (anchor_cells == poi_cell).sum()
+    assert (anchor_cells == building_cell).sum() > (anchor_cells == poi_cell).sum() * 4
 
 
 def test_poi_building_home_anchors_exclude_empty_no_poi_cells(tmp_path):
@@ -1804,7 +1806,7 @@ def test_default_home_anchor_cache_path_includes_method_and_resolution():
         }
     )
 
-    assert _home_anchors_output_path(config).name == "example_profiles_home_anchors_poi_building_v3_h3r8.parquet"
+    assert _home_anchors_output_path(config).name == "example_profiles_home_anchors_poi_building_v4_h3r8.parquet"
 
 
 def test_activity_column_absent_when_disabled():

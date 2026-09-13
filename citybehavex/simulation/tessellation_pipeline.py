@@ -216,7 +216,7 @@ def _home_anchors_output_path(config: CityBehavExConfig) -> Path:
     profile_out = Path(config.profiles.output)
     method = config.profiles.location_inference_method
     resolution = config.profiles.home_anchor_h3_resolution
-    return profile_out.with_name(f"{profile_out.stem}_home_anchors_{method}_v3_h3r{resolution}.parquet")
+    return profile_out.with_name(f"{profile_out.stem}_home_anchors_{method}_v4_h3r{resolution}.parquet")
 
 
 def _read_home_anchor_candidates(path: Path) -> pd.DataFrame:
@@ -257,33 +257,24 @@ def _derive_home_anchor_candidates_from_tessellation(
     if not cells:
         raise ValueError("no H3 cells found for the configured bounding box")
 
-    base_column = _base_relevance_column(config, tessellation_df, relevance_column)
-    poi_counts = _poi_counts_by_h3(tessellation_df, resolution, base_column)
     buildings = _load_or_build_building_features(config, tessellation_df, resolution)
     building_counts = buildings.set_index("h3_cell")["building_count"]
     cells = sorted(cell for cell in cells if float(building_counts.get(cell, 0.0)) > 0)
     if not cells:
         raise ValueError(
-            "POI + building HOME inference found no building cells inside the configured bbox; "
+            "building-based HOME inference found no building cells inside the configured bbox; "
             "provide a matching overture_building_features_path/cache or check the bbox/resolution"
         )
 
-    poi = np.array([poi_counts.get(cell, 0.0) for cell in cells], dtype=float)
     building = np.array([building_counts.get(cell, 0.0) for cell in cells], dtype=float)
-    poi_scaled = _minmax(poi)
-    building_scaled = _minmax(np.log1p(building))
-    pc = config.profiles
-    weights = building_scaled * (
-        pc.home_building_weight
-        + pc.home_poi_inverse_weight * (1.0 - poi_scaled)
-    )
+    weights = np.log1p(building)
     if float(weights.sum()) <= 0:
         weights = np.ones(len(cells), dtype=float)
     weights /= weights.sum()
 
     rng = np.random.default_rng(config.simulation.random_state)
     sampled_cells = rng.choice(np.asarray(cells), size=limit, p=weights, replace=True)
-    typer.echo("Derived residential HOME anchors from POI + Overture building scores")
+    typer.echo("Derived residential HOME anchors from Overture building counts")
     return _jitter_h3_cell_centers(sampled_cells, resolution, rng)
 
 
@@ -303,7 +294,7 @@ def _load_or_build_home_anchor_candidates(
         typer.echo(f"Loading cached residential HOME anchors from {out} ...")
         return _read_home_anchor_candidates(out)
 
-    typer.echo("Deriving residential HOME anchors from POI + Overture building scores ...")
+    typer.echo("Deriving residential HOME anchors from Overture building counts ...")
     anchors = _derive_home_anchor_candidates_from_tessellation(
         config,
         tessellation_df,
