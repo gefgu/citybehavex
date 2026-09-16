@@ -87,7 +87,13 @@ else
     --json "$REPORT_JSON"
 fi
 
-PYTHONPATH="" uv run python - "$DATASET" "$VARIANT" "$RUN_INDEX" "$CONFIG_PATH" "$TRAJ_PATH" "$REPORT_JSON" "$RT_MINUTES" "$MEM_GB" "$MANIFEST" <<'PYEOF'
+# flock around the manifest write: backfill_reports.sh (run in parallel to
+# reuse idle CPU while this script's simulate step is network/GPU-bound)
+# rewrites the whole file per completed report, so a plain append here could
+# otherwise land mid-rewrite and get silently dropped.
+(
+  flock -x 200
+  PYTHONPATH="" uv run python - "$DATASET" "$VARIANT" "$RUN_INDEX" "$CONFIG_PATH" "$TRAJ_PATH" "$REPORT_JSON" "$RT_MINUTES" "$MEM_GB" "$MANIFEST" <<'PYEOF'
 import json
 import sys
 from datetime import datetime, timezone
@@ -108,5 +114,6 @@ with open(manifest_path, "a") as f:
     f.write(json.dumps(row) + "\n")
 print(f"manifest row appended: {row}")
 PYEOF
+) 200>"${MANIFEST}.lock"
 
 echo "=== $TAG: done (RT=${RT_MINUTES} min, Mem=${MEM_GB} GB) ==="

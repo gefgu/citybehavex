@@ -44,7 +44,7 @@ run() {
   fi
 }
 
-VARIANTS="no_profile no_micro_sched no_social no_transport no_feedback"
+VARIANTS="no_profile no_micro_sched no_social no_transport"
 
 # Shanghai comparison-table runs already completed and applied to
 # paper/comparision_table.tex -- not repeated here.
