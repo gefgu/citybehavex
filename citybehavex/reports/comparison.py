@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import sys
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Optional
@@ -1209,6 +1211,8 @@ def trajectory_common_part_of_commuters_multi(
     """
     rows: list[tuple[int, float]] = []
     for resolution in resolutions:
+        t0 = time.perf_counter()
+        print(f"  [cpc h3={resolution}] trajectory_to_od(synth, {len(traj.df)} rows) ...", file=sys.stderr, flush=True)
         synth_od = trajectory_to_od(
             traj.df,
             resolution,
@@ -1217,6 +1221,8 @@ def trajectory_common_part_of_commuters_multi(
             lat_col=traj.lat_col,
             lng_col=traj.lng_col,
         )
+        t1 = time.perf_counter()
+        print(f"  [cpc h3={resolution}] synth_od done in {t1 - t0:.1f}s ({len(synth_od)} od rows); trajectory_to_od(real, {len(real_traj.df)} rows) ...", file=sys.stderr, flush=True)
         real_od = trajectory_to_od(
             real_traj.df,
             resolution,
@@ -1225,9 +1231,16 @@ def trajectory_common_part_of_commuters_multi(
             lat_col=real_traj.lat_col,
             lng_col=real_traj.lng_col,
         )
+        t2 = time.perf_counter()
+        print(f"  [cpc h3={resolution}] real_od done in {t2 - t1:.1f}s ({len(real_od)} od rows); building FlowDataFrames ...", file=sys.stderr, flush=True)
         synth_flow = fastmob.FlowDataFrame(synth_od, flow="count")
         real_flow = fastmob.FlowDataFrame(real_od, flow="count")
-        rows.append((resolution, common_part_of_commuters(real_flow, synth_flow)))
+        t3 = time.perf_counter()
+        print(f"  [cpc h3={resolution}] FlowDataFrames built in {t3 - t2:.1f}s; computing CPC ...", file=sys.stderr, flush=True)
+        cpc_value = common_part_of_commuters(real_flow, synth_flow)
+        t4 = time.perf_counter()
+        print(f"  [cpc h3={resolution}] CPC={cpc_value:.4f} computed in {t4 - t3:.1f}s (resolution total {t4 - t0:.1f}s)", file=sys.stderr, flush=True)
+        rows.append((resolution, cpc_value))
     return rows
 
 
@@ -1403,6 +1416,7 @@ def generate_comparison_report(
         )
 
     typer.echo("Computing mobility metrics ...")
+    _mobility_metrics_t0 = time.perf_counter()
 
     # When a cached road graph is supplied, recompute jump lengths / radius of
     # gyration as road-network distance (instead of fastmob's straight-line
@@ -1498,9 +1512,13 @@ def generate_comparison_report(
     w_rog = wasserstein_distance(synth_rog, real_rog)
     metrics["wasserstein"]["radius_of_gyration_km"] = w_rog
 
+    print(f"[timing] mobility metrics (jump/visits/rog) took {time.perf_counter() - _mobility_metrics_t0:.1f}s", file=sys.stderr, flush=True)
+
     if "cpc" in enabled_sections:
         typer.echo("Computing Common Part of Commuters ...")
+        _cpc_t0 = time.perf_counter()
         cpc_rows = trajectory_common_part_of_commuters_multi(traj, real_traj, resolutions=CPC_H3_RESOLUTIONS)
+        print(f"[timing] CPC (all {len(CPC_H3_RESOLUTIONS)} resolutions) took {time.perf_counter() - _cpc_t0:.1f}s total", file=sys.stderr, flush=True)
     else:
         cpc_rows = []
     metrics["cpc"] = {f"h3_{resolution}": value for resolution, value in cpc_rows}
@@ -1541,11 +1559,14 @@ def generate_comparison_report(
         w_trip = wasserstein_distance(synth_trip, real_trip) if synth_trip and real_trip else None
     if w_trip is not None:
         metrics["wasserstein"]["trip_duration_min"] = w_trip
+    print(f"[timing] dwell/trip duration took {time.perf_counter() - _mobility_metrics_t0:.1f}s (cumulative since mobility metrics start)", file=sys.stderr, flush=True)
 
     network_validation = None
     nv_cfg = network_validation_config
     nv_enabled = bool(getattr(nv_cfg, "enabled", False)) if nv_cfg is not None else False
     if synthetic_path is not None and nv_enabled:
+        print("[timing] network validation starting ...", file=sys.stderr, flush=True)
+        _nv_t0 = time.perf_counter()
         try:
             network_validation, network_warnings = build_network_validation(
                 synthetic_path,
@@ -1567,6 +1588,9 @@ def generate_comparison_report(
                 typer.echo(f"Warning: network validation: {warning}", err=True)
         except Exception as exc:
             typer.echo(f"Warning: network validation skipped: {exc}", err=True)
+        print(f"[timing] network validation took {time.perf_counter() - _nv_t0:.1f}s", file=sys.stderr, flush=True)
+    else:
+        print(f"[timing] network validation skipped (enabled={nv_enabled})", file=sys.stderr, flush=True)
 
     js_rows: list[tuple[str, str, str]] = []
     synthetic_visits = None
@@ -1580,6 +1604,8 @@ def generate_comparison_report(
     location_resolution = _location_resolution(real_df, real_location_col)
 
     if need_activity_visits:
+        print("[timing] activity visits prep starting ...", file=sys.stderr, flush=True)
+        _av_t0 = time.perf_counter()
         synthetic_visit_result = _prepare_activity_visits(
             traj.df,
             label="synthetic",
@@ -1617,6 +1643,7 @@ def generate_comparison_report(
                 activity_warnings.append(observed_visit_result.warning)
         for warning in activity_warnings:
             typer.echo(f"Warning: {warning}", err=True)
+        print(f"[timing] activity visits prep took {time.perf_counter() - _av_t0:.1f}s", file=sys.stderr, flush=True)
 
     if (
         "activity_jsd" in enabled_sections
@@ -1673,6 +1700,8 @@ def generate_comparison_report(
         )
 
     if "motifs" in enabled_sections:
+        print("[timing] motifs starting ...", file=sys.stderr, flush=True)
+        _motif_t0 = time.perf_counter()
         try:
             if observed_visits is not None:
                 observed_motif_visits = _motif_visits(observed_visits)
@@ -1716,9 +1745,12 @@ def generate_comparison_report(
                     )
         except Exception as exc:
             typer.echo(f"Warning: motif metrics skipped: {exc}", err=True)
+        print(f"[timing] motifs took {time.perf_counter() - _motif_t0:.1f}s", file=sys.stderr, flush=True)
 
     transport_cfg = transport_spatial_config
     if bool(getattr(transport_cfg, "enabled", True)):
+        print("[timing] transport spatial mobility starting ...", file=sys.stderr, flush=True)
+        _transport_t0 = time.perf_counter()
         synthetic_moving_path = getattr(transport_cfg, "synthetic_moving_path", None)
         moving_path = (
             Path(synthetic_moving_path)
@@ -1771,6 +1803,7 @@ def generate_comparison_report(
                         metrics["transport_spatial"] = transport_summary
             except Exception as exc:
                 typer.echo(f"Warning: transport spatial mobility skipped: {exc}", err=True)
+        print(f"[timing] transport spatial mobility took {time.perf_counter() - _transport_t0:.1f}s", file=sys.stderr, flush=True)
 
     w_rows = [
         ("Jump lengths", f"{w_jump:.4f}", "km"),

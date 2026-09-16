@@ -118,6 +118,16 @@ def report(
         "--json",
         help="Metrics JSON output path.",
     ),
+    skip_network_validation: bool = typer.Option(
+        False,
+        "--skip-network-validation",
+        help=(
+            "Skip the social/contact-network validation section (co-presence graph "
+            "construction + degree/clustering/persistence/topological-overlap "
+            "metrics) even if the config enables it. Useful while that section is "
+            "a known slow path -- rerun without this flag later to backfill it."
+        ),
+    ),
 ):
     """Compute mobility comparison metrics and optionally write JSON.
 
@@ -130,6 +140,10 @@ def report(
     synthetic_path = synthetic or loaded.simulation.output
     real_path = comparison or loaded.comparison.path
     label = comparison_label or loaded.comparison.label
+
+    if skip_network_validation and loaded.comparison.network_validation.enabled:
+        typer.echo("Skipping network validation (--skip-network-validation) ...")
+        loaded.comparison.network_validation.enabled = False
 
     rn = loaded.road_network
     road_nodes_df = road_edges_df = None

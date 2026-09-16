@@ -44,7 +44,7 @@ llm:
   concurrency: 8
   base_url: http://200.134.10.65:8081
   api_key: none
-  model: Qwen/Qwen2.5-32B-Instruct-AWQ
+  model: qwen2.5-32b-culturellm
   diary_count: 30
   max_tokens: 768
   cache_dir: data/llm_diaries_shanghai

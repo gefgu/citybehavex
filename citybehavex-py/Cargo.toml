@@ -15,7 +15,7 @@ crate-type = ["cdylib"]
 # (gitignored) with:
 #   [patch.crates-io]
 #   fastmob-core = { path = "../../fastmob/fastmob-core" }
-fastmob-core = { version = "0.1.1", default-features = false }
+fastmob-core = { version = "0.2.0", default-features = false }
 pyo3 = "0.28.2"
 numpy = "0.28.0"
 rand = "0.8"

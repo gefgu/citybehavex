@@ -21,6 +21,7 @@ from concurrent.futures import Future
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
+import torch
 from sentence_transformers import SentenceTransformer
 from sentence_transformers.cross_encoder import CrossEncoder
 
@@ -138,6 +139,8 @@ class _CrossEncoderEntry(_Entry):
 
     def close(self) -> None:
         del self._model
+        del self._scorer
+        torch.cuda.empty_cache()
 
 
 class _EmbeddingEntry(_Entry):
@@ -155,6 +158,7 @@ class _EmbeddingEntry(_Entry):
 
     def close(self) -> None:
         del self._model
+        torch.cuda.empty_cache()
 
 
 class ModelRegistry:

@@ -60,6 +60,15 @@ JSD_METRICS = {
     "atm": (("jsd", "activity_transitions"), lambda v: v * 100),
     "dard": (("jsd", "daily_activity_profile"), lambda v: v * 100),
 }
+# The ablation table reports the shared middle spatial scale (H3 resolution
+# 8) for both flow overlap and spatiotemporal-volume distance.  Keeping the
+# resolution in one place prevents the table label and report extraction from
+# drifting apart.
+H3_ABLATION_RESOLUTION = 8
+H3_ABLATION_METRICS = {
+    "cpc": ("cpc", H3_ABLATION_RESOLUTION),
+    "stvd": ("stvd", H3_ABLATION_RESOLUTION),
+}
 
 
 def _get_nested(d: dict, path: tuple[str, ...]) -> Any:
@@ -92,6 +101,16 @@ def extract_metric(report: dict, metric_key: str) -> float | None:
         path, transform = JSD_METRICS[metric_key]
         v = _get_nested(report, path)
         return _finite_or_none(transform(v) if v is not None else None)
+    if metric_key in H3_ABLATION_METRICS:
+        section, resolution = H3_ABLATION_METRICS[metric_key]
+        # Comparison reports serialize H3 metrics as {"h3_8": value}.
+        # Accept an integer key too, so reports produced by other serializers
+        # can feed the table without a conversion pass.
+        values = report.get(section)
+        if not isinstance(values, dict):
+            return None
+        v = values.get(f"h3_{resolution}", values.get(resolution))
+        return _finite_or_none(v)
     if metric_key in NETWORK_METRICS:
         (sub,) = NETWORK_METRICS[metric_key]
         # Model columns (full, no_profile, ...) carry synthetic_vs_observed --
@@ -236,7 +255,16 @@ ABLATION_METRIC_LABELS = {
     "vpd": r"\\textit\{VPD\b",
     "atm": r"\\textit\{ATM\b",
     "dard": r"\\textit\{DARD\b",
+    "cpc": r"\\textit\{CPC \(H3 8\)\}",
+    "stvd": r"\\textit\{STVD-EMD \(H3 8\)\}",
 }
+# Only CPC is a similarity score; every other ablation metric is a distance,
+# divergence, or resource use for which smaller is better.
+HIGHER_IS_BETTER_METRICS = {"cpc"}
+# CPC is bounded in [0, 1] and meaningful differences in this experiment are
+# below one tenth; retain three decimals instead of rounding every result to
+# 0.0. Other rows retain the table-wide default precision.
+ABLATION_METRIC_DECIMALS = {"cpc": 3}
 NEW_ROW_METRICS = [
     ("degree", "Degree"),
     ("clustering", "Clustering coeff."),
@@ -302,16 +330,17 @@ def patch_ablation_tex(
             # yjmob/yjmob2 never have a matching line for these metric_keys,
             # so no dashing branch is needed here (unlike the comparison
             # table, which keeps all datasets as rows and dashes cells).
-            # Bold only the actual best (lowest, since every metric here is
-            # a distance/divergence/runtime -- lower means closer to real or
-            # cheaper) value in the row, not unconditionally "full".
+            # Bold only the actual best value in the row, not unconditionally
+            # "full". CPC is a similarity score (higher is better); the
+            # remaining metrics are distances/divergences/resource use.
             row_values = {
                 variant: results.get((dataset, variant), {}).get(metric_key)
                 for variant, col_idx in ABLATION_COLUMN_INDEX.items()
                 if col_idx < len(cells)
             }
             finite = {v: data[0] for v, data in row_values.items() if data is not None}
-            best_variant = min(finite, key=finite.get) if finite else None
+            choose_best = max if metric_key in HIGHER_IS_BETTER_METRICS else min
+            best_variant = choose_best(finite, key=finite.get) if finite else None
             for variant, col_idx in ABLATION_COLUMN_INDEX.items():
                 if col_idx >= len(cells):
                     continue
@@ -319,7 +348,8 @@ def patch_ablation_tex(
                 if cell_data is None:
                     continue
                 mean, std, n = cell_data
-                new_cell = format_cell(mean, std, n, decimals, bold=(variant == best_variant))
+                metric_decimals = ABLATION_METRIC_DECIMALS.get(metric_key, decimals)
+                new_cell = format_cell(mean, std, n, metric_decimals, bold=(variant == best_variant))
                 cells[col_idx] = replace_cell_value(cells[col_idx], new_cell)
                 changes.append(
                     f"{dataset}/{variant}/{metric_key}: n={n} mean={mean:.3f} std={std:.3f}"
@@ -335,7 +365,11 @@ def patch_ablation_tex(
                 else:
                     ref_data = results.get((dataset, "ref"), {}).get(metric_key)
                     cells[REF_COLUMN_INDEX] = replace_cell_value(
-                        cells[REF_COLUMN_INDEX], format_ref_cell(ref_data, decimals)
+                        cells[REF_COLUMN_INDEX],
+                        format_ref_cell(
+                            ref_data,
+                            ABLATION_METRIC_DECIMALS.get(metric_key, decimals),
+                        ),
                     )
                     if ref_data is not None:
                         changes.append(f"{dataset}/ref/{metric_key}: mean={ref_data[0]:.3f}")
@@ -605,7 +639,10 @@ def main(argv: Iterable[str] | None = None) -> None:
     manifest_rows = load_manifest(args.manifest)
 
     all_metric_keys = (
-        list(WASSERSTEIN_METRICS) + list(NETWORK_METRICS) + list(JSD_METRICS)
+        list(WASSERSTEIN_METRICS)
+        + list(NETWORK_METRICS)
+        + list(JSD_METRICS)
+        + list(H3_ABLATION_METRICS)
     )
     results = aggregate(manifest_rows, all_metric_keys)
 

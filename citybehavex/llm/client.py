@@ -6,7 +6,7 @@ import requests
 
 from citybehavex.llm.config import LLMConfig
 from citybehavex.llm_diaries.models import DiaryValidationError, LLMStats
-from citybehavex.utils.http import post_openai_chat_json
+from citybehavex.utils.http import CHAT_COMPLETION_INNER_RETRIES, post_openai_chat_json
 
 
 class OpenAICompatibleDiaryClient:
@@ -60,7 +60,7 @@ class OpenAICompatibleDiaryClient:
             response_format={"type": "json_object"},
             max_tokens=self.config.max_tokens,
             timeout=self.config.timeout_seconds,
-            retries=1,
+            retries=CHAT_COMPLETION_INNER_RETRIES,
             api_key=self.config.api_key,
             requests_module=self.requests,
         )
