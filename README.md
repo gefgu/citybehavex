@@ -97,7 +97,8 @@ simulation engine only — the web backend is pure Python/FastAPI and needs no
 Rust toolchain). CityBehavEx builds on `fastmob`:
 
 - [`fastmob`](https://github.com/gefgu/fastmob) — Rust-accelerated mobility
-  analysis and visualization, available from PyPI as `fastmob==0.1.2`. Its
+  analysis and visualization, available from PyPI as
+  [`fastmob==0.2.2`](https://pypi.org/project/fastmob/0.2.2/). Its
   `visualization` extra provides the Rust-backed ECharts visualizations.
 
 ## Quick Start
@@ -118,6 +119,13 @@ uv run citybehavex simulate --config configs/yjmob_simulation.yaml
 The command writes simulation outputs under the paths configured in the YAML
 file, typically inside `data/.../results/`. Existing caches are reused when
 available.
+
+> **No model training required.** Every shipped config already points at
+> CityBehavEx's five pretrained ModernBERT aligners, hosted on the
+> [Hugging Face Hub](https://huggingface.co/gefgu) and resolved automatically
+> on first use — no local checkpoints or extra setup. See
+> [Alignment Services](#alignment-services) below for the model list and how
+> to serve them locally instead.
 
 ## Web Demo
 
@@ -379,5 +387,5 @@ If you use CityBehavEx, please cite:
 }
 ```
 
-CityBehavEx depends on [`fastmob` 0.1.2](https://pypi.org/project/fastmob/0.1.2/)
-with its `visualization` extra.
+CityBehavEx depends on [`fastmob` 0.2.2](https://pypi.org/project/fastmob/0.2.2/)
+([GitHub](https://github.com/gefgu/fastmob)) with its `visualization` extra.
