@@ -109,16 +109,33 @@ rail_network:
 llm:
   base_url: "http://200.134.10.65:8081"
   api_key: "none"
-  model: "mistral-small-3.2-24b"
+  model: "qwen2.5-32b"
   diary_count: 30
   max_tokens: 768
-  concurrency: 8
+  concurrency: 24
   retries: 5
   timeout_seconds: 90.0
   cache_dir: data/llm_diaries_shanghai_h3
   validated_diaries_path: data/llm_diaries_shanghai_h3/validated_diaries.json
 
 diaries:
+  # v-recast calibration round 1 (Vf, lever diaries.schedule_guidance):
+  # synthetic mean visits/user 35.8 vs observed 40.4 (undershoot, opposite
+  # direction from gparis) -- observed is also much more SPREAD (std 26.4,
+  # p10=5.9/p90=78) than synthetic (std 8.1, p10=25/p90=45): real Shanghai
+  # has a long tail of both very-low-activity and very-high-activity days
+  # that synthetic isn't reproducing, not just a mean shift.
+  # Round 1 result (shanghai_cal_r1_run42): mixed/unclear -- vf W1 barely
+  # moved (15.64->14.70) and the mean actually went the WRONG direction
+  # (35.8->33.6, further from target 40.4; only std moved toward target,
+  # 8.1->9.9 vs target 26.4) -- the "some days quiet" half of the guidance
+  # apparently dominated the "other days busier" half. dr improved
+  # (2.125->1.906) but rg/td/dt regressed, and activity_distribution/ATM/DARD
+  # JSDs all got slightly worse (only daily_motifs and CPC improved). Not a
+  # clear net win like gparis's -- REVERTED to no guidance. Shanghai's Vf
+  # gap needs a differently-shaped intervention (the mean AND the variance
+  # both need to move, and this wording didn't reliably do either) --
+  # left as an open item, not resolved this pass -- time-boxed.
   city_profile: "Shanghai, China — one of the world's densest megacities, with extensive metro and bus networks, high-rise residential clusters, commercial districts, industrial zones, and mixed-use neighborhoods."
   city_profile_weekday: "Shanghai weekday routines: early metro/bus commutes to offices, factories, or universities; midday meals near workplaces; evening shopping or leisure along commercial streets; late returns home."
   city_profile_weekend: "Shanghai weekend routines: later mornings at home, family outings to malls, parks, or restaurants, leisure trips by metro or car, tourism in central districts."
@@ -237,5 +254,4 @@ comparison:
     synthetic_enabled: true
     location_mode: location_col
     location_col: venueId
-    max_group_size: 200
   road_network_distance: false

@@ -43,7 +43,8 @@ rail_network:
 llm:
   base_url: http://200.134.10.65:8081
   api_key: none
-  model: qwen2.5-32b-culturellm
+  model: qwen2.5-32b
+  concurrency: 24
   diary_count: 30
   max_tokens: 768
   cache_dir: data/llm_diaries_gparis

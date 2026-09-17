@@ -5,6 +5,44 @@ practical ways to improve them. Treat every suggestion as a hypothesis to test:
 change one or two knobs, rerun the simulation, then compare the same filters and
 run length.
 
+## Workflow
+
+A prior 8-round calibration pass (4 rounds each on GreaterParis and Shanghai,
+see the calibration log comments at the bottom of
+`configs/idf_home_work_from_gparis_simulation.yaml` and
+`configs/shanghai_home_work_simulation.yaml`) only ever tracked the 5 core
+Wasserstein metrics (jump lengths, radius of gyration, trip duration, dwell
+time, visits/user) while tuning levers that this guide's own tables list as
+*also* affecting other metric families (e.g. `diaries.location_count_*` also
+affects "Daily visited locations"/"Daily motifs"; `simulation.car_speed_kmh`
+changes travel time, which shifts every downstream activity's arrival/
+departure clock-time and so plausibly affects "Daily activity profile").
+Those other families were never checked and likely regressed as an
+unmonitored side effect. **Always check the full metric set after a
+calibration round, not just the metric(s) the lever you changed targets.**
+
+It was also blind bisection: a scalar Wasserstein distance says *how wrong*
+you are, not *which direction* to move the lever -- the old log is full of
+"push further" followed by "overshot, reverted" cycles that a shape
+comparison would have shortcut. `citybehavex report`'s output JSON now
+carries a `wasserstein_distributions` object alongside each scalar $W_1$
+value, with a synthetic/observed mean+median+p10+p90 summary for every core
+metric (the same shape `network_validation`'s per-metric distributions
+already had). Before changing a lever:
+
+1. Generate (or reuse) a report for the current config.
+2. Plot synthetic-vs-observed for the metric you're targeting --
+   `notebooks/07_simulation_calibration/simulation_calibration.ipynb`'s
+   `plot_distribution_comparison(tag, city)` does this directly from the
+   report JSON (mean + p10-p90 whiskers per metric, synthetic vs observed).
+   If synthetic's mean sits below observed's, the lever needs to move the
+   distribution *up* (e.g. longer trips/higher speed/more spread); above
+   observed, move it down. This replaces guessing a direction from the
+   scalar alone.
+3. Change the lever, rerun, replot, and also re-check `load_full_metrics()`
+   for the *other* metric families (VPD/ATM/DARD/CPC/social) before deciding
+   the round is a net win -- not just the metric you targeted.
+
 ## Distribution and Wasserstein Metrics
 
 Lower Wasserstein values are better: they mean the synthetic distribution is
@@ -86,7 +124,7 @@ too structured relative to a degree-preserving baseline.
 | Clustering coefficient | How often an agent's friends are also connected to each other. | Tune `social.similarity_temperature`, `social.home_h3_resolution`, `social.work_h3_resolution`, `social.max_ring_expansion`, and dynamic friendship thresholds. |
 | Edge persistence | Fraction of time windows in which a tie or co-presence edge recurs. | Tune `social.encounter_window_hours`, `social.regularity_threshold`, `social.friendship_update_interval_hours`, and schedule repeatability. |
 | Topological overlap | Shared-neighbor overlap for connected agents. | Tune `social.topological_overlap_threshold`, profile similarity, and `social.recast_random_chance_probability`. |
-| Observed network construction | Co-presence graph used for observed validation. | Tune `comparison.network_validation.location_mode`, `comparison.network_validation.location_col`, `comparison.network_validation.h3_resolution`, and `comparison.network_validation.max_group_size`. Bad grouping can make observed baselines too dense or too sparse. |
+| Observed network construction | Co-presence graph used for observed validation. | Tune `comparison.network_validation.location_mode`, `comparison.network_validation.location_col`, and `comparison.network_validation.h3_resolution`. Bad grouping can make observed baselines too dense or too sparse. |
 
 ## Mobility-Profile Metrics
 

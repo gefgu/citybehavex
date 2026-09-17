@@ -37,6 +37,7 @@ from fastmob.preprocessing import trajectory_to_od
 
 from citybehavex.activities import build_catalog
 from citybehavex.reports.network_validation import build_network_validation
+from fastmob.social import distribution_summary as _wasserstein_distribution_summary
 
 _DATETIME_CANDIDATES = [
     "datetime", "start_timestamp", "timestamp", "check-in_time",
@@ -1330,7 +1331,20 @@ def generate_comparison_report(
             )
     enabled_sections = set(sections) if sections is not None else set(ALL_REPORT_SECTIONS)
     need_activity_visits = bool(enabled_sections & ACTIVITY_JSD_SECTIONS)
-    metrics: dict = {"wasserstein": {}, "jsd": {}}
+    metrics: dict = {"wasserstein": {}, "wasserstein_distributions": {}, "jsd": {}}
+
+    def _record_wasserstein(name: str, value: float | None, synth_values, real_values) -> None:
+        # The scalar Wasserstein distance alone doesn't say which direction
+        # to move a calibration lever -- a companion mean/median/percentile
+        # summary for both sides (same shape network_validation already
+        # carries) lets the calibration notebook plot synthetic-vs-real
+        # distributions and see over/undershoot directly instead of blind
+        # bisection on the scalar.
+        metrics["wasserstein"][name] = value
+        metrics["wasserstein_distributions"][name] = {
+            "synthetic": _wasserstein_distribution_summary(np.asarray(synth_values, dtype=float)),
+            "observed": _wasserstein_distribution_summary(np.asarray(real_values, dtype=float)),
+        }
     typer.echo(f"Loading observed trajectories from {real_path} ...")
     real_df = pl.read_parquet(real_path)
     _dt_col = detect_column(real_df, _DATETIME_CANDIDATES)
@@ -1461,7 +1475,7 @@ def generate_comparison_report(
     synth_jumps = synth_jumps[synth_jumps > 0]
     real_jumps = real_jumps[real_jumps > 0]
     w_jump = wasserstein_distance(synth_jumps, real_jumps)
-    metrics["wasserstein"]["jump_lengths_km"] = w_jump
+    _record_wasserstein("jump_lengths_km", w_jump, synth_jumps, real_jumps)
 
     # Collapse the slot-by-slot synthetic trajectory into distinct stay episodes
     # so visits-per-user counts visits (not 15-min slots), comparable to the
@@ -1487,7 +1501,7 @@ def generate_comparison_report(
     synth_visit_counts = synth_stays.group_by(traj.uid_col).len()["len"].to_numpy()
     real_visit_counts = real_stays.group_by(real_metric_traj.uid_col).len()["len"].to_numpy()
     w_visits = wasserstein_distance(synth_visit_counts, real_visit_counts)
-    metrics["wasserstein"]["visits_per_user"] = w_visits
+    _record_wasserstein("visits_per_user", w_visits, synth_visit_counts, real_visit_counts)
 
     if road_network is not None:
         synth_rog = road_radius_of_gyration_km(
@@ -1510,7 +1524,7 @@ def generate_comparison_report(
         synth_rog = traj.radius_of_gyration()["radius_of_gyration"].to_numpy()
         real_rog = real_metric_traj.radius_of_gyration()["radius_of_gyration"].to_numpy()
     w_rog = wasserstein_distance(synth_rog, real_rog)
-    metrics["wasserstein"]["radius_of_gyration_km"] = w_rog
+    _record_wasserstein("radius_of_gyration_km", w_rog, synth_rog, real_rog)
 
     print(f"[timing] mobility metrics (jump/visits/rog) took {time.perf_counter() - _mobility_metrics_t0:.1f}s", file=sys.stderr, flush=True)
 
@@ -1537,7 +1551,7 @@ def generate_comparison_report(
     else:
         real_dwell = waiting_times_minutes(real_metric_traj)
     w_dwell = wasserstein_distance(synth_dwell, real_dwell)
-    metrics["wasserstein"]["dwell_time_min"] = w_dwell
+    _record_wasserstein("dwell_time_min", w_dwell, synth_dwell, real_dwell)
 
     # Trip (travel) duration. The synthetic side carries a genuine car trip
     # duration per leg; the observed visit table has no travel-time ground truth,
@@ -1558,7 +1572,7 @@ def generate_comparison_report(
         real_trip = [(j / CAR_SPEED_KMH) * 60.0 for j in real_jumps if j > 0]
         w_trip = wasserstein_distance(synth_trip, real_trip) if synth_trip and real_trip else None
     if w_trip is not None:
-        metrics["wasserstein"]["trip_duration_min"] = w_trip
+        _record_wasserstein("trip_duration_min", w_trip, synth_trip, real_trip)
     print(f"[timing] dwell/trip duration took {time.perf_counter() - _mobility_metrics_t0:.1f}s (cumulative since mobility metrics start)", file=sys.stderr, flush=True)
 
     network_validation = None
@@ -1569,18 +1583,20 @@ def generate_comparison_report(
         _nv_t0 = time.perf_counter()
         try:
             network_validation, network_warnings = build_network_validation(
-                synthetic_path,
+                traj.df,
                 observed_df=real_df,
                 observed_uid_col=real_traj.uid_col,
                 observed_datetime_col=real_traj.datetime_col,
+                observed_source_path=real_path,
                 enabled=True,
                 synthetic_enabled=bool(getattr(nv_cfg, "synthetic_enabled", True)),
                 observed_enabled=bool(getattr(nv_cfg, "observed_enabled", False)),
                 location_mode=str(getattr(nv_cfg, "location_mode", "auto")),
                 location_col=getattr(nv_cfg, "location_col", None),
                 h3_resolution=int(getattr(nv_cfg, "h3_resolution", 9)),
-                max_group_size=int(getattr(nv_cfg, "max_group_size", 200)),
                 seed=int(getattr(nv_cfg, "random_seed", 42)),
+                random_baseline=bool(getattr(nv_cfg, "random_baseline", True)),
+                cache_observed=bool(getattr(nv_cfg, "cache_observed", True)),
             )
             if network_validation is not None:
                 metrics["network_validation"] = network_validation

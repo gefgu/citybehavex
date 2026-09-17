@@ -17,8 +17,22 @@ class NetworkValidationConfig(BaseModel):
     location_mode: Literal["auto", "location_col", "h3"] = "auto"
     location_col: Optional[str] = None
     h3_resolution: int = 9
-    max_group_size: int = 200
     random_seed: int = 42
+    # The ablation table only reads synthetic_vs_observed/observed_vs_observed
+    # (see aggregate_ablation_results.py's NETWORK_METRICS lookup), never
+    # synthetic_vs_random/observed_vs_random -- building the degree-preserving
+    # random null-model graph and its clustering/topological-overlap metrics
+    # is ~56% of total network-validation cost on dense graphs (measured on
+    # yjmob) for a comparison nothing downstream reads. Default True to keep
+    # existing web-UI behavior (Charts.tsx renders these blocks); the
+    # ablation CLI/scripts turn it off explicitly.
+    random_baseline: bool = True
+    # The observed-side co-presence graph and its metrics are identical
+    # across every ablation variant/round for a given dataset, but were
+    # recomputed from scratch on every single report call -- cache them
+    # (keyed by comparison path + these params) so repeated calls reuse the
+    # first computation instead of repeating it.
+    cache_observed: bool = True
 
 
 class TransportSpatialConfig(BaseModel):

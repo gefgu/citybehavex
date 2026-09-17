@@ -46,7 +46,9 @@ def _build_schedule(
     narratives = None
     profile_clusters = None
     if profiles is not None:
-        narratives = [profile_to_narrative(p) for p in profiles]
+        narratives = [
+            profile_to_narrative(p, extra_guidance=config.schedule.alignment_guidance) for p in profiles
+        ]
         if config.embedding.enabled:
             typer.echo(
                 f"Profile embeddings: embedding {len(narratives)} profile narratives "

@@ -431,7 +431,6 @@ def test_generate_comparison_report_writes_json_metrics(tmp_path):
             location_mode="location_col",
             location_col="purpose",
             h3_resolution=9,
-            max_group_size=200,
             random_seed=7,
         ),
     )

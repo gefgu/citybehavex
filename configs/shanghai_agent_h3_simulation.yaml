@@ -56,10 +56,10 @@ rail_network:
 llm:
   base_url: "http://200.134.10.65:8081"
   api_key: "none"
-  model: "mistral-small-3.2-24b"
+  model: "qwen2.5-32b"
   diary_count: 30
   max_tokens: 768
-  concurrency: 8
+  concurrency: 24
   retries: 5
   timeout_seconds: 90.0
   cache_dir: data/llm_diaries_shanghai_h3
@@ -184,5 +184,4 @@ comparison:
     synthetic_enabled: true
     location_mode: location_col
     location_col: venueId
-    max_group_size: 200
   road_network_distance: false

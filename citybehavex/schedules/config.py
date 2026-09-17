@@ -19,6 +19,14 @@ class ScheduleConfig(BaseModel):
     alignment_concurrency: int = Field(default=4, ge=1)
     alignment_retries: int = Field(default=2, ge=1)
     alignment_checkpoint_every: int = Field(default=5, ge=1)
+    # Free-text guidance appended to the profile narrative used for
+    # macro-schedule alignment (profile-to-diary matching) specifically --
+    # not the social graph or activity CRP, which embed profile_to_narrative
+    # separately. Meant to be tunable during calibration to nudge which
+    # diary templates get preferentially matched, e.g. "prefer diaries with
+    # more errands and evening social activity" -- without touching the
+    # aligner model itself.
+    alignment_guidance: str = ""
 
     # SW-CRP temperature T and exploration weight alpha, sampled per-agent
     # (see citybehavex/schedules/crp.py). Each is drawn from either a Beta or

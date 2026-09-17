@@ -53,6 +53,12 @@ class DiariesConfig(BaseModel):
     max_locations: int = Field(default=6, ge=1, le=10)
     max_one_location_diaries: int | None = Field(default=None, ge=0)
     motif_exploration_rate: float = Field(default=1.0, ge=0.0, le=1.0)
+    # Free-text guidance injected directly into the diary-generation prompt
+    # (see build_single_diary_prompt), on top of city_profile_*. Meant to be
+    # tunable during calibration -- e.g. "diary timing should skew earlier in
+    # the morning" or "include more evening social/errand activity" -- without
+    # having to rewrite the whole city-profile string each round.
+    schedule_guidance: str = ""
 
     def profile_for(self, day_type: str) -> str:
         """City profile for a day type, falling back to the shared one."""
