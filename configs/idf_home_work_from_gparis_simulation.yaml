@@ -50,7 +50,7 @@ simulation:
   alpha: 0.2
   dt_update_mob_sim_hours: 168.0
   indipendency_window_hours: 0.5
-  gravity_deterrence_exponent: -2.5
+  gravity_deterrence_exponent: -3.2
   gravity_origin_exponent: 1.0
   gravity_destination_exponent: 1.0
   start_date: null
@@ -323,6 +323,48 @@ profiles:
 # that touched vf (round 1's location_count, round 4's gamma) either helped once and then
 # plateaued, or didn't move it -- Vf looks like it needs a schedule/diary-side fix beyond what
 # these 4 rounds covered, not a quick knob turn).
+#
+# v4 calibration series (this batch, after diaries.schedule_guidance round 2 above was kept):
+# checking the FULL metric set for the first time after a schedule_guidance-only fix revealed
+# dr/rg/td/dt had regressed as an unmonitored side effect (see diaries.schedule_guidance's own
+# log comment). Baseline for this series = data/ablation_logs/gparis_final_run{1,2,3} (3-seed,
+# schedule_guidance kept, simulation.* still at v3-series defaults): dr=1.825 rg=0.613 td=7.34
+# dt=2.205(h) vf=0.891 vpd=0.182 atm=7.55 dard=3.178 cpc=0.2594 (mean W1/JSDx100, single-seed
+# gparis_calibrated_run1's raw means: jump synth 7.86 vs obs 6.09km, dwell synth 447 vs obs
+# 316min, trip_duration synth 14.41 vs obs 7.30min -- all overshooting from the guidance change).
+# Round 1 (dt, lever activities.act_dur_scale 1.0->0.72): WRONG LEVER -- barely moved dt (447->444
+# synth mean, ~1%) despite a 28% cut. Root cause: act_dur_scale only feeds the micro-activity
+# sidecar table (activity_pipeline.py), not the main trajectory's stop-level dwell_minutes the
+# report actually measures (frames.py's _build_trip_frame, sourced from the Rust simulation core).
+# Net loss elsewhere too (dr/td/vf/dard/cpc all worse). REVERTED.
+# Round 2 (td, lever simulation.car_speed_kmh 60->85): lever saturated under the current
+# (post-guidance) setup -- td got slightly WORSE (7.34->7.431 W1; synth mean 14.41->14.73,
+# moving further from target) despite a 42% speed increase, contradicting the v3 series' "car_speed
+# only touches td" assumption; likely because most trips here are short enough to be walk/bike-mode
+# (car_speed_kmh can't shorten those), and the change produced unpredictable knock-on effects
+# (vf worse +9.5%, dard/cpc worse) rather than the clean isolated effect the v3-era log assumed.
+# REVERTED.
+# Round 3 (dr, lever simulation.gravity_deterrence_exponent -2.5->-3.2, prioritizing dr over rg
+# since they conflict on this one lever and dr's error was ~3x rg's): STRONG NET WIN. dr
+# 1.825->1.083 (-40.7%), td 5.853 (-20.3%, unexpected bonus -- shorter jumps -> shorter trips,
+# jump length and trip duration are mechanically linked even though CALIBRATION.md lists them as
+# separate levers), dt flat, vf/vpd/atm/cpc all improved too. rg regressed 0.613->0.993 (+62%,
+# further undershoot: synth mean 5.09 vs obs 5.90) as predicted, and dard regressed slightly --
+# smaller in magnitude than the dr+td gains. KEPT -- gravity_deterrence_exponent=-3.2 is this
+# series' final value.
+# Round 4 (rg recovery, lever simulation.rho 0.6->0.78 on top of round 3's -3.2): bad trade -- rg
+# barely moved (0.993->0.955, only -3.8%, did not meaningfully recover round 3's regression) while
+# vf blew up (0.835->1.349, +61.6%) and atm/dard also regressed. REVERTED; round 3 alone remains
+# the best config found this series.
+# v4 series (4 single-seed rounds, seed 42) DONE. Final state: gravity_deterrence_exponent=-3.2
+# (round 3, kept), everything else unchanged from v3. rg is now the largest remaining single-metric
+# gap and the accepted trade-off for this series -- CALIBRATION.md's next candidate is
+# profiles.work_distance_* (separate from gravity_deterrence_exponent, controls commute-specific
+# spread rather than general exploratory jump/rog together) or simulation.rho at a smaller step
+# than round 4's, not attempted this pass (round budget exhausted). NOTE: this is a single-seed
+# (run42) result, not yet re-validated across the 3-seed replicate the earlier series used --
+# treat as a strong preliminary signal, re-run gparis_final_run{1,2,3}-style 3 seeds before citing
+# in the paper table.
 comparison:
   path: data/gparis/gparis_visitation_df.parquet
   label: idf_home_work_from_gparis
