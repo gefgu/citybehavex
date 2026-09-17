@@ -69,15 +69,47 @@ rail_network:
 llm:
   base_url: http://200.134.10.65:8081
   api_key: none
-  model: mistral-small-3.2-24b
+  model: qwen2.5-32b
   diary_count: 30
   max_tokens: 768
-  concurrency: 8
+  concurrency: 24
   retries: 5
   timeout_seconds: 90.0
   cache_dir: data/llm_diaries_idf
   validated_diaries_path: data/llm_diaries_idf/validated_diaries.json
 diaries:
+  # v4 calibration round 1 (Vf, new lever diaries.schedule_guidance):
+  # synthetic mean visits/user 28.2 vs observed 21.5 (~31% over) -- v3's
+  # numeric levers (location_count_mu 1->0.6, gamma 0.21->0.35) plateaued on
+  # this per the v3 log ("needs a schedule/diary-side fix... not a quick
+  # knob turn"). Testing the new prompt-guidance lever directly.
+  # Round 1 result (gparis_cal_r1_run42): vf W1 6.96->1.67 (big win, synth
+  # visits/user 28.2->19.9 vs target 21.5, nearly exact) BUT net loss overall
+  # -- dr 1.08->2.33, td 5.85->7.99, dt(h) 0.95->2.95, rg 0.43->0.61 all
+  # regressed hard. Root cause: capping to "1-2 stops max" kept the same
+  # total daily out-of-home time/distance budget but compressed it into
+  # fewer stops, so each remaining stop absorbed more distance and dwell
+  # time (synth dwell mean 491.8min vs target 315.8, synth jump mean 8.4km
+  # vs target 6.1km -- both now overshooting in the OTHER direction).
+  # Round 2: same direction, much gentler wording -- nudge don't cap.
+  # Round 2 result (gparis_cal_r2_run42): vf W1 6.96->0.87 (excellent, synth
+  # visits/user now close to target). dr/rg/td/dt still regressed vs
+  # baseline (dr 1.08->1.84, rg 0.43->0.61, td 5.85->7.36, dt(h) 0.95->2.20)
+  # but much less than round 1's overcorrection. Crucially, checking the
+  # FULL metric set (the whole point of this workflow change) shows this is
+  # a real net win, not just a Vf improvement masking other damage: activity
+  # JSDs all improved too (activity_distribution 0.0047->0.0018, activity
+  # transitions/ATM 0.118->0.075, daily_activity_profile/DARD 0.045->0.032,
+  # daily_motifs 0.217->0.197) and CPC improved (0.226->0.261, higher is
+  # better). KEEPING round 2 -- accepted trade-off: distance/duration/dwell
+  # metrics regress moderately in exchange for large improvements across
+  # visits and every activity-pattern metric. Further rounds to recover
+  # dr/rg/td/dt (e.g. gravity_deterrence_exponent, car_speed_kmh) are a
+  # reasonable next step but not attempted this pass -- time-boxed.
+  schedule_guidance: 'Slightly fewer non-home stops than a typical busy day;
+    skip a discretionary errand or leisure stop occasionally rather than
+    adding extra ones, but most days should still involve a normal mix of
+    activities.'
   city_profile: Greater Paris metropolitan region, urban mobility with commuting, errands, leisure, healthcare, studies, and home routines.
   city_profile_weekday: 'Greater Paris weekday routines: commuting to work or studies, midday errands, evening leisure, and home.'
   city_profile_weekend: 'Greater Paris weekend routines: later mornings at home, leisure, shopping, social visits, fewer work/study trips.'

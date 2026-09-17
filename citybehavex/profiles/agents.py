@@ -124,12 +124,17 @@ class PartialAgentProfile(BaseModel):
 _HEALTH_LABELS = {1: "very poor", 2: "poor", 3: "fair", 4: "good", 5: "very good"}
 
 
-def profile_to_narrative(profile: AgentProfile, *, include_transport: bool = True) -> str:
+def profile_to_narrative(
+    profile: AgentProfile, *, include_transport: bool = True, extra_guidance: str = ""
+) -> str:
     """Return a concise prose description of a profile for embedding.
 
     This is the single source of truth that all downstream modules embed:
     the SW-CRP (schedule similarity), the social graph, and the activity CRP
-    all operate on embeddings of this text.
+    all operate on embeddings of this text. ``extra_guidance`` is appended
+    verbatim (e.g. ``schedule.alignment_guidance``) -- callers that want it
+    scoped to just one of those three consumers (rather than all of them)
+    pass it only at their own call site.
     """
     transport_str = ""
     if include_transport:
@@ -153,6 +158,8 @@ def profile_to_narrative(profile: AgentProfile, *, include_transport: bool = Tru
     ]
     if transport_str:
         parts.append(transport_str)
+    if extra_guidance:
+        parts.append(f" {extra_guidance}")
     return "".join(parts)
 
 

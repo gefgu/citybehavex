@@ -30,6 +30,7 @@ def fetch_diary_batch(
     max_locations: int = 6,
     motif_exploration_rate: float = 1.0,
     random_state: int = 0,
+    schedule_guidance: str = "",
     variant: str = "",
     stats: Optional[LLMStats] = None,
     progress_callback: Optional[Callable[[str, int, int, LLMStats], None]] = None,
@@ -37,6 +38,16 @@ def fetch_diary_batch(
 ) -> DiaryBatch:
     base_valid_path = cache_path(config)
     valid_path = apply_variant(base_valid_path, variant)
+    if schedule_guidance:
+        # Cache validation doesn't fingerprint prompt text (city_profile
+        # changes don't invalidate it either) -- route guidance-bearing runs
+        # to their own cache file so calibration iterations on
+        # diaries.schedule_guidance always regenerate instead of silently
+        # reusing diaries written under different (or no) guidance.
+        import hashlib
+
+        guidance_tag = hashlib.sha1(schedule_guidance.encode("utf-8")).hexdigest()[:8]
+        valid_path = apply_variant(valid_path, f"guidance{guidance_tag}")
 
     distribution_metadata = LocationCountDistribution(
         mu=location_count_mu,
@@ -124,6 +135,7 @@ def fetch_diary_batch(
                 location_count=diary_location_count,
                 previous_diaries=previous_diaries,
                 motif_rule=motif_rule,
+                schedule_guidance=schedule_guidance,
             )
 
             for _ in range(max(config.retries, 1)):

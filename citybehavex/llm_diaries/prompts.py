@@ -24,6 +24,7 @@ def build_single_diary_prompt(
     location_count: Optional[int] = None,
     previous_diaries: Optional[list[Diary]] = None,
     motif_rule: str = "",
+    schedule_guidance: str = "",
 ) -> str:
     distribution = purpose_distribution or {}
     location_rule = ""
@@ -54,6 +55,8 @@ def build_single_diary_prompt(
             f"{listing}"
         )
 
+    guidance_rule = f"Additional guidance: {schedule_guidance}\n" if schedule_guidance else ""
+
     return (
         "Return JSON only for one synthetic daily mobility diary.\n"
         "Shape: {\"diary_id\":\"d1\",\"episodes\":[{\"start\":\"00:00\",\"end\":\"07:00\","
@@ -62,6 +65,7 @@ def build_single_diary_prompt(
         f"Diary number: {diary_number} of {diary_count}\n"
         f"City profile: {city_profile or 'No additional city profile provided.'}\n"
         f"Purpose distribution hints: {json.dumps(distribution, sort_keys=True)}\n"
+        f"{guidance_rule}"
         f"{location_rule}"
         f"{motif_rule}"
         f"{dedup_rule}"

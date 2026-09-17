@@ -1619,7 +1619,6 @@ def build_network_validation_payload(
             location_mode=str(getattr(nv_cfg, "location_mode", "auto")),
             location_col=getattr(nv_cfg, "location_col", None),
             h3_resolution=int(getattr(nv_cfg, "h3_resolution", 9)),
-            max_group_size=int(getattr(nv_cfg, "max_group_size", 200)),
             seed=int(getattr(nv_cfg, "random_seed", 42)),
         )
     except Exception as exc:  # noqa: BLE001 - degrade gracefully, matching build_comparison_payload's guard()

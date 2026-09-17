@@ -128,6 +128,18 @@ def report(
             "a known slow path -- rerun without this flag later to backfill it."
         ),
     ),
+    skip_network_validation_random_baseline: bool = typer.Option(
+        False,
+        "--skip-network-validation-random-baseline",
+        help=(
+            "Skip building the degree-preserving random null-model graph and its "
+            "clustering/topological-overlap metrics (the synthetic_vs_random / "
+            "observed_vs_random comparisons) -- roughly half of network validation's "
+            "cost on dense graphs. Only synthetic_vs_observed/observed_vs_observed "
+            "(what the ablation table reads) are unaffected; the web UI's random-"
+            "baseline charts will be empty for reports generated with this flag."
+        ),
+    ),
 ):
     """Compute mobility comparison metrics and optionally write JSON.
 
@@ -144,6 +156,10 @@ def report(
     if skip_network_validation and loaded.comparison.network_validation.enabled:
         typer.echo("Skipping network validation (--skip-network-validation) ...")
         loaded.comparison.network_validation.enabled = False
+
+    if skip_network_validation_random_baseline and loaded.comparison.network_validation.random_baseline:
+        typer.echo("Skipping network validation random baseline (--skip-network-validation-random-baseline) ...")
+        loaded.comparison.network_validation.random_baseline = False
 
     rn = loaded.road_network
     road_nodes_df = road_edges_df = None

@@ -61,6 +61,11 @@ def test_simulation_config_rejects_removed_social_graph_radius():
         SimulationConfig(social_graph_radius=0.5)
 
 
+def test_network_validation_config_rejects_removed_max_group_size():
+    with pytest.raises(ValueError):
+        ComparisonConfig(network_validation={"max_group_size": 200})
+
+
 def test_social_network_config_accepts_bounded_social_graph_settings():
     config = SocialNetworkConfig(
         social_graph_k=30,

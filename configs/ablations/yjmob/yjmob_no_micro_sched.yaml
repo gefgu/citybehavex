@@ -37,10 +37,10 @@ rail_network:
   edges_output: data/yjmob/yjmob_rail_graph_edges.parquet
   snap_output: data/yjmob/yjmob_rail_graph_snap.parquet
 llm:
-  concurrency: 8
+  concurrency: 24
   base_url: http://200.134.10.65:8081
   api_key: none
-  model: qwen2.5-32b-culturellm
+  model: qwen2.5-32b
   diary_count: 30
   max_tokens: 768
   cache_dir: data/llm_diaries_yjmob
@@ -171,5 +171,4 @@ comparison:
     synthetic_enabled: true
     location_mode: h3
     h3_resolution: 9
-    max_group_size: 200
   road_network_distance: false

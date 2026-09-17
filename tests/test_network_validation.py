@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import json
+from types import SimpleNamespace
 
 import numpy as np
 import pandas as pd
 import polars as pl
 
+import citybehavex.reports.network_validation as network_validation
 from citybehavex.reports.network_validation import (
+    _observed_edges_and_persistence,
     build_network_validation,
     clustering_coefficients,
     encounters_sidecar_path,
@@ -32,6 +35,45 @@ def test_topological_overlap_is_per_edge_jaccard():
     assert values[(0, 1)] == 1.0 / 3.0
     assert values[(2, 3)] == 0.0
     assert values[(0, 2)] == 0.25
+
+
+def test_observed_network_adapts_records_to_fastmob_staypoints(monkeypatch):
+    observed = pl.DataFrame(
+        {
+            "uid": ["alice", "bob"],
+            "timestamp": pl.Series(["2026-01-01 08:00", "2026-01-01 08:02"]).str.to_datetime(),
+            "end_timestamp": pl.Series(["2026-01-01 08:20", "2026-01-01 08:22"]).str.to_datetime(),
+            "location_id": ["cafe", "cafe"],
+        }
+    )
+    captured = {}
+
+    def fake_fastmob_contact_graph(staypoints, locations):
+        captured["staypoints"] = staypoints.to_native()
+        captured["locations"] = locations.to_native()
+        return SimpleNamespace(
+            graph=graph_from_edges(2, {(0, 1)}),
+            edge_persistence=np.asarray([1.0]),
+            time_steps=1,
+        )
+
+    monkeypatch.setattr(network_validation, "co_presence_graph_from_staypoints", fake_fastmob_contact_graph)
+    graph, persistence, time_steps, warnings = _observed_edges_and_persistence(
+        observed,
+        uid_col="uid",
+        datetime_col="timestamp",
+        location_mode="location_col",
+        location_col="location_id",
+        h3_resolution=9,
+    )
+
+    assert graph.edges == {(0, 1)}
+    np.testing.assert_array_equal(persistence, [1.0])
+    assert time_steps == 1
+    assert warnings == []
+    assert captured["staypoints"]["finished_at"].to_list() == observed["end_timestamp"].to_list()
+    assert captured["staypoints"]["location_id"].to_list() == ["cafe", "cafe"]
+    assert captured["locations"]["location_id"].to_list() == ["cafe"]
 
 
 def test_build_network_validation_computes_distribution_wasserstein(tmp_path):
@@ -128,9 +170,8 @@ def test_observed_validation_uses_location_day_contacts(tmp_path):
     observed = pl.DataFrame(
         {
             "user_id": ["a", "b", "a", "b", "c"],
-            "timestamp": pl.Series(
-                ["2026-01-01 08:00", "2026-01-01 09:00", "2026-01-02 08:00", "2026-01-02 09:00", "2026-01-02 10:00"]
-            ).str.to_datetime(),
+            "timestamp": pl.Series(["2026-01-01 08:00", "2026-01-01 09:00", "2026-01-02 08:00", "2026-01-02 09:00", "2026-01-02 09:30"]).str.to_datetime(),
+            "end_timestamp": pl.Series(["2026-01-01 10:00", "2026-01-01 10:00", "2026-01-02 10:00", "2026-01-02 10:00", "2026-01-02 11:00"]).str.to_datetime(),
             "venueId": ["x", "x", "x", "x", "x"],
             "lat": [0.0] * 5,
             "lon": [0.0] * 5,
@@ -155,13 +196,14 @@ def test_observed_validation_uses_location_day_contacts(tmp_path):
     assert block["distributions"]["observed"]["edge_persistence"]["mean"] == 2.0 / 3.0
 
 
-def test_observed_validation_skips_oversized_groups(tmp_path):
+def test_observed_validation_does_not_skip_oversized_groups(tmp_path):
     synthetic = tmp_path / "synthetic.parquet"
     pd.DataFrame({"uid": [1]}).to_parquet(synthetic, index=False)
     observed = pl.DataFrame(
         {
             "uid": [1, 2, 3],
             "timestamp": pl.Series(["2026-01-01 08:00"] * 3).str.to_datetime(),
+            "end_timestamp": pl.Series(["2026-01-01 09:00"] * 3).str.to_datetime(),
             "location_id": ["x", "x", "x"],
         }
     )
@@ -172,13 +214,12 @@ def test_observed_validation_skips_oversized_groups(tmp_path):
         enabled=True,
         synthetic_enabled=False,
         observed_enabled=True,
-        max_group_size=2,
         seed=7,
     )
 
     assert payload is not None
-    assert payload["observed_vs_random"]["distributions"]["observed"]["edge_persistence"]["count"] == 0
-    assert any("larger than max_group_size=2" in warning for warning in warnings)
+    assert payload["observed_vs_random"]["source_network"]["edge_count"] == 3
+    assert warnings == []
 
 
 def test_observed_validation_uses_h3_contacts(tmp_path):
