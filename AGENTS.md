@@ -18,17 +18,22 @@ there at once, so switching requires whoever runs that host's vLLM to restart it
 
 ## Serving the aligner/embedding server
 
-All five ModernBERT CrossEncoder aligners (schedule, activity, vehicle-ownership,
-profile-coherence, POI-type) and the diary/profile embedding model are served by one
-consolidated process, `scripts/serve_aligners.py`, on **port 8090**. It lazily loads
-whichever model a request names (clients already send a `model` field — the exact
-`*_alignment_model`/`embedding.model` checkpoint path/id from config — on every
-`/rerank`, `/score_pairs`, and `/v1/embeddings` call), evicts a model after
-`--idle-ttl-s` (default 600s) of no requests, and exposes `POST /unload {"model":
-"..."}` for an immediate evict. Start it with:
+The ModernBERT CrossEncoder aligners actually deployed (schedule, activity,
+vehicle-ownership — see `models/modernbert-*-aligner/`; profile-coherence is
+currently disabled everywhere via `coherence_alignment_backend: none`, and
+POI-type reuses the activity aligner's checkpoint rather than having its own,
+see `citybehavex/activities/alignment.py`'s `model = config.poi_type_alignment_model
+or config.alignment_model`) and the diary/profile embedding model are served
+by one consolidated process, `scripts/serve_aligners.py`, on **port 8090**.
+It lazily loads whichever model a request names (clients already send a
+`model` field — the exact `*_alignment_model`/`embedding.model` checkpoint
+path/id from config — on every `/rerank`, `/score_pairs`, and
+`/v1/embeddings` call), evicts a model after `--idle-ttl-s` (default 600s) of
+no requests, and exposes `POST /unload {"model": "..."}` for an immediate
+evict. Start it with citybehavex's own venv -- no separate torch/CUDA
+environment needed, `pyproject.toml` already pins the CUDA 13 wheel index:
 ```
-PYTHONPATH=/home/gustavo/vllm/.venv/lib/python3.12/site-packages \
-  .venv/bin/python scripts/serve_aligners.py --port 8090 --device cuda \
+uv run python scripts/serve_aligners.py --port 8090 --device cuda \
   --predict-batch-size 128
 ```
 Every scenario config's `*_alignment_base_url` and `embedding.base_url` point at this one
@@ -41,7 +46,7 @@ finishes, so idle-TTL eviction is a backstop, not the only mechanism.
 
 - `scripts/train_modernbert_activity_aligner.py` labels profile/block/activity pairs through the configured OpenAI-compatible chat endpoint.
 - Use `--llm-concurrency` to keep multiple labeling requests in flight so vLLM can batch work. Start with `--llm-concurrency 8`; increase when GPU utilization is low, and decrease if requests time out.
-- Never serve local AI models on CPU on this workstation. Launch `scripts/serve_aligners.py` with the vLLM environment's CUDA 13 / PyTorch build first on `PYTHONPATH` (see the invocation above) and `--device cuda`.
+- Never serve local AI models on CPU on this workstation. Launch `scripts/serve_aligners.py` from citybehavex's own venv (see the invocation above) with `--device cuda`.
 - Use `--predict-batch-size` on `scripts/serve_aligners.py` and `activities.alignment_batch_size` in configs to keep rerank inference batched. `--predict-batch-size 128` measured best on this workstation's RTX 5090 (shared with other GPU residents) — 256/512 measured ~15% *slower* (~1400 vs ~1650 pairs/sec) there, so it's contention-bound, not headroom-bound; re-measure with a quick `/score_pairs` timing loop if the GPU's other residents change. Pair with `activities.alignment_batch_size: 512` in configs.
 - `scripts/serve_aligners.py` coalesces concurrent `/rerank` and `/score_pairs` requests **per loaded model** into fewer, larger `CrossEncoder.predict()` calls (a background thread per model drains whatever's queued within `--coalesce-window-ms`, default 20ms, up to `--coalesce-max-pairs`, default 2048) — this only helps when the client actually sends concurrent requests, so pair it with `activities.alignment_concurrency` (default 4) on the client side. Measured gain in this shared-GPU environment was modest (~1.1x) — the model itself is the bottleneck here, not request overhead.
 - `citybehavex.activities.alignment.score_activity_alignment` also checkpoints its on-disk cache (`activities.alignment_cache_path`) atomically every `activities.alignment_checkpoint_every` batches (default 20), not just at the end, and retries a failed batch up to `activities.alignment_retries` times (default 2) before giving up — a crash mid-run now loses at most one checkpoint interval's worth of scores instead of the whole run.

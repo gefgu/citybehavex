@@ -70,7 +70,7 @@ embedding:
   base_url: http://localhost:8090
   task_prefix: 'clustering: '
   dimensions: 768
-  auto_launch: true
+  auto_launch: false
   vllm_executable: /home/gustavo/vllm/.venv/bin/vllm
   vllm_port: 8001
   vllm_extra_args:
@@ -90,7 +90,7 @@ schedule:
   alpha_beta_b: 6.0
   similarity_backend: alignment_model
   alignment_base_url: http://localhost:8090
-  alignment_model: models/modernbert-schedule-aligner
+  alignment_model: gefgu/modernbert-schedule-aligner
   alignment_cache_path: data/llm_diaries_shanghai/alignment_cache.npz
 activities:
   enabled: true
@@ -100,9 +100,10 @@ activities:
   embed_activities: false
   alignment_backend: rerank
   alignment_base_url: http://localhost:8090
-  alignment_model: models/modernbert-activity-aligner
+  alignment_model: gefgu/modernbert-activity-aligner
   alignment_batch_size: 512
   poi_type_choice_enabled: true
+  poi_type_alignment_model: gefgu/modernbert-poi-type-aligner
   poi_type_choice_temperature: 0.5
   poi_type_choice_alpha: 1.0
   alignment_cache_path: data/llm_diaries_shanghai/activity_alignment_cache.npz
@@ -147,9 +148,9 @@ profiles:
   work_distance_fallback: expand
   work_distance_density_correction_power: 1.0
   work_from_home_probability: 0.05
-  coherence_alignment_backend: none
+  coherence_alignment_backend: rerank
   coherence_alignment_base_url: http://localhost:8090
-  coherence_alignment_model: models/modernbert-profile-coherence-aligner
+  coherence_alignment_model: gefgu/modernbert-profile-coherence-aligner
   coherence_alignment_batch_size: 256
   coherence_alignment_cache_path: data/llm_diaries_shanghai/profile_coherence_alignment_cache.npz
   coherence_alignment_concurrency: 4
@@ -157,7 +158,7 @@ profiles:
   coherence_rerun_threshold: 0.6
   ownership_alignment_backend: none
   ownership_alignment_base_url: http://localhost:8090
-  ownership_alignment_model: models/modernbert-vehicle-ownership-aligner
+  ownership_alignment_model: gefgu/modernbert-vehicle-ownership-aligner
   ownership_alignment_batch_size: 256
   ownership_alignment_cache_path: data/llm_diaries_shanghai/vehicle_ownership_alignment_cache.npz
   ownership_alignment_concurrency: 4

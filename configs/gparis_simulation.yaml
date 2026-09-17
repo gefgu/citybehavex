@@ -62,7 +62,7 @@ embedding:
   base_url: http://localhost:8090
   task_prefix: 'clustering: '
   dimensions: 768
-  auto_launch: true
+  auto_launch: false
   vllm_executable: /home/gustavo/vllm/.venv/bin/vllm
   vllm_port: 8005
   vllm_extra_args:
@@ -76,7 +76,7 @@ embedding:
 schedule:
   similarity_backend: alignment_model
   alignment_base_url: http://localhost:8090
-  alignment_model: models/modernbert-schedule-aligner
+  alignment_model: gefgu/modernbert-schedule-aligner
   alignment_batch_size: 32
   alignment_cache_path: data/llm_diaries_gparis/schedule_alignment_scores_cache.npz
   temperature_distribution: beta
@@ -117,13 +117,14 @@ activities:
   embed_activities: true
   alignment_backend: rerank
   alignment_base_url: http://localhost:8090
-  alignment_model: models/modernbert-activity-aligner
+  alignment_model: gefgu/modernbert-activity-aligner
   alignment_batch_size: 512
   alignment_cache_path: data/llm_diaries_gparis/activity_alignment_cache.npz
   alignment_concurrency: 4
   alignment_retries: 2
   alignment_checkpoint_every: 20
   poi_type_choice_enabled: true
+  poi_type_alignment_model: gefgu/modernbert-poi-type-aligner
   poi_type_choice_temperature: 0.5
   poi_type_choice_alpha: 1.0
   durations:
@@ -165,9 +166,9 @@ profiles:
   work_distance_fallback: expand
   work_distance_density_correction_power: 1.0
   work_from_home_probability: 0.02
-  coherence_alignment_backend: none
+  coherence_alignment_backend: rerank
   coherence_alignment_base_url: http://localhost:8090
-  coherence_alignment_model: models/modernbert-profile-coherence-aligner
+  coherence_alignment_model: gefgu/modernbert-profile-coherence-aligner
   coherence_alignment_batch_size: 256
   coherence_alignment_cache_path: data/llm_diaries_gparis/profile_coherence_alignment_cache.npz
   coherence_alignment_concurrency: 4
@@ -175,7 +176,7 @@ profiles:
   coherence_rerun_threshold: 0.6
   ownership_alignment_backend: rerank
   ownership_alignment_base_url: http://localhost:8090
-  ownership_alignment_model: models/modernbert-vehicle-ownership-aligner
+  ownership_alignment_model: gefgu/modernbert-vehicle-ownership-aligner
   ownership_alignment_batch_size: 256
   ownership_alignment_cache_path: data/llm_diaries_gparis/vehicle_ownership_alignment_cache.npz
   ownership_alignment_concurrency: 4
