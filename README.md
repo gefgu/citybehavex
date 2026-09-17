@@ -94,10 +94,10 @@ Optional requirements:
 
 The Python package uses `maturin` to build the Rust extension (the core
 simulation engine only — the web backend is pure Python/FastAPI and needs no
-Rust toolchain). CityBehavEx builds on `fastmob`:
+Rust toolchain). CityBehavEx builds on Fastkit-Mobility:
 
-- [`fastmob`](https://github.com/gefgu/fastmob) — Rust-accelerated mobility
-  analysis and visualization, available from PyPI as
+- [Fastkit-Mobility](https://github.com/gefgu/fastmob) (`fastmob` on PyPI) —
+  Rust-accelerated mobility analysis and visualization, available as
   [`fastmob==0.2.2`](https://pypi.org/project/fastmob/0.2.2/). Its
   `visualization` extra provides the Rust-backed ECharts visualizations.
 
@@ -387,5 +387,6 @@ If you use CityBehavEx, please cite:
 }
 ```
 
-CityBehavEx depends on [`fastmob` 0.2.2](https://pypi.org/project/fastmob/0.2.2/)
-([GitHub](https://github.com/gefgu/fastmob)) with its `visualization` extra.
+CityBehavEx depends on [Fastkit-Mobility](https://github.com/gefgu/fastmob)
+([`fastmob` 0.2.2 on PyPI](https://pypi.org/project/fastmob/0.2.2/)) with its
+`visualization` extra.
