@@ -69,7 +69,13 @@ CPC_H3_RESOLUTIONS = (7, 8, 9)
 # computed -- they're cheap and feed the always-on Distribution-comparisons
 # section, so gating them would either be a no-op or break that section.
 ACTIVITY_JSD_SECTIONS = {"activity_jsd", "activity_comparison", "motifs", "mobility_profiles"}
-ALL_REPORT_SECTIONS = ACTIVITY_JSD_SECTIONS | {"cpc", "stvd", "micro_activity", "mobility_laws"}
+DEFAULT_REPORT_SECTIONS = ACTIVITY_JSD_SECTIONS | {"cpc", "micro_activity", "mobility_laws"}
+# "stvd" is deliberately excluded from the default set: fastmob's stvd_emd builds
+# a dense (n_real x n_synth) Sinkhorn cost matrix that does not scale -- it has
+# hung for 8+ minutes and plateaued at ~10GB RSS without finishing even on
+# gparis's real dataset alone. It must be opted into explicitly via
+# `sections: [..., "stvd"]` and only once fastmob's implementation scales.
+ALL_REPORT_SECTIONS = DEFAULT_REPORT_SECTIONS | {"stvd"}
 
 
 @dataclass(frozen=True)
@@ -1453,7 +1459,7 @@ def generate_comparison_report(
                 f"Unknown comparison report section(s): {sorted(unknown)}. "
                 f"Valid sections: {sorted(ALL_REPORT_SECTIONS)}"
             )
-    enabled_sections = set(sections) if sections is not None else set(ALL_REPORT_SECTIONS)
+    enabled_sections = set(sections) if sections is not None else set(DEFAULT_REPORT_SECTIONS)
     need_activity_visits = bool(enabled_sections & ACTIVITY_JSD_SECTIONS)
     metrics: dict = {"wasserstein": {}, "wasserstein_distributions": {}, "jsd": {}}
 
