@@ -148,7 +148,7 @@ diaries:
 embedding:
   enabled: true
   model: "nomic-ai/nomic-embed-text-v1.5"
-  base_url: http://localhost:8090
+  base_url: http://200.134.10.65:8090
   task_prefix: "clustering: "
   dimensions: 768
   auto_launch: false
@@ -166,7 +166,7 @@ schedule:
   alpha_beta_a: 1.0
   alpha_beta_b: 6.0
   similarity_backend: alignment_model
-  alignment_base_url: http://localhost:8090
+  alignment_base_url: http://200.134.10.65:8090
   alignment_model: gefgu/modernbert-schedule-aligner
   alignment_cache_path: data/llm_diaries_shanghai_h3/alignment_cache.npz
 
@@ -177,7 +177,7 @@ activities:
   temperature: 0.25
   embed_activities: true
   alignment_backend: rerank
-  alignment_base_url: http://localhost:8090
+  alignment_base_url: http://200.134.10.65:8090
   alignment_model: gefgu/modernbert-activity-aligner
   alignment_batch_size: 512
   alignment_cache_path: data/llm_diaries_shanghai_h3/activity_alignment_cache.npz
@@ -229,7 +229,7 @@ profiles:
   work_distance_density_correction_power: 1.0
   work_from_home_probability: 0.05
   coherence_alignment_backend: rerank
-  coherence_alignment_base_url: http://localhost:8085
+  coherence_alignment_base_url: http://200.134.10.65:8090
   coherence_alignment_model: gefgu/modernbert-profile-coherence-aligner
   coherence_alignment_batch_size: 256
   coherence_alignment_cache_path: data/llm_diaries_shanghai_h3/profile_coherence_alignment_cache.npz
@@ -237,7 +237,7 @@ profiles:
   coherence_rerun_rounds: 3
   coherence_rerun_threshold: 0.6
   ownership_alignment_backend: rerank
-  ownership_alignment_base_url: http://localhost:8090
+  ownership_alignment_base_url: http://200.134.10.65:8090
   ownership_alignment_model: gefgu/modernbert-vehicle-ownership-aligner
   ownership_alignment_batch_size: 256
   ownership_alignment_cache_path: data/llm_diaries_shanghai_h3/vehicle_ownership_alignment_cache.npz
@@ -246,6 +246,16 @@ profiles:
 comparison:
   path: data/shanghai/shanghai_500sample.parquet
   label: shanghai_home_work
+  # Synthetic agents can only ever occupy one of shanghai_h3_tessellation_home_work's
+  # 3010 H3 resolution-8 cell centroids (see tessellation.resolution above),
+  # but the observed side (shanghai_500sample.parquet) carries continuous
+  # check-in GPS coordinates. Without snapping, jump_lengths_km/
+  # radius_of_gyration_km/visits_per_user compare a spatially-quantized
+  # synthetic side against a continuous observed side -- the observed side
+  # gets "credit" for sub-cell movement/distinct-venue diversity the
+  # synthetic side is structurally incapable of producing. Snap both sides
+  # to the same resolution-8 grid before computing those metrics.
+  distance_h3_resolution: 8
   evaluation_adaptation:
     mode: auto
     h3_resolution: 8

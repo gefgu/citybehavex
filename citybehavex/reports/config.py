@@ -85,6 +85,16 @@ class ComparisonConfig(BaseModel):
     # real datasets (tens/hundreds of millions of rows) may want this off to
     # keep the live web comparison responsive.
     road_network_distance: bool = True
+    # When set, both synthetic and observed coordinates are snapped to their
+    # H3 cell centroid at this resolution before jump_lengths_km/
+    # radius_of_gyration_km/visits_per_user are computed -- matching the
+    # spatial granularity the simulation actually operates at (an H3-cell
+    # tessellation, e.g. Shanghai's resolution-8 grid) instead of comparing
+    # a coarse synthetic side against continuous real GPS/check-in
+    # coordinates. Only meaningful for H3-tessellation scenarios; leave
+    # unset (None, default) for POI-tessellation scenarios like GreaterParis,
+    # where "cell" isn't the right unit.
+    distance_h3_resolution: Optional[int] = Field(default=None, ge=0, le=15)
     evaluation_adaptation: EvaluationAdaptationConfig = Field(
         default_factory=EvaluationAdaptationConfig
     )

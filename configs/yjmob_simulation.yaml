@@ -60,7 +60,7 @@ diaries:
 embedding:
   enabled: true
   model: nomic-ai/nomic-embed-text-v1.5
-  base_url: http://localhost:8090
+  base_url: http://200.134.10.65:8090
   task_prefix: 'clustering: '
   dimensions: 768
   auto_launch: false
@@ -77,7 +77,7 @@ schedule:
   alpha_beta_a: 1.0
   alpha_beta_b: 6.0
   similarity_backend: alignment_model
-  alignment_base_url: http://localhost:8090
+  alignment_base_url: http://200.134.10.65:8090
   alignment_model: gefgu/modernbert-schedule-aligner
   alignment_cache_path: data/llm_diaries_yjmob/alignment_cache.npz
 activities:
@@ -87,7 +87,7 @@ activities:
   temperature: 0.25
   embed_activities: false
   alignment_backend: rerank
-  alignment_base_url: http://localhost:8090
+  alignment_base_url: http://200.134.10.65:8090
   alignment_model: gefgu/modernbert-activity-aligner
   alignment_batch_size: 512
   poi_type_choice_enabled: true
@@ -137,7 +137,7 @@ profiles:
   work_distance_density_correction_power: 1.0
   work_from_home_probability: 0.05
   coherence_alignment_backend: rerank
-  coherence_alignment_base_url: http://localhost:8090
+  coherence_alignment_base_url: http://200.134.10.65:8090
   coherence_alignment_model: gefgu/modernbert-profile-coherence-aligner
   coherence_alignment_batch_size: 256
   coherence_alignment_cache_path: data/llm_diaries_yjmob/profile_coherence_alignment_cache.npz
@@ -145,7 +145,7 @@ profiles:
   coherence_rerun_rounds: 3
   coherence_rerun_threshold: 0.6
   ownership_alignment_backend: none
-  ownership_alignment_base_url: http://localhost:8090
+  ownership_alignment_base_url: http://200.134.10.65:8090
   ownership_alignment_model: gefgu/modernbert-vehicle-ownership-aligner
   ownership_alignment_batch_size: 256
   ownership_alignment_cache_path: data/llm_diaries_yjmob/vehicle_ownership_alignment_cache.npz
@@ -154,6 +154,13 @@ comparison:
   path: data/yjmob/yjmob_wgs84_simple.parquet
   label: yjmob100k
   sections: ["activity_jsd"]
+  # Unlike Shanghai's check-in data (continuous GPS), yjmob_wgs84_simple.parquet
+  # is itself already a fixed 500m x/y grid (the YJMob100K challenge's native
+  # format, converted to lat/lon centroids) -- a DIFFERENT grid than synthetic's
+  # H3 resolution-8 tessellation, not raw continuous coordinates. Snapping both
+  # sides to the shared H3-8 grid still matters (the two grids don't align), but
+  # the effect should be smaller than Shanghai's, since real is already coarse.
+  distance_h3_resolution: 8
   evaluation_adaptation:
     mode: auto
     h3_resolution: 6

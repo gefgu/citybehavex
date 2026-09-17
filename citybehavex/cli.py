@@ -190,6 +190,7 @@ def report(
         transport_spatial_config=loaded.comparison.transport_spatial,
         evaluation_adaptation_config=loaded.comparison.evaluation_adaptation,
         sections=loaded.comparison.sections,
+        distance_h3_resolution=loaded.comparison.distance_h3_resolution,
     )
 
 

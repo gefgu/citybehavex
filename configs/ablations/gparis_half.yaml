@@ -65,7 +65,7 @@ diaries:
 embedding:
   enabled: true
   model: nomic-ai/nomic-embed-text-v1.5
-  base_url: http://localhost:8090
+  base_url: http://200.134.10.65:8090
   task_prefix: 'clustering: '
   dimensions: 768
   auto_launch: false
@@ -81,7 +81,7 @@ embedding:
   cache_path: data/llm_diaries_gparis/diary_embeddings.npz
 schedule:
   similarity_backend: alignment_model
-  alignment_base_url: http://localhost:8090
+  alignment_base_url: http://200.134.10.65:8090
   alignment_model: gefgu/modernbert-schedule-aligner
   alignment_batch_size: 32
   alignment_cache_path: data/llm_diaries_gparis/schedule_alignment_scores_cache.npz
@@ -122,7 +122,7 @@ activities:
   temperature: 0.25
   embed_activities: true
   alignment_backend: rerank
-  alignment_base_url: http://localhost:8090
+  alignment_base_url: http://200.134.10.65:8090
   alignment_model: gefgu/modernbert-activity-aligner
   alignment_batch_size: 512
   alignment_cache_path: data/llm_diaries_gparis/activity_alignment_cache.npz
@@ -173,7 +173,7 @@ profiles:
   work_distance_density_correction_power: 1.0
   work_from_home_probability: 0.02
   coherence_alignment_backend: rerank
-  coherence_alignment_base_url: http://localhost:8090
+  coherence_alignment_base_url: http://200.134.10.65:8090
   coherence_alignment_model: gefgu/modernbert-profile-coherence-aligner
   coherence_alignment_batch_size: 256
   coherence_alignment_cache_path: data/llm_diaries_gparis/profile_coherence_alignment_cache.npz
@@ -181,7 +181,7 @@ profiles:
   coherence_rerun_rounds: 3
   coherence_rerun_threshold: 0.6
   ownership_alignment_backend: rerank
-  ownership_alignment_base_url: http://localhost:8090
+  ownership_alignment_base_url: http://200.134.10.65:8090
   ownership_alignment_model: gefgu/modernbert-vehicle-ownership-aligner
   ownership_alignment_batch_size: 256
   ownership_alignment_cache_path: data/llm_diaries_gparis/vehicle_ownership_alignment_cache.npz

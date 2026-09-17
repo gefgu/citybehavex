@@ -741,6 +741,7 @@ source = { editable = "." }
 dependencies = [
     { name = "contextily" },
     { name = "duckdb" },
+    { name = "einops" },
     { name = "fastmob" },
     { name = "fastmob-vis" },
     { name = "folium" },
@@ -796,6 +797,7 @@ requires-dist = [
     { name = "contextily", specifier = ">=1.7.0" },
     { name = "datasets", marker = "extra == 'finetuning'", specifier = ">=3.0.0" },
     { name = "duckdb", specifier = ">=1.5.3" },
+    { name = "einops", specifier = ">=0.8.2" },
     { name = "fastmob", extras = ["data", "generation", "tessellation", "diversity", "visualization"], editable = "../fastmob" },
     { name = "fastmob-vis", editable = "../fastmob/fastmob-vis" },
     { name = "folium", specifier = ">=0.20.0" },

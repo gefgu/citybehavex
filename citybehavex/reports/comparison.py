@@ -477,6 +477,32 @@ def _h3_cells(lat: pl.Series, lng: pl.Series, resolution: int) -> pl.Series:
     return result["h3_cell"]
 
 
+def _snap_to_h3_centroid(df: pl.DataFrame, *, lat_col: str, lng_col: str, resolution: int) -> pl.DataFrame:
+    """Replace each row's (lat, lng) with the centroid of its H3 cell at
+    ``resolution``. Used to make distance-based comparison metrics (jump
+    length, radius of gyration) apples-to-apples when the synthetic side is
+    structurally confined to a coarse cell tessellation (e.g. H3 res 8 for
+    Shanghai's 3010-cell grid) but the observed side carries continuous
+    GPS/check-in coordinates -- without snapping, the observed side gets
+    "credit" for sub-cell movement the synthetic side can never produce.
+    """
+    cells = _h3_cells(df[lat_col], df[lng_col], resolution)
+    unique_cells = [c for c in cells.unique().to_list() if c is not None]
+    centroids = pl.DataFrame(
+        {
+            "h3_cell": unique_cells,
+            f"{lat_col}__snapped": [h3.cell_to_latlng(h3.int_to_str(c))[0] for c in unique_cells],
+            f"{lng_col}__snapped": [h3.cell_to_latlng(h3.int_to_str(c))[1] for c in unique_cells],
+        },
+        schema={"h3_cell": cells.dtype, f"{lat_col}__snapped": pl.Float64, f"{lng_col}__snapped": pl.Float64},
+    )
+    out = df.with_columns(cells.alias("h3_cell")).join(centroids, on="h3_cell", how="left")
+    return out.with_columns(
+        pl.coalesce([pl.col(f"{lat_col}__snapped"), pl.col(lat_col)]).alias(lat_col),
+        pl.coalesce([pl.col(f"{lng_col}__snapped"), pl.col(lng_col)]).alias(lng_col),
+    ).drop(["h3_cell", f"{lat_col}__snapped", f"{lng_col}__snapped"])
+
+
 def _visits_for_comparison(
     df: pl.DataFrame,
     *,
@@ -1313,6 +1339,7 @@ def generate_comparison_report(
     network_validation_config: Optional[object] = None,
     transport_spatial_config: Optional[object] = None,
     evaluation_adaptation_config: Optional[object] = None,
+    distance_h3_resolution: Optional[int] = None,
 ) -> None:
     if not getattr(traj, "sorted", False):
         traj = _traj_dataframe(
@@ -1432,6 +1459,43 @@ def generate_comparison_report(
     typer.echo("Computing mobility metrics ...")
     _mobility_metrics_t0 = time.perf_counter()
 
+    # When the scenario's tessellation is a coarse H3 grid (set via
+    # comparison.distance_h3_resolution), the synthetic side is structurally
+    # confined to those cell centroids -- snap the observed side (and, for
+    # consistency, the synthetic side too, a no-op if it's already on-grid)
+    # to the same resolution before computing distance/stay-based metrics, so
+    # neither side gets "credit" for sub-cell movement the other can't
+    # produce. Affects jump length, radius of gyration, and visits/stays
+    # (dwell/trip-duration use non-spatial columns and are unaffected).
+    dist_traj = traj
+    dist_real_df = real_metric_df
+    dist_real_traj = real_metric_traj
+    if distance_h3_resolution is not None:
+        dist_traj = _traj_dataframe(
+            _snap_to_h3_centroid(
+                traj.df, lat_col=traj.lat_col, lng_col=traj.lng_col, resolution=distance_h3_resolution
+            ),
+            datetime_col=traj.datetime_col,
+            lat_col=traj.lat_col,
+            lng_col=traj.lng_col,
+            uid_col=traj.uid_col,
+            presorted=True,
+        )
+        dist_real_df = _snap_to_h3_centroid(
+            real_metric_df,
+            lat_col=real_metric_traj.lat_col,
+            lng_col=real_metric_traj.lng_col,
+            resolution=distance_h3_resolution,
+        )
+        dist_real_traj = _traj_dataframe(
+            dist_real_df,
+            datetime_col=real_metric_traj.datetime_col,
+            lat_col=real_metric_traj.lat_col,
+            lng_col=real_metric_traj.lng_col,
+            uid_col=real_metric_traj.uid_col,
+            presorted=True,
+        )
+
     # When a cached road graph is supplied, recompute jump lengths / radius of
     # gyration as road-network distance (instead of fastmob's straight-line
     # Haversine) for both synthetic and real trajectories -- otherwise fall
@@ -1443,20 +1507,20 @@ def generate_comparison_report(
     )
     if road_network is not None:
         synth_jumps = road_jump_lengths_km(
-            traj.df,
-            uid_col=traj.uid_col,
-            lat_col=traj.lat_col,
-            lng_col=traj.lng_col,
-            datetime_col=traj.datetime_col,
+            dist_traj.df,
+            uid_col=dist_traj.uid_col,
+            lat_col=dist_traj.lat_col,
+            lng_col=dist_traj.lng_col,
+            datetime_col=dist_traj.datetime_col,
             network=road_network,
             snap_max_distance_m=road_snap_max_distance_m,
         )
         real_jumps = road_jump_lengths_km(
-            real_metric_df,
-            uid_col=real_metric_traj.uid_col,
-            lat_col=real_metric_traj.lat_col,
-            lng_col=real_metric_traj.lng_col,
-            datetime_col=real_metric_traj.datetime_col,
+            dist_real_df,
+            uid_col=dist_real_traj.uid_col,
+            lat_col=dist_real_traj.lat_col,
+            lng_col=dist_real_traj.lng_col,
+            datetime_col=dist_real_traj.datetime_col,
             network=road_network,
             snap_max_distance_m=road_snap_max_distance_m,
         )
@@ -1466,8 +1530,8 @@ def generate_comparison_report(
         # that's an Arrow-backed array whose elements are pyarrow scalars,
         # not plain floats, so normalize to a numpy array before any
         # downstream arithmetic/comparisons.
-        synth_jumps = np.asarray(traj.jump_lengths(merge=True), dtype=float)
-        real_jumps = np.asarray(real_metric_traj.jump_lengths(merge=True), dtype=float)
+        synth_jumps = np.asarray(dist_traj.jump_lengths(merge=True), dtype=float)
+        real_jumps = np.asarray(dist_real_traj.jump_lengths(merge=True), dtype=float)
     # Zero-length "jumps" between consecutive same-location rows (e.g. repeat
     # check-ins at one venue, more common after coordinate rounding) aren't
     # movement -- exclude them from both sides so the distribution reflects
@@ -1481,48 +1545,48 @@ def generate_comparison_report(
     # so visits-per-user counts visits (not 15-min slots), comparable to the
     # observed stay-event table.
     synth_stays = _collapse_to_stays(
-        traj.df,
-        uid_col=traj.uid_col,
-        lat_col=traj.lat_col,
-        lng_col=traj.lng_col,
-        datetime_col=traj.datetime_col,
+        dist_traj.df,
+        uid_col=dist_traj.uid_col,
+        lat_col=dist_traj.lat_col,
+        lng_col=dist_traj.lng_col,
+        datetime_col=dist_traj.datetime_col,
     )
     # Real check-in-style datasets can have many consecutive rows at the same
     # location (repeated pings/check-ins without leaving); collapse them into
     # stay episodes the same way the synthetic side is collapsed, so both
     # sides count distinct visits rather than raw row density.
     real_stays = _collapse_to_stays(
-        real_metric_df,
-        uid_col=real_metric_traj.uid_col,
-        lat_col=real_metric_traj.lat_col,
-        lng_col=real_metric_traj.lng_col,
-        datetime_col=real_metric_traj.datetime_col,
+        dist_real_df,
+        uid_col=dist_real_traj.uid_col,
+        lat_col=dist_real_traj.lat_col,
+        lng_col=dist_real_traj.lng_col,
+        datetime_col=dist_real_traj.datetime_col,
     )
-    synth_visit_counts = synth_stays.group_by(traj.uid_col).len()["len"].to_numpy()
-    real_visit_counts = real_stays.group_by(real_metric_traj.uid_col).len()["len"].to_numpy()
+    synth_visit_counts = synth_stays.group_by(dist_traj.uid_col).len()["len"].to_numpy()
+    real_visit_counts = real_stays.group_by(dist_real_traj.uid_col).len()["len"].to_numpy()
     w_visits = wasserstein_distance(synth_visit_counts, real_visit_counts)
     _record_wasserstein("visits_per_user", w_visits, synth_visit_counts, real_visit_counts)
 
     if road_network is not None:
         synth_rog = road_radius_of_gyration_km(
-            traj.df,
-            uid_col=traj.uid_col,
-            lat_col=traj.lat_col,
-            lng_col=traj.lng_col,
+            dist_traj.df,
+            uid_col=dist_traj.uid_col,
+            lat_col=dist_traj.lat_col,
+            lng_col=dist_traj.lng_col,
             network=road_network,
             snap_max_distance_m=road_snap_max_distance_m,
         )["radius_of_gyration"].to_numpy()
         real_rog = road_radius_of_gyration_km(
-            real_metric_df,
-            uid_col=real_metric_traj.uid_col,
-            lat_col=real_metric_traj.lat_col,
-            lng_col=real_metric_traj.lng_col,
+            dist_real_df,
+            uid_col=dist_real_traj.uid_col,
+            lat_col=dist_real_traj.lat_col,
+            lng_col=dist_real_traj.lng_col,
             network=road_network,
             snap_max_distance_m=road_snap_max_distance_m,
         )["radius_of_gyration"].to_numpy()
     else:
-        synth_rog = traj.radius_of_gyration()["radius_of_gyration"].to_numpy()
-        real_rog = real_metric_traj.radius_of_gyration()["radius_of_gyration"].to_numpy()
+        synth_rog = dist_traj.radius_of_gyration()["radius_of_gyration"].to_numpy()
+        real_rog = dist_real_traj.radius_of_gyration()["radius_of_gyration"].to_numpy()
     w_rog = wasserstein_distance(synth_rog, real_rog)
     _record_wasserstein("radius_of_gyration_km", w_rog, synth_rog, real_rog)
 
