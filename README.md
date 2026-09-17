@@ -217,10 +217,26 @@ whichever model a request names — the `model` field every request already
 carries, taken directly from each config's `*_alignment_model` /
 `embedding.model` field — evicts a model after `--idle-ttl-s` (default 600s)
 of no requests, and exposes `POST /unload {"model": "..."}` for an immediate
-evict:
+evict.
+
+The five pretrained aligners are published on the Hugging Face Hub and are
+what every shipped config points at by default — no local checkpoint copy or
+extra setup needed, `sentence-transformers` resolves them straight from the
+Hub on first use, same as a local path:
+
+| aligner | Hugging Face repo |
+| --- | --- |
+| schedule | [`gefgu/modernbert-schedule-aligner`](https://huggingface.co/gefgu/modernbert-schedule-aligner) |
+| activity | [`gefgu/modernbert-activity-aligner`](https://huggingface.co/gefgu/modernbert-activity-aligner) |
+| vehicle-ownership | [`gefgu/modernbert-vehicle-ownership-aligner`](https://huggingface.co/gefgu/modernbert-vehicle-ownership-aligner) |
+| profile-coherence | [`gefgu/modernbert-profile-coherence-aligner`](https://huggingface.co/gefgu/modernbert-profile-coherence-aligner) |
+| POI-type | [`gefgu/modernbert-poi-type-aligner`](https://huggingface.co/gefgu/modernbert-poi-type-aligner) |
+
+Start the server with citybehavex's own venv — no separate CUDA/torch
+environment needed, `pyproject.toml` already pins the CUDA 13 wheel index:
 
 ```bash
-.venv/bin/python scripts/serve_aligners.py \
+uv run python scripts/serve_aligners.py \
   --port 8090 \
   --device cuda \
   --predict-batch-size 128
@@ -229,8 +245,9 @@ evict:
 Point every config's `*_alignment_base_url` and `embedding.base_url` at this
 one port; only the `*_alignment_model` / `embedding.model` fields select which
 checkpoint gets loaded for a given request — no separate service or port per
-aligner. For example, a compatible custom checkpoint can be selected directly
-in YAML without restarting the server:
+aligner. A `*_alignment_model` field accepts a Hugging Face repo id (the
+default) or any local/compatible checkpoint path, selected directly in YAML
+without restarting the server:
 
 ```yaml
 activities:
