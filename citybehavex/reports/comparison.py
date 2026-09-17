@@ -14,6 +14,7 @@ import polars as pl
 import typer
 from fastmob import (
     activity_transition_matrix,
+    build_stvd,
     common_part_of_commuters,
     daily_activity_distribution,
     daily_motifs,
@@ -22,10 +23,12 @@ from fastmob import (
     fit_visitation_law,
     jensen_shannon_divergence,
     motif_distribution,
+    stvd_emd,
     visit_purpose_distribution,
     waiting_times,
     wasserstein_distance,
 )
+from fastmob.core import Locations, Staypoints
 from fastmob.measures.individual.network_distance import (
     jump_lengths_km as road_jump_lengths_km,
 )
@@ -945,6 +948,100 @@ def _compute_stvd_layers(
     return _diff_stvd_layers(syn_hourly, real_hourly, resolutions)
 
 
+def _stays_for_stvd(
+    df: pl.DataFrame,
+    *,
+    uid_col: str,
+    lat_col: str,
+    lng_col: str,
+    start_col: str,
+    end_col: Optional[str],
+    max_duration_hours: float = 24.0,
+) -> pl.DataFrame:
+    """One row per stay with (uid, lat, lng, started_at, finished_at), for
+    ``fastmob.build_stvd``. When no genuine stay-end column exists (panel/
+    check-in data with single timestamps), each row becomes a zero-duration
+    stay -- ``mean_area_volume`` explicitly supports this, producing exactly
+    one 10-minute bin at the floored start time per docs.
+
+    Durations are capped at ``max_duration_hours``: ``mean_area_volume``
+    expands each stay into 10-minute presence slots, and real stay-duration
+    columns can carry multi-day outliers (observed up to ~6.5 days in
+    GreaterParis's survey data) that blow up that expansion combinatorially
+    -- confirmed empirically: an uncapped run against gparis's ~14K-row real
+    table still hadn't finished after 8+ minutes. A capped stay still
+    contributes correctly to every 10-minute bin within the cap; only the
+    (rare, likely data-artifact) tail beyond it is dropped.
+    """
+    end_expr = _to_datetime(df[end_col]) if end_col else _to_datetime(df[start_col])
+    work = df.select(
+        pl.col(uid_col).alias("uid"),
+        pl.col(lat_col).cast(pl.Float64, strict=False).alias("lat"),
+        pl.col(lng_col).cast(pl.Float64, strict=False).alias("lng"),
+        _to_datetime(df[start_col]).alias("started_at"),
+        end_expr.alias("finished_at"),
+    ).drop_nulls(subset=["uid", "lat", "lng", "started_at", "finished_at"])
+    work = work.with_columns(
+        pl.min_horizontal(
+            pl.col("finished_at"),
+            pl.col("started_at") + pl.duration(hours=max_duration_hours),
+        ).alias("finished_at")
+    )
+    return work.filter(pl.col("finished_at") >= pl.col("started_at"))
+
+
+def _stvd_emd_for_resolution(
+    synth_stays: pl.DataFrame,
+    real_stays: pl.DataFrame,
+    resolution: int,
+) -> Optional[float]:
+    """STVD-EMD (spatio-temporal Wasserstein distance, metres) between
+    synthetic and observed visit-volume distributions, both binned onto the
+    SAME H3 catalogue at ``resolution`` -- required so ``build_stvd`` compares
+    the two sides over identical physical places (``fastmob.build_stvd``'s own
+    docs: "Call this once per side against the SAME locations catalogue")."""
+    synth_cells = _h3_cells(synth_stays["lat"], synth_stays["lng"], resolution)
+    real_cells = _h3_cells(real_stays["lat"], real_stays["lng"], resolution)
+    synth_work = synth_stays.with_columns(synth_cells.cast(pl.Utf8).alias("location_id")).drop_nulls(
+        subset=["location_id"]
+    )
+    real_work = real_stays.with_columns(real_cells.cast(pl.Utf8).alias("location_id")).drop_nulls(
+        subset=["location_id"]
+    )
+    if synth_work.is_empty() or real_work.is_empty():
+        return None
+
+    catalogue = (
+        pl.concat(
+            [
+                synth_work.select("location_id", "lat", "lng"),
+                real_work.select("location_id", "lat", "lng"),
+            ]
+        )
+        .unique(subset=["location_id"], keep="first", maintain_order=True)
+        .rename({"lat": "center_lat", "lng": "center_lng"})
+    )
+    locations = Locations(catalogue, scope="global")
+
+    synth_dist = build_stvd(
+        Staypoints(
+            synth_work, uid_col="uid", lat_col="lat", lng_col="lng",
+            started_at_col="started_at", finished_at_col="finished_at",
+        ),
+        locations,
+    )
+    real_dist = build_stvd(
+        Staypoints(
+            real_work, uid_col="uid", lat_col="lat", lng_col="lng",
+            started_at_col="started_at", finished_at_col="finished_at",
+        ),
+        locations,
+    )
+    if len(synth_dist) == 0 or len(real_dist) == 0:
+        return None
+    return float(stvd_emd(synth_dist, real_dist))
+
+
 def _split_transition_matrix_categories(matrix: Any) -> tuple[Any, list[Any] | None]:
     """``fastmob.activity_transition_matrix`` returns activity labels in the
     index for a pandas result, but embeds them in an explicit ``activity``
@@ -1600,6 +1697,38 @@ def generate_comparison_report(
     else:
         cpc_rows = []
     metrics["cpc"] = {f"h3_{resolution}": value for resolution, value in cpc_rows}
+
+    # CAUTION: fastmob.stvd_emd currently builds an explicit dense Sinkhorn
+    # cost matrix sized (n_real_points x n_synth_points), where each point is
+    # one (location, 10-minute-bin) row from build_stvd's output. Confirmed
+    # empirically this does not scale even for GreaterParis's small real
+    # table (~127K rows after build_stvd's own date/day-of-week averaging):
+    # multi-minute hang, 10GB+ RSS, never completed within 8+ minutes. Do not
+    # enable "stvd" in any config's comparison.sections until this is
+    # resolved (upstream in fastmob, or by aggregating build_stvd's output to
+    # coarser bins before calling stvd_emd) -- especially not for yjmob/
+    # yjmob2, whose real tables are ~1000x larger.
+    if "stvd" in enabled_sections:
+        typer.echo("Computing STVD-EMD ...")
+        _stvd_t0 = time.perf_counter()
+        synth_end_col = "departure" if "departure" in traj.df.columns else None
+        real_end_col = detect_column(real_metric_df, _END_TS_CANDIDATES)
+        synth_stays_stvd = _stays_for_stvd(
+            traj.df, uid_col=traj.uid_col, lat_col=traj.lat_col, lng_col=traj.lng_col,
+            start_col=traj.datetime_col, end_col=synth_end_col,
+        )
+        real_stays_stvd = _stays_for_stvd(
+            real_metric_df, uid_col=real_metric_traj.uid_col, lat_col=real_metric_traj.lat_col,
+            lng_col=real_metric_traj.lng_col, start_col=real_metric_traj.datetime_col, end_col=real_end_col,
+        )
+        stvd_rows = []
+        for resolution in CPC_H3_RESOLUTIONS:
+            value = _stvd_emd_for_resolution(synth_stays_stvd, real_stays_stvd, resolution)
+            stvd_rows.append((resolution, value))
+        print(f"[timing] STVD-EMD (all {len(CPC_H3_RESOLUTIONS)} resolutions) took {time.perf_counter() - _stvd_t0:.1f}s total", file=sys.stderr, flush=True)
+    else:
+        stvd_rows = []
+    metrics["stvd"] = {f"h3_{resolution}": value for resolution, value in stvd_rows}
 
     # Dwell time = time spent at a location. The synthetic simulation records this
     # directly as departure - arrival (`dwell_minutes`); otherwise fall back to
