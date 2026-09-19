@@ -7,6 +7,8 @@ import pandas as pd
 import typer
 from fastmob.network import haversine_m_batch
 
+from citybehavex.tessellation.overture import fetch_with_overture_release_fallback
+
 _CATEGORY_CSV = Path(__file__).parents[1] / "category" / "unique_categories.csv"
 _POI_RELEVANCE_RADIUS_M = 500.0
 _POI_RELEVANCE_DEGREE_WINDOW = 0.0045
@@ -44,39 +46,42 @@ def build_tessellation(
     )
 
     if enrich_overture:
-        typer.echo(
-            f"Fetching H3 cells (res={resolution}) and enriching with "
-            f"Overture Maps {overture_release} POI data ..."
-        )
-        df = duckdb.sql(f"""
-            INSTALL spatial;  LOAD spatial;
-            INSTALL h3 FROM community;  LOAD h3;
-            SET s3_region = 'us-west-2';
-
-            WITH grouped_pois AS (
-                SELECT
-                    h3_latlng_to_cell_string(
-                        ST_Y(geometry), ST_X(geometry), {resolution}
-                    ) AS h3_str,
-                    COUNT(*) AS total_poi_count
-                FROM read_parquet(
-                    's3://overturemaps-us-west-2/release/{overture_release}/theme=places/type=place/*',
-                    filename=true, hive_partitioning=1
-                )
-                WHERE bbox.xmin BETWEEN {min_lon} AND {max_lon}
-                  AND bbox.ymin BETWEEN {min_lat} AND {max_lat}
-                GROUP BY h3_str
-                HAVING COUNT(*) >= {min_poi_count}
+        def query(release: str) -> pd.DataFrame:
+            typer.echo(
+                f"Fetching H3 cells (res={resolution}) and enriching with "
+                f"Overture Maps {release} POI data ..."
             )
-            SELECT
-                h3_str                                          AS tile_id,
-                h3_cell_to_lat(h3_string_to_h3(h3_str))       AS lat,
-                h3_cell_to_lng(h3_string_to_h3(h3_str))       AS lng,
-                h3_cell_to_boundary_wkt(h3_string_to_h3(h3_str)) AS cell_polygon_wkt,
-                total_poi_count
-            FROM grouped_pois
-            ORDER BY total_poi_count DESC
-        """).df()
+            return duckdb.sql(f"""
+                INSTALL spatial;  LOAD spatial;
+                INSTALL h3 FROM community;  LOAD h3;
+                SET s3_region = 'us-west-2';
+
+                WITH grouped_pois AS (
+                    SELECT
+                        h3_latlng_to_cell_string(
+                            ST_Y(geometry), ST_X(geometry), {resolution}
+                        ) AS h3_str,
+                        COUNT(*) AS total_poi_count
+                    FROM read_parquet(
+                        's3://overturemaps-us-west-2/release/{release}/theme=places/type=place/*',
+                        filename=true, hive_partitioning=1
+                    )
+                    WHERE bbox.xmin BETWEEN {min_lon} AND {max_lon}
+                      AND bbox.ymin BETWEEN {min_lat} AND {max_lat}
+                    GROUP BY h3_str
+                    HAVING COUNT(*) >= {min_poi_count}
+                )
+                SELECT
+                    h3_str                                          AS tile_id,
+                    h3_cell_to_lat(h3_string_to_h3(h3_str))       AS lat,
+                    h3_cell_to_lng(h3_string_to_h3(h3_str))       AS lng,
+                    h3_cell_to_boundary_wkt(h3_string_to_h3(h3_str)) AS cell_polygon_wkt,
+                    total_poi_count
+                FROM grouped_pois
+                ORDER BY total_poi_count DESC
+            """).df()
+
+        df = fetch_with_overture_release_fallback(overture_release, query)
     else:
         typer.echo(f"Generating H3 tessellation (res={resolution}) from bbox ...")
         df = duckdb.sql(f"""
@@ -109,26 +114,29 @@ def build_poi_tessellation(
     max_lat: float,
     overture_release: str,
 ) -> pd.DataFrame:
-    typer.echo(
-        f"Fetching individual POIs from Overture Maps {overture_release} "
-        "and computing 500 m relevance ..."
-    )
-    raw_pois = duckdb.sql(f"""
-        INSTALL spatial;  LOAD spatial;
-        SET s3_region = 'us-west-2';
-
-        SELECT
-            id                        AS poi_id,
-            ST_Y(geometry)            AS lat,
-            ST_X(geometry)            AS lng,
-            categories.primary        AS category
-        FROM read_parquet(
-            's3://overturemaps-us-west-2/release/{overture_release}/theme=places/type=place/*',
-            filename=true, hive_partitioning=1
+    def query(release: str) -> pd.DataFrame:
+        typer.echo(
+            f"Fetching individual POIs from Overture Maps {release} "
+            "and computing 500 m relevance ..."
         )
-        WHERE bbox.xmin BETWEEN {min_lon} AND {max_lon}
-          AND bbox.ymin BETWEEN {min_lat} AND {max_lat}
-    """).df()
+        return duckdb.sql(f"""
+            INSTALL spatial;  LOAD spatial;
+            SET s3_region = 'us-west-2';
+
+            SELECT
+                id                        AS poi_id,
+                ST_Y(geometry)            AS lat,
+                ST_X(geometry)            AS lng,
+                categories.primary        AS category
+            FROM read_parquet(
+                's3://overturemaps-us-west-2/release/{release}/theme=places/type=place/*',
+                filename=true, hive_partitioning=1
+            )
+            WHERE bbox.xmin BETWEEN {min_lon} AND {max_lon}
+              AND bbox.ymin BETWEEN {min_lat} AND {max_lat}
+        """).df()
+
+    raw_pois = fetch_with_overture_release_fallback(overture_release, query)
 
     if raw_pois.empty:
         df = pd.DataFrame(columns=["tile_id", "lat", "lng", "category", "relevance"])

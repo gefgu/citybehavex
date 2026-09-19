@@ -10,8 +10,14 @@ import typer
 
 from citybehavex.config import CityBehavExConfig
 from citybehavex.simulation.network_pipeline import _maybe_snap_to_rail, _maybe_snap_to_roads
-from citybehavex.simulation.spatial import _lng_column, _minmax, _resolve_spatial_bounds, h3_cell_strings
+from citybehavex.simulation.spatial import (
+    _lng_column,
+    _minmax,
+    _resolve_spatial_bounds,
+    h3_cell_strings,
+)
 from citybehavex.tessellation import build_poi_tessellation, build_tessellation
+from citybehavex.tessellation.overture import fetch_with_overture_release_fallback
 
 _WORK_SCORE_COLUMN = "work_score"
 
@@ -46,34 +52,36 @@ def _fetch_overture_building_features(
     resolution: int,
     overture_release: str,
 ) -> pd.DataFrame:
-    typer.echo(
-        f"Fetching Overture Maps {overture_release} building counts "
-        f"by H3 cell (res={resolution}) ..."
-    )
-    return duckdb.sql(f"""
-        INSTALL spatial; LOAD spatial;
-        INSTALL h3 FROM community; LOAD h3;
-        INSTALL httpfs; LOAD httpfs;
-        SET s3_region = 'us-west-2';
-
-        SELECT
-            h3_latlng_to_cell_string(
-                ST_Y(ST_Centroid(geometry)),
-                ST_X(ST_Centroid(geometry)),
-                {resolution}
-            ) AS h3_cell,
-            COUNT(*) AS building_count
-        FROM read_parquet(
-            's3://overturemaps-us-west-2/release/{overture_release}/theme=buildings/type=*/*',
-            filename=true,
-            hive_partitioning=1
+    def query(release: str) -> pd.DataFrame:
+        typer.echo(
+            f"Fetching Overture Maps {release} building counts by H3 cell (res={resolution}) ..."
         )
-        WHERE bbox.xmax >= {min_lon}
-          AND bbox.xmin <= {max_lon}
-          AND bbox.ymax >= {min_lat}
-          AND bbox.ymin <= {max_lat}
-        GROUP BY h3_cell
-    """).df()
+        return duckdb.sql(f"""
+            INSTALL spatial; LOAD spatial;
+            INSTALL h3 FROM community; LOAD h3;
+            INSTALL httpfs; LOAD httpfs;
+            SET s3_region = 'us-west-2';
+
+            SELECT
+                h3_latlng_to_cell_string(
+                    ST_Y(ST_Centroid(geometry)),
+                    ST_X(ST_Centroid(geometry)),
+                    {resolution}
+                ) AS h3_cell,
+                COUNT(*) AS building_count
+            FROM read_parquet(
+                's3://overturemaps-us-west-2/release/{release}/theme=buildings/type=*/*',
+                filename=true,
+                hive_partitioning=1
+            )
+            WHERE bbox.xmax >= {min_lon}
+              AND bbox.xmin <= {max_lon}
+              AND bbox.ymax >= {min_lat}
+              AND bbox.ymin <= {max_lat}
+            GROUP BY h3_cell
+        """).df()
+
+    return fetch_with_overture_release_fallback(overture_release, query)
 
 
 def _load_or_build_building_features(

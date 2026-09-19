@@ -15,7 +15,7 @@ class TessellationConfig(BaseModel):
     max_lat: Optional[float] = None
     resolution: int = 10
     enrich_overture: bool = False
-    overture_release: str = "2026-05-20.0"
+    overture_release: str = "2026-08-19.0"
     min_poi_count: int = 1
     poi_tessellation: bool = False
     output: str = "tessellation.parquet"
