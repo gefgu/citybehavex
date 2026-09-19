@@ -3,6 +3,7 @@ __pycache__/
 *.py[cod]
 *.egg-info/
 dist/
+dist_local_test/
 build/
 target/
 *.so
