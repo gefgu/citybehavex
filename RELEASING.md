@@ -1,9 +1,10 @@
 # Releasing CityBehavEx
 
-1. Publish compatible `fastmob-core` to crates.io (done as of v0.2.0) and
-   `fastmob-vis` to PyPI. CityBehavEx's release build must succeed from a
-   clean checkout without the ignored `../fastmob` Cargo/Python development
-   overrides.
+`v0.1.0` shipped 2026-09-19: Linux x86_64 wheels + sdist, live on PyPI.
+
+1. `fastmob-core` (crates.io) and `fastmob-vis` (PyPI) are both published --
+   done. CityBehavEx's release build must succeed from a clean checkout
+   without the ignored `../fastmob` Cargo/Python development overrides.
 2. Build the synthetic YJMOB-1k demo sample asset with
    `python scripts/build_yjmob_sample_release.py --source-trajectories <completed-run.parquet> --source-tessellation <yjmob_h3_tessellation.parquet> --output citybehavex-yjmob-1k-vX.Y.Z.tar.gz`.
    The asset is a subsample (first `--agents`/first `--days`, default 1000/7)

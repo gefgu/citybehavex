@@ -117,13 +117,13 @@ builds on Fastkit-Mobility:
 
 ## Quick Start
 
-> **Not yet on PyPI.** `citybehavex` and its `fastmob-vis` dependency are not
-> published yet — the flow below describes the intended install path once
-> both are released. See [`RELEASING.md`](RELEASING.md) for the outstanding
-> release blockers. Until then, use the source-checkout flow (`uv sync` +
-> `./scripts/update_local_citybehavex.sh`) described further down.
+> **Linux only for now.** `citybehavex`'s first PyPI release ships Linux
+> x86_64 wheels + an sdist; macOS/Windows wheels are planned for a follow-up
+> release. On those platforms `pip install` falls back to building the sdist,
+> which needs a Rust toolchain locally. Contributors building from source can
+> use `uv sync` followed by `./scripts/update_local_citybehavex.sh` instead.
 
-Install the published wheel (Rust is already compiled for supported platforms):
+Install the published wheel:
 
 ```bash
 python -m pip install citybehavex
@@ -132,21 +132,24 @@ citybehavex data download yjmob --project my-citybehavex-project
 cd my-citybehavex-project
 ```
 
-Set the configured external OpenAI-compatible diary LLM, validate the project,
-then run the local temporary aligner service with the simulation:
+Validate the project, then run the local temporary aligner service with the
+simulation:
 
 ```bash
-export CITYBEHAVEX_LLM_BASE_URL=http://llm-host:8081
-export CITYBEHAVEX_LLM_API_KEY=none
-export CITYBEHAVEX_LLM_MODEL=your-served-model
 citybehavex doctor --config configs/yjmob-1k.yaml
 citybehavex simulate --config configs/yjmob-1k.yaml --start-aligners
 ```
 
+No LLM setup needed for this first run — the project ships with bundled,
+pre-generated diaries (`data/yjmob-1k/llm_diaries/validated_diaries_*.json`),
+reused automatically instead of calling an LLM. To regenerate diaries
+instead (e.g. after changing `diaries.city_profile`), set
+`CITYBEHAVEX_LLM_BASE_URL`, `CITYBEHAVEX_LLM_API_KEY`, and
+`CITYBEHAVEX_LLM_MODEL` to a real OpenAI-compatible endpoint and delete the
+corresponding `validated_diaries_*.json` first.
+
 `--start-aligners` requires CUDA by default. Use `--aligner-device cpu` only
-when a GPU is unavailable; it is much slower. The diary-generation LLM remains
-an externally managed service. Contributors building from source still need
-Rust and can use `uv sync` followed by `./scripts/update_local_citybehavex.sh`.
+when a GPU is unavailable; it is much slower.
 
 The command writes simulation outputs under the paths configured in the YAML
 file, typically inside `data/.../results/`. Existing caches are reused when
