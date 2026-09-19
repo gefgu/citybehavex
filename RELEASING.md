@@ -12,11 +12,14 @@
    `yjmob-1k-vX.Y.Z` GitHub Release tag -- deliberately **not** a `vX.Y.Z`
    tag, since that pattern triggers the PyPI/TestPyPI publish workflows below
    -- then replace the template manifest URL/version/SHA-256.
-3. Tag `vX.Y.Z-rcN` to build and publish wheels to TestPyPI. Install and smoke
-   test the release candidate from a clean supported platform.
+3. Optional: tag `vX.Y.Z-rcN` to build and publish wheels to TestPyPI first,
+   and install/smoke test the release candidate from a clean platform.
 4. Tag `vX.Y.Z` to publish the verified wheels and sdist to PyPI and attach
    the artifacts to the GitHub Release.
 
-The release workflows build CPython 3.11--3.13 wheels for Linux x86_64,
-macOS x86_64/arm64, and Windows x86_64. The external diary LLM is never part
-of a package release.
+`release-testpypi.yml` builds CPython 3.11-3.13 wheels for Linux x86_64,
+macOS x86_64/arm64, and Windows x86_64. `release-pypi.yml` currently builds
+Linux x86_64 wheels + the sdist only, to skip the macos-13 runner queue --
+macOS/Windows users fall back to the sdist (needs a Rust toolchain locally)
+until a follow-up release restores the full platform matrix there too. The
+external diary LLM is never part of a package release.
