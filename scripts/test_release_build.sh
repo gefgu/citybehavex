@@ -54,8 +54,20 @@ rm -rf "$OUT_DIR"
 mkdir -p "$OUT_DIR"
 
 echo "==> Building manylinux x86_64 wheel (docker: ${MATURIN_IMAGE}) ..."
-docker run --rm -v "$SNAPSHOT_DIR":/io -v "$REPO_ROOT/$OUT_DIR":/io/"$OUT_DIR" "$MATURIN_IMAGE" \
-    build --release --out "$OUT_DIR" --find-interpreter
+echo "    (installs Python 3.11 inside the container first, matching"
+echo "    release-pypi.yml / release-testpypi.yml's before-script-linux --"
+echo "    the default manylinux image doesn't bundle 3.11 even though"
+echo "    requires-python is >=3.11.4)"
+docker run --rm --entrypoint bash \
+    -v "$SNAPSHOT_DIR":/io -v "$REPO_ROOT/$OUT_DIR":/io/"$OUT_DIR" "$MATURIN_IMAGE" -c "
+set -euo pipefail
+curl -LsSf https://astral.sh/uv/install.sh | sh
+export PATH=\"\$HOME/.local/bin:\$PATH\"
+uv python install 3.11
+mkdir -p /opt/python/cp311-cp311/bin
+ln -sf \"\$(uv python find 3.11)\" /opt/python/cp311-cp311/bin/python3.11
+maturin build --release --out $OUT_DIR --find-interpreter
+"
 
 echo "==> Built:"
 ls -lh "$OUT_DIR"
@@ -68,6 +80,14 @@ grep -E "^(Name|Version|Summary|License-File)" "$OUT_DIR"/extracted/*.dist-info/
 
 echo "==> Checking citybehavex._core is bundled in the wheel ..."
 python3 -m zipfile -l "$WHEEL" | grep -q "_core" && echo "OK: _core extension present"
+
+echo "==> Checking a cp311 wheel was built ..."
+if ls "$OUT_DIR"/*cp311*.whl >/dev/null 2>&1; then
+    echo "OK: $(ls "$OUT_DIR"/*cp311*.whl)"
+else
+    echo "MISSING: no cp311 wheel in $OUT_DIR -- requires-python says >=3.11.4"
+    exit 1
+fi
 
 if [ -n "${SUDO_USER:-}" ]; then
     chown -R "$SUDO_USER":"$SUDO_USER" "$OUT_DIR"

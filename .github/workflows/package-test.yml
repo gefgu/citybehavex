@@ -15,7 +15,7 @@ jobs:
         with:
           python-version: "3.11"
       - name: Build wheel
-        run: pipx run maturin build --release --out dist --find-interpreter
+        run: pipx run maturin build --release --out dist -i python
       - name: Smoke test installed wheel
         run: |
           python -m venv /tmp/citybehavex-wheel-test
