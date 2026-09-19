@@ -121,7 +121,10 @@ builds on Fastkit-Mobility:
 > x86_64 wheels + an sdist; macOS/Windows wheels are planned for a follow-up
 > release. On those platforms `pip install` falls back to building the sdist,
 > which needs a Rust toolchain locally. Contributors building from source can
-> use `uv sync` followed by `./scripts/update_local_citybehavex.sh` instead.
+> use `uv sync` followed by `./scripts/update_local_citybehavex.sh` instead --
+> this needs a sibling checkout of [`fastmob`](https://github.com/gefgu/fastmob)
+> at `../fastmob` next to this repo (`[tool.uv.sources]` points the editable
+> dev install at it; `uv sync` fails without it).
 
 Install the published wheel:
 

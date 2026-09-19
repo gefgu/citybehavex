@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 from pathlib import Path
 from typing import Any, Optional
 
@@ -9,10 +10,19 @@ from pydantic import BaseModel
 
 from .root import CityBehavExConfig
 
+# os.path.expandvars leaves ${VAR} as a literal string when VAR is unset,
+# which config fields relying on env-var-means-configured (e.g. llm.base_url)
+# then treat as a truthy, garbage "configured" value. Substitute unset vars
+# with "" instead, so an intentionally-unconfigured field (like the optional
+# diary LLM) actually reads as empty.
+_ENV_VAR_PATTERN = re.compile(r"\$\{(\w+)\}|\$(\w+)")
+
 
 def _expand_env(value: Any) -> Any:
     if isinstance(value, str):
-        return os.path.expandvars(value)
+        return _ENV_VAR_PATTERN.sub(
+            lambda m: os.environ.get(m.group(1) or m.group(2), ""), value
+        )
     if isinstance(value, list):
         return [_expand_env(item) for item in value]
     if isinstance(value, dict):

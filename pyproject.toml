@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "citybehavex"
-version = "0.1.1"
+version = "0.1.2"
 description = "Scalable, empirically validated, LLM-assisted urban behavior simulation platform."
 readme = "README.md"
 license = { file = "LICENSE" }
@@ -47,6 +47,14 @@ dependencies = [
     "seaborn>=0.13.2",
     "shapely>=2.1.2",
     "sentence-transformers>=3.0.0",
+    # nomic-ai/nomic-embed-text-v1.5's remote code (every shipped config's
+    # default embedding model) calls PreTrainedModel.get_extended_attention_mask,
+    # which transformers 5.x removed -- confirmed the model fails to load under
+    # transformers 5.17.0 and works under 4.57.6. sentence-transformers itself
+    # allows transformers up to <6.0.0, so this needs its own explicit bound.
+    # The floor (not just <5.0.0) matches what vllm 0.20-0.23 also accept, so
+    # the embeddings extra below can still resolve in the same lockfile.
+    "transformers>=4.56.0,<5.0.0",
     # geo/vis are fastmob's current extras; vis pulls in fastmob-vis directly.
     "fastmob[geo,vis]>=0.3.2",
     "typer>=0.12.0",
@@ -60,16 +68,20 @@ dependencies = [
 # rely on cached `diary_embeddings.npz`, or set `embedding.enabled: false` to fall
 # back to identity similarity (exact preferential return).
 embeddings = [
-    # vLLM 0.24 and PyTorch 2.11 provide CUDA 13 / RTX 5090 support.
-    "vllm>=0.24.0,<0.25.0",
+    # vllm 0.24.0 requires transformers>=5.5.3, which conflicts with the base
+    # transformers<5.0.0 pin above (nomic-embed-text-v1.5's remote code needs
+    # transformers<5.0). vllm 0.20-0.23 all pin the identical torch==2.11.0
+    # (same CUDA 13 / RTX 5090 support) but accept transformers>=4.56.0 with
+    # 5.0.x-5.4.x and 5.5.0 excluded -- 0.23.0 is the newest of those.
+    "vllm>=0.23.0,<0.24.0",
     "torch>=2.11.0,<2.12.0",
-    "transformers>=4.51.1,<6.0.0",
+    "transformers>=4.56.0,<5.0.0",
 ]
 finetuning = [
     # CUDA 13 / PyTorch 2.11 includes sm_120 kernels required by RTX 5090.
     "accelerate>=0.26.0",
     "datasets>=3.0.0",
-    "transformers>=4.51.1,<6.0.0",
+    "transformers>=4.56.0,<5.0.0",
 ]
 [project.urls]
 Homepage = "https://github.com/gefgu/citybehavex"
