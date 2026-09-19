@@ -2,13 +2,17 @@ name: Release to PyPI
 
 on:
   push:
-    tags: ["v[0-9]*"]
+    tags:
+      - "v[0-9]*"
+      - "!v*-*"
 
 jobs:
   build:
     strategy:
+      fail-fast: false
       matrix:
         python: ["3.11", "3.12", "3.13"]
+        os: [ubuntu-latest, macos-13, macos-14, windows-latest]
         include:
           - os: ubuntu-latest
             manylinux: auto
@@ -27,7 +31,7 @@ jobs:
       - uses: PyO3/maturin-action@v1
         with:
           command: build
-          args: --release --out dist
+          args: --release --out dist --find-interpreter
           manylinux: ${{ matrix.manylinux }}
       - uses: PyO3/maturin-action@v1
         if: matrix.os == 'ubuntu-latest' && matrix.python == '3.11'
