@@ -53,20 +53,26 @@ git archive HEAD | tar -x -C "$SNAPSHOT_DIR"
 rm -rf "$OUT_DIR"
 mkdir -p "$OUT_DIR"
 
-echo "==> Building manylinux x86_64 wheel (docker: ${MATURIN_IMAGE}) ..."
-echo "    (installs Python 3.11 inside the container first, matching"
-echo "    release-pypi.yml / release-testpypi.yml's before-script-linux --"
-echo "    the default manylinux image doesn't bundle 3.11 even though"
-echo "    requires-python is >=3.11.4)"
+echo "==> Building manylinux x86_64 wheels (docker: ${MATURIN_IMAGE}) ..."
+echo "    (installs Python 3.11 inside the container first and builds it"
+echo "    with an explicit -i pass, matching release-pypi.yml /"
+echo "    release-testpypi.yml's before-script-linux -- the default"
+echo "    manylinux image doesn't bundle 3.11 even though requires-python"
+echo "    is >=3.11.4, and --find-interpreter's own discovery doesn't pick"
+echo "    up a freshly-installed interpreter reliably, so 3.11 gets its"
+echo "    own explicit -i build rather than depending on discovery)"
 docker run --rm --entrypoint bash \
     -v "$SNAPSHOT_DIR":/io -v "$REPO_ROOT/$OUT_DIR":/io/"$OUT_DIR" "$MATURIN_IMAGE" -c "
 set -euo pipefail
+maturin --version
 curl -LsSf https://astral.sh/uv/install.sh | sh
 export PATH=\"\$HOME/.local/bin:\$PATH\"
 uv python install 3.11
-mkdir -p /opt/python/cp311-cp311/bin
-ln -sf \"\$(uv python find 3.11)\" /opt/python/cp311-cp311/bin/python3.11
+PY311=\"\$(uv python find 3.11)\"
+echo \"python3.11 resolved to: \$PY311\"
+\"\$PY311\" --version
 maturin build --release --out $OUT_DIR --find-interpreter
+maturin build --release --out $OUT_DIR -i \"\$PY311\"
 "
 
 echo "==> Built:"

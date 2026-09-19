@@ -30,14 +30,26 @@ jobs:
         with:
           target: ${{ matrix.target }}
           command: build
+          # --find-interpreter's own discovery doesn't reliably pick up a
+          # freshly-installed 3.11 (neither a fresh uv install inside the
+          # manylinux container nor actions/setup-python's install on
+          # macOS/Windows) -- see before-script-linux below and the second
+          # maturin-action step for macOS/Windows. Build everything else
+          # (3.12+, including free-threaded) via discovery as before.
           args: --release --out dist --find-interpreter
           manylinux: ${{ matrix.manylinux }}
           before-script-linux: |
             curl -LsSf https://astral.sh/uv/install.sh | sh
             export PATH="$HOME/.local/bin:$PATH"
             uv python install 3.11
-            mkdir -p /opt/python/cp311-cp311/bin
-            ln -sf "$(uv python find 3.11)" /opt/python/cp311-cp311/bin/python3.11
+            PY311="$(uv python find 3.11)"
+            maturin build --release --out dist -i "$PY311"
+      - uses: PyO3/maturin-action@v1
+        if: matrix.os != 'ubuntu-latest'
+        with:
+          target: ${{ matrix.target }}
+          command: build
+          args: --release --out dist -i python3.11
       - uses: PyO3/maturin-action@v1
         if: matrix.os == 'ubuntu-latest'
         with:
