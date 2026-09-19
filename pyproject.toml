@@ -83,7 +83,14 @@ citybehavex = "citybehavex.cli:app"
 module-name = "citybehavex._core"
 python-source = "."
 manifest-path = "citybehavex-py/Cargo.toml"
-include = ["citybehavex/category/*.csv", "citybehavex/templates/**"]
+include = [
+    "citybehavex/category/*.csv",
+    "citybehavex/templates/**",
+    # Wheels already get NOTICE via maturin's own license-file auto-detection
+    # (dist-info/licenses/NOTICE); the sdist doesn't, so it's added explicitly
+    # here, scoped to sdist only to avoid a stray root-level copy in wheels.
+    { path = "NOTICE", format = "sdist" },
+]
 
 # PyPI's torch wheel is CPU-only. Pin the PyTorch CUDA 13 index so `uv sync`
 # installs a build that contains RTX 5090 (sm_120) kernels.

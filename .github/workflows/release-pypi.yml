@@ -57,3 +57,8 @@ jobs:
       - uses: pypa/gh-action-pypi-publish@release/v1
         with:
           packages-dir: dist
+          # v0.1.0's 7 wheels already uploaded successfully on the first
+          # attempt; only the sdist failed (License-File NOTICE, now fixed).
+          # Re-running this workflow would otherwise error re-uploading
+          # files PyPI already has.
+          skip-existing: true
