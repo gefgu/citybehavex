@@ -1,12 +1,17 @@
 # Releasing CityBehavEx
 
-1. Publish compatible `fastmob-core` to crates.io and `fastmob-vis` to PyPI.
-   CityBehavEx's release build must succeed from a clean checkout without the
-   ignored `../fastmob` Cargo/Python development overrides.
-2. Build the license-cleared prepared YJMOB-1k asset with
-   `python scripts/build_yjmob_sample_release.py --input-dir <prepared-dir> --output citybehavex-yjmob-1k-vX.Y.Z.tar.gz`.
-   Attach it to the matching GitHub Release, then replace the template
-   manifest URL/version/SHA-256 before tagging the package release.
+1. Publish compatible `fastmob-core` to crates.io (done as of v0.2.0) and
+   `fastmob-vis` to PyPI. CityBehavEx's release build must succeed from a
+   clean checkout without the ignored `../fastmob` Cargo/Python development
+   overrides.
+2. Build the synthetic YJMOB-1k demo sample asset with
+   `python scripts/build_yjmob_sample_release.py --source-trajectories <completed-run.parquet> --source-tessellation <yjmob_h3_tessellation.parquet> --output citybehavex-yjmob-1k-vX.Y.Z.tar.gz`.
+   The asset is a subsample (first `--agents`/first `--days`, default 1000/7)
+   of an already-completed CityBehavEx run, not the real YJMob100K dataset,
+   so it carries no data-license restrictions. Publish it under its own
+   `yjmob-1k-vX.Y.Z` GitHub Release tag -- deliberately **not** a `vX.Y.Z`
+   tag, since that pattern triggers the PyPI/TestPyPI publish workflows below
+   -- then replace the template manifest URL/version/SHA-256.
 3. Tag `vX.Y.Z-rcN` to build and publish wheels to TestPyPI. Install and smoke
    test the release candidate from a clean supported platform.
 4. Tag `vX.Y.Z` to publish the verified wheels and sdist to PyPI and attach

@@ -31,5 +31,9 @@ profiles:
   coherence_alignment_backend: rerank
   coherence_alignment_model: gefgu/modernbert-profile-coherence-aligner
 comparison:
-  path: data/yjmob-1k/yjmob_wgs84_simple.parquet
-  label: yjmob-1k
+  # Synthetic demo baseline: the first 1,000 agents / first 7 days of an
+  # already-completed CityBehavEx run, not the real YJMob100K dataset. See
+  # the "Setting up data/ for the YJMOB scenario" section of the README to
+  # compare against real observed mobility instead.
+  path: data/yjmob-1k/yjmob_1k_simulated_sample.parquet
+  label: yjmob-1k-simulated-demo

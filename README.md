@@ -368,6 +368,12 @@ input and generated files under `data/`, with exact paths controlled by each YAM
 configuration. `data/` itself is not part of the repository (it is gitignored) —
 create it locally and populate it before running a scenario.
 
+> **The packaged `citybehavex data download yjmob` sample is not this
+> dataset.** It ships a small, entirely synthetic comparison baseline (the
+> first 1,000 agents / first 7 days of an already-completed CityBehavEx run)
+> so the pip-installed CLI has zero data-license entanglement. To validate
+> against the real YJMob100K dataset, follow the steps below instead.
+
 ### Setting up `data/` for the YJMOB scenario
 
 1. Create the directory: `mkdir -p data/yjmob`.
