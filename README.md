@@ -117,11 +117,11 @@ builds on Fastkit-Mobility:
 
 ## Quick Start
 
-> **Linux only for now.** `citybehavex`'s first PyPI release ships Linux
-> x86_64 wheels + an sdist; macOS/Windows wheels are planned for a follow-up
-> release. On those platforms `pip install` falls back to building the sdist,
-> which needs a Rust toolchain locally. Contributors building from source can
-> use `uv sync` followed by `./scripts/update_local_citybehavex.sh` instead --
+> **Prebuilt wheels**: Linux x86_64, macOS x86_64/arm64, and Windows x86_64
+> (from v0.1.3 onward; v0.1.0-v0.1.2 shipped Linux-only). On any other
+> platform, `pip install` falls back to building the sdist, which needs a
+> Rust toolchain locally. Contributors building from source can use
+> `uv sync` followed by `./scripts/update_local_citybehavex.sh` instead --
 > this needs a sibling checkout of [`fastmob`](https://github.com/gefgu/fastmob)
 > at `../fastmob` next to this repo (`[tool.uv.sources]` points the editable
 > dev install at it; `uv sync` fails without it).
@@ -167,9 +167,16 @@ available.
 
 ## Web Demo
 
-Start the FastAPI backend:
+> **Requires a source checkout, not just `pip install citybehavex`.**
+> `web/` (the FastAPI backend and React frontend) isn't part of the
+> published wheel/sdist at all -- clone the repo to run it.
+
+Install the backend's extra dependencies (FastAPI + uvicorn aren't needed
+for the CLI/simulation core, so they're not in the base install) and start
+it:
 
 ```bash
+uv sync --extra web
 uv run uvicorn app.main:app --app-dir web/backend --port 8000
 ```
 

@@ -1,6 +1,7 @@
 # Releasing CityBehavEx
 
-`v0.1.0` shipped 2026-09-19: Linux x86_64 wheels + sdist, live on PyPI.
+`v0.1.0`-`v0.1.2` shipped 2026-09-19: Linux x86_64 wheels + sdist, live on
+PyPI. `v0.1.3` restores the full platform matrix (see below).
 
 1. `fastmob-core` (crates.io) and `fastmob-vis` (PyPI) are both published --
    done. CityBehavEx's release build must succeed from a clean checkout
@@ -18,9 +19,7 @@
 4. Tag `vX.Y.Z` to publish the verified wheels and sdist to PyPI and attach
    the artifacts to the GitHub Release.
 
-`release-testpypi.yml` builds CPython 3.11-3.13 wheels for Linux x86_64,
-macOS x86_64/arm64, and Windows x86_64. `release-pypi.yml` currently builds
-Linux x86_64 wheels + the sdist only, to skip the macos-13 runner queue --
-macOS/Windows users fall back to the sdist (needs a Rust toolchain locally)
-until a follow-up release restores the full platform matrix there too. The
-external diary LLM is never part of a package release.
+Both `release-testpypi.yml` and `release-pypi.yml` build CPython 3.11-3.15
+(incl. free-threaded) wheels for Linux x86_64, macOS x86_64/arm64, and
+Windows x86_64, plus the sdist. The external diary LLM is never part of a
+package release.

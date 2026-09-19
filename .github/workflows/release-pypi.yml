@@ -8,23 +8,38 @@ on:
 
 jobs:
   build:
-    # Linux-only for this first release, to skip the macos-13 runner queue
-    # bottleneck. macOS/Windows users fall back to the sdist (needs a Rust
-    # toolchain to build locally) until a follow-up release adds prebuilt
-    # wheels for those platforms -- see release-testpypi.yml for the full
-    # 4-platform matrix to restore here when that happens.
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64
+            manylinux: auto
+          - os: macos-13
+            target: x86_64
+          - os: macos-14
+            target: aarch64
+          - os: windows-latest
+            target: x86_64
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        if: matrix.os != 'ubuntu-latest'
+        with:
+          python-version: "3.11"
       - uses: PyO3/maturin-action@v1
         with:
+          target: ${{ matrix.target }}
           command: build
           # --find-interpreter's own discovery doesn't reliably pick up a
-          # freshly-installed 3.11, so it gets its own explicit -i build via
-          # before-script-linux; --find-interpreter covers everything else
-          # (3.12+, including free-threaded) already bundled in the image.
+          # freshly-installed 3.11 (neither a fresh uv install inside the
+          # manylinux container nor actions/setup-python's install on
+          # macOS/Windows) -- see before-script-linux below and the second
+          # maturin-action step for macOS/Windows. Build everything else
+          # (3.12+, including free-threaded) via discovery as before.
           args: --release --out dist --find-interpreter
-          manylinux: auto
+          manylinux: ${{ matrix.manylinux }}
           before-script-linux: |
             curl -LsSf https://astral.sh/uv/install.sh | sh
             export PATH="$HOME/.local/bin:$PATH"
@@ -32,12 +47,19 @@ jobs:
             PY311="$(uv python find 3.11)"
             maturin build --release --out dist -i "$PY311"
       - uses: PyO3/maturin-action@v1
+        if: matrix.os != 'ubuntu-latest'
+        with:
+          target: ${{ matrix.target }}
+          command: build
+          args: --release --out dist -i python3.11
+      - uses: PyO3/maturin-action@v1
+        if: matrix.os == 'ubuntu-latest'
         with:
           command: sdist
           args: --out dist
       - uses: actions/upload-artifact@v4
         with:
-          name: packages
+          name: packages-${{ matrix.os }}
           path: dist
   release:
     needs: build
@@ -57,8 +79,9 @@ jobs:
       - uses: pypa/gh-action-pypi-publish@release/v1
         with:
           packages-dir: dist
-          # v0.1.0's 7 wheels already uploaded successfully on the first
-          # attempt; only the sdist failed (License-File NOTICE, now fixed).
-          # Re-running this workflow would otherwise error re-uploading
-          # files PyPI already has.
+          # Lets a retried/re-triggered run skip files a prior attempt for
+          # the same version already uploaded successfully, instead of
+          # erroring on the duplicate filename (hit this during v0.1.0's
+          # release: wheels succeeded, only the sdist failed and needed a
+          # retry).
           skip-existing: true

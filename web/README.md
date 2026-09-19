@@ -18,9 +18,11 @@ web/
 
 ## Run
 
-Start the backend from the repository root:
+The backend needs FastAPI + uvicorn, which aren't part of the base install
+(they're not needed for the CLI/simulation core). From the repository root:
 
 ```bash
+uv sync --extra web
 uv run uvicorn app.main:app --app-dir web/backend --port 8000
 ```
 
