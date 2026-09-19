@@ -27,7 +27,7 @@ data/llm_diaries_gparis/markov_training.parquet
 .citybehavex/
 
 
-notebooks/02_shanghai
+notebooks/02_shanghai_preparation/
 
 *.npz
 **/diary_embeddings.npz
@@ -85,3 +85,20 @@ uv.toml
 
 logs/
 codebooks/
+
+# Author's local data mount / research-only docs and notebooks -- kept
+# locally, not shipped in the public demo repo
+/data
+/tei_docker_commands.md
+/RUST_BACKEND_MIGRATION.md
+notebooks/00_ile_de_france_exploration/00_densityepr_generation.ipynb
+notebooks/00_ile_de_france_exploration/01_buildings_view.ipynb
+notebooks/00_ile_de_france_exploration/03_home_locations_individuals.ipynb
+notebooks/00_ile_de_france_exploration/04_mtus_comparision.ipynb
+notebooks/00_ile_de_france_exploration/05_motif_distribution.ipynb
+notebooks/00_ile_de_france_exploration/07_gparis_500_reference.ipynb
+notebooks/03_yjmob2_preparation/02_motif_distribution.ipynb
+notebooks/04_reranker_testing/
+notebooks/05_poi_activity_mask/
+notebooks/06_cross_reranker_evaluation/01_profile_coherence_evaluation.ipynb
+notebooks/08_recast_friendship_validation/

@@ -5,7 +5,7 @@ simulation platform. It generates synthetic city-scale mobility trajectories and
 lets users inspect, replay, debug, and evaluate them against observed mobility,
 time-use, semantic, transport, and social-network patterns.
 
-This repository accompanies an EMNLP Demo Track submission:
+This repository accompanies an EACL Demo Track submission:
 
 > **CityBehavEx: A Scalable and Empirically Validated LLM-Assisted Urban
 > Simulation Platform**
@@ -327,7 +327,25 @@ data access.
 
 Large simulation outputs are intentionally not committed. The repository expects
 input and generated files under `data/`, with exact paths controlled by each YAML
-configuration.
+configuration. `data/` itself is not part of the repository (it is gitignored) —
+create it locally and populate it before running a scenario.
+
+### Setting up `data/` for the YJMOB scenario
+
+1. Create the directory: `mkdir -p data/yjmob`.
+2. Obtain the YJMob100K dataset (released for the HuMob Challenge) and place its
+   `dataset1` CSV as `data/yjmob/yjmob100k-dataset1.csv.gz`.
+3. Run the preparation notebooks in order to produce the processed parquet files
+   that `configs/yjmob_simulation.yaml` reads:
+   `notebooks/01_yjmob_preparation/01_preprocessing.ipynb`, then `02_eda.ipynb`
+   and `04_motif_distribution.ipynb` as needed for validation baselines.
+4. For the disaster/special-event scenario (`configs/yjmob2_simulation.yaml`),
+   run `notebooks/03_yjmob2_preparation/01_preprocessing.ipynb` against the
+   corresponding YJMob2 release.
+
+Greater Paris and Shanghai configs expect the same `data/<city>/...` layout, but
+since their source datasets are private, they cannot be reproduced from this
+repository alone.
 
 ## Reproducing Paper-Style Experiments
 
