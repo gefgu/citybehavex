@@ -5,7 +5,24 @@ build-backend = "maturin"
 [project]
 name = "citybehavex"
 version = "0.1.0"
+description = "Scalable, empirically validated, LLM-assisted urban behavior simulation platform."
+readme = "README.md"
+license = { file = "LICENSE" }
+authors = [{ name = "gefgu", email = "gefgu@hotmail.com" }]
 requires-python = ">=3.11.4"
+keywords = ["urban-mobility", "simulation", "synthetic-population", "agent-based-modeling", "llm"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: GNU Affero General Public License v3 (AGPLv3)",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Rust",
+    "Topic :: Scientific/Engineering",
+    "Topic :: Scientific/Engineering :: GIS",
+]
 dependencies = [
     "contextily>=1.7.0",
     "duckdb>=1.5.3",
@@ -57,6 +74,11 @@ finetuning = [
     "datasets>=3.0.0",
     "transformers>=4.51.1,<6.0.0",
 ]
+[project.urls]
+Homepage = "https://github.com/gefgu/citybehavex"
+Repository = "https://github.com/gefgu/citybehavex"
+Issues = "https://github.com/gefgu/citybehavex/issues"
+
 [project.scripts]
 citybehavex = "citybehavex.cli:app"
 
