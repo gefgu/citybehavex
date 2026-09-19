@@ -5,7 +5,13 @@
     "module": "ESNext",
     "moduleResolution": "bundler",
     "allowSyntheticDefaultImports": true,
-    "strict": true
+    "strict": true,
+    // Composite projects can't set noEmit, but the output is only needed for
+    // `tsc -b`'s own type-check bookkeeping -- redirect it out of the source
+    // tree so it never shadows vite.config.ts with a stale compiled copy
+    // (this is what made Vite load a build 4 weeks stale, still pointing at
+    // the pre-FastAPI-migration backend port).
+    "outDir": "./node_modules/.tsbuild"
   },
   "include": ["vite.config.ts"]
 }
