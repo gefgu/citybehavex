@@ -62,7 +62,7 @@ ls -lh "$OUT_DIR"
 
 WHEEL=$(ls "$OUT_DIR"/*.whl | head -1)
 echo "==> Checking metadata on ${WHEEL} ..."
-python3 -m zipfile -l "$WHEEL" | grep -E "\.dist-info/METADATA$"
+python3 -m zipfile -l "$WHEEL" | grep -E "\.dist-info/METADATA"
 python3 -m zipfile -e "$WHEEL" "$OUT_DIR/extracted"
 grep -E "^(Name|Version|Summary|License-File)" "$OUT_DIR"/extracted/*.dist-info/METADATA
 
