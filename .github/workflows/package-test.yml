@@ -18,7 +18,12 @@ jobs:
         run: pipx run maturin build --release --out dist -i python
       - name: Smoke test installed wheel
         run: |
+          DIST_DIR="$(pwd)/dist"
           python -m venv /tmp/citybehavex-wheel-test
-          /tmp/citybehavex-wheel-test/bin/pip install --find-links dist citybehavex
+          /tmp/citybehavex-wheel-test/bin/pip install --find-links "$DIST_DIR" citybehavex
+          # Run from outside the checkout: it has its own citybehavex/ source
+          # directory (no compiled _core), which Python's CWD-based import
+          # resolution would otherwise shadow the installed wheel with.
+          cd /tmp
           /tmp/citybehavex-wheel-test/bin/citybehavex --help
           /tmp/citybehavex-wheel-test/bin/python -c 'import citybehavex._core'
