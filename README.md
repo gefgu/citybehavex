@@ -61,6 +61,10 @@ modified versions of the simulator remain available to the research community.
 
 ```text
 citybehavex/                 Python package and report/evaluation logic
+citybehavex/aligners/        Packaged local aligner/embedding server (`--start-aligners`)
+citybehavex/templates/       `citybehavex init` project scaffold and the YJMOB-1k asset manifest
+citybehavex/project.py       `init`/`data download`/`doctor` CLI implementations
+citybehavex/services.py      Local aligner process lifecycle helpers used by `simulate`
 citybehavex-py/              Rust simulation core exposed as citybehavex._core
 configs/                     Reproducible scenario and ablation configurations
 scripts/                     Simulation, training, serving, and sweep utilities
@@ -79,11 +83,19 @@ The web backend is the FastAPI app in `web/backend/app`; see
 
 Core requirements:
 
-- Python 3.11+
-- Rust toolchain, for the simulation core (`citybehavex._core`) — not needed
-  for the web backend, which is pure Python
-- `uv`
+- Python 3.11.4+ (earlier 3.11.x patches lack `tarfile`'s `filter=` support,
+  which `citybehavex data download` relies on)
+
+Additional requirements for the web dashboard (not needed for the pip-installed
+CLI on its own):
+
 - Node.js 18+ and npm, for the web frontend
+
+Additional requirements for building from a source checkout (not needed when
+installing the published wheel):
+
+- Rust toolchain, for the simulation core (`citybehavex._core`)
+- `uv`
 
 Optional requirements:
 
@@ -92,9 +104,11 @@ Optional requirements:
 - An OpenAI-compatible LLM endpoint when regenerating diaries or training
   semantic aligners
 
-The Python package uses `maturin` to build the Rust extension (the core
-simulation engine only — the web backend is pure Python/FastAPI and needs no
-Rust toolchain). CityBehavEx builds on Fastkit-Mobility:
+The published wheel ships a prebuilt Rust extension, so `pip install
+citybehavex` needs no Rust toolchain. Building from source uses `maturin` to
+build that extension (the core simulation engine only — the web backend is
+pure Python/FastAPI and needs no Rust toolchain either way). CityBehavEx
+builds on Fastkit-Mobility:
 
 - [Fastkit-Mobility](https://github.com/gefgu/fastmob) (`fastmob` on PyPI) —
   Rust-accelerated mobility analysis and visualization, available as
@@ -103,18 +117,36 @@ Rust toolchain). CityBehavEx builds on Fastkit-Mobility:
 
 ## Quick Start
 
-From the repository root:
+> **Not yet on PyPI.** `citybehavex` and its `fastmob-vis` dependency are not
+> published yet — the flow below describes the intended install path once
+> both are released. See [`RELEASING.md`](RELEASING.md) for the outstanding
+> release blockers. Until then, use the source-checkout flow (`uv sync` +
+> `./scripts/update_local_citybehavex.sh`) described further down.
+
+Install the published wheel (Rust is already compiled for supported platforms):
 
 ```bash
-uv sync
-./scripts/update_local_citybehavex.sh
+python -m pip install citybehavex
+citybehavex init my-citybehavex-project
+citybehavex data download yjmob --project my-citybehavex-project
+cd my-citybehavex-project
 ```
 
-Run a public-data-oriented YJMOB scenario:
+Set the configured external OpenAI-compatible diary LLM, validate the project,
+then run the local temporary aligner service with the simulation:
 
 ```bash
-uv run citybehavex simulate --config configs/yjmob_simulation.yaml
+export CITYBEHAVEX_LLM_BASE_URL=http://llm-host:8081
+export CITYBEHAVEX_LLM_API_KEY=none
+export CITYBEHAVEX_LLM_MODEL=your-served-model
+citybehavex doctor --config configs/yjmob-1k.yaml
+citybehavex simulate --config configs/yjmob-1k.yaml --start-aligners
 ```
+
+`--start-aligners` requires CUDA by default. Use `--aligner-device cpu` only
+when a GPU is unavailable; it is much slower. The diary-generation LLM remains
+an externally managed service. Contributors building from source still need
+Rust and can use `uv sync` followed by `./scripts/update_local_citybehavex.sh`.
 
 The command writes simulation outputs under the paths configured in the YAML
 file, typically inside `data/.../results/`. Existing caches are reused when
@@ -250,6 +282,12 @@ uv run python scripts/serve_aligners.py \
   --predict-batch-size 128
 ```
 
+For a one-off simulation, the equivalent public CLI flow is simply:
+
+```bash
+citybehavex simulate --config configs/yjmob-1k.yaml --start-aligners
+```
+
 Point every config's `*_alignment_base_url` and `embedding.base_url` at this
 one port; only the `*_alignment_model` / `embedding.model` fields select which
 checkpoint gets loaded for a given request — no separate service or port per
@@ -375,7 +413,9 @@ timeline replay, metrics, and cached comparison payloads.
 
 ## Troubleshooting
 
-- **Rust extension not found:** rerun `./scripts/update_local_citybehavex.sh`.
+- **Rust extension not found (source checkout only):** rerun
+  `./scripts/update_local_citybehavex.sh`. The published wheel bundles a
+  prebuilt extension and never hits this.
 - **`fastmob` not found:** install the project dependencies with `uv sync`.
   The required `fastmob` features, including visualization, are installed from
   PyPI as extras.

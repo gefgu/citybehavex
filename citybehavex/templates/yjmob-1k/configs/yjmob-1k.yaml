@@ -1,0 +1,35 @@
+tessellation:
+  output: data/yjmob-1k/yjmob_h3_tessellation.parquet
+simulation:
+  agents: 1000
+  days: 7
+  start_date: "2019-09-15"
+  output: data/yjmob-1k/simulation_trajectories.parquet
+  random_state: 42
+llm:
+  base_url: ${CITYBEHAVEX_LLM_BASE_URL}
+  api_key: ${CITYBEHAVEX_LLM_API_KEY}
+  model: ${CITYBEHAVEX_LLM_MODEL}
+  cache_dir: data/yjmob-1k/llm_diaries
+  validated_diaries_path: data/yjmob-1k/llm_diaries/validated_diaries.json
+diaries:
+  city_profile: Nagoya / Aichi Prefecture, Japan.
+embedding:
+  enabled: true
+  model: nomic-ai/nomic-embed-text-v1.5
+  cache_dir: data/yjmob-1k/llm_diaries
+schedule:
+  similarity_backend: alignment_model
+  alignment_model: gefgu/modernbert-schedule-aligner
+activities:
+  enabled: true
+  alignment_backend: rerank
+  alignment_model: gefgu/modernbert-activity-aligner
+profiles:
+  enabled: true
+  output: data/yjmob-1k/agent_profiles.parquet
+  coherence_alignment_backend: rerank
+  coherence_alignment_model: gefgu/modernbert-profile-coherence-aligner
+comparison:
+  path: data/yjmob-1k/yjmob_wgs84_simple.parquet
+  label: yjmob-1k

@@ -1,0 +1,24 @@
+name: Package smoke tests
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  wheel:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Build wheel
+        run: pipx run maturin build --release --out dist
+      - name: Smoke test installed wheel
+        run: |
+          python -m venv /tmp/citybehavex-wheel-test
+          /tmp/citybehavex-wheel-test/bin/pip install --find-links dist citybehavex
+          /tmp/citybehavex-wheel-test/bin/citybehavex --help
+          /tmp/citybehavex-wheel-test/bin/python -c 'import citybehavex._core'

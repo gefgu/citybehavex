@@ -5,7 +5,7 @@ build-backend = "maturin"
 [project]
 name = "citybehavex"
 version = "0.1.0"
-requires-python = ">=3.11"
+requires-python = ">=3.11.4"
 dependencies = [
     "contextily>=1.7.0",
     "duckdb>=1.5.3",
@@ -31,11 +31,13 @@ dependencies = [
     "seaborn>=0.13.2",
     "shapely>=2.1.2",
     "statsmodels>=0.14.6",
+    "sentence-transformers>=3.0.0",
     "fastmob[data,generation,tessellation,diversity,visualization]>=0.1.2",
     "fastmob-vis",
     "tqdm>=4.67.3",
     "typer>=0.12.0",
     "einops>=0.8.2",
+    "torch>=2.11.0,<2.12.0",
 ]
 
 [project.optional-dependencies]
@@ -53,8 +55,6 @@ finetuning = [
     # CUDA 13 / PyTorch 2.11 includes sm_120 kernels required by RTX 5090.
     "accelerate>=0.26.0",
     "datasets>=3.0.0",
-    "sentence-transformers>=3.0.0",
-    "torch>=2.11.0,<2.12.0",
     "transformers>=4.51.1,<6.0.0",
 ]
 [project.scripts]
@@ -64,7 +64,7 @@ citybehavex = "citybehavex.cli:app"
 module-name = "citybehavex._core"
 python-source = "."
 manifest-path = "citybehavex-py/Cargo.toml"
-include = ["citybehavex/category/*.csv"]
+include = ["citybehavex/category/*.csv", "citybehavex/templates/**"]
 
 # PyPI's torch wheel is CPU-only. Pin the PyTorch CUDA 13 index so `uv sync`
 # installs a build that contains RTX 5090 (sm_120) kernels.
@@ -74,6 +74,8 @@ url = "https://download.pytorch.org/whl/cu130"
 explicit = true
 
 [tool.uv.sources]
+# Development-only sibling overrides.  These do not become wheel metadata:
+# release installs resolve the published fastmob and fastmob-vis distributions.
 fastmob = { path = "../fastmob", editable = true }
 fastmob-vis = { path = "../fastmob/fastmob-vis", editable = true }
 torch = { index = "pytorch-cu130" }

@@ -1,0 +1,55 @@
+name: Release candidate to TestPyPI
+
+on:
+  push:
+    tags: ["v*-rc*"]
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        python: ["3.11", "3.12", "3.13"]
+        include:
+          - os: ubuntu-latest
+            target: x86_64
+            manylinux: auto
+          - os: macos-13
+            target: x86_64
+          - os: macos-14
+            target: aarch64
+          - os: windows-latest
+            target: x86_64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - uses: PyO3/maturin-action@v1
+        with:
+          command: build
+          args: --release --out dist
+          manylinux: ${{ matrix.manylinux }}
+      - uses: PyO3/maturin-action@v1
+        if: matrix.os == 'ubuntu-latest' && matrix.python == '3.11'
+        with:
+          command: sdist
+          args: --out dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: packages-${{ matrix.os }}-${{ matrix.python }}
+          path: dist
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist
+          repository-url: https://test.pypi.org/legacy/

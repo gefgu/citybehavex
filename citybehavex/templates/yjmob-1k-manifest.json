@@ -1,0 +1,6 @@
+{
+  "version": "0.1.0",
+  "url": "https://github.com/gefgu/citybehavex/releases/download/v0.1.0/citybehavex-yjmob-1k-v0.1.0.tar.gz",
+  "sha256": "REPLACE_WITH_RELEASE_ASSET_SHA256",
+  "files": ["data/yjmob-1k/yjmob_h3_tessellation.parquet", "data/yjmob-1k/yjmob_wgs84_simple.parquet"]
+}

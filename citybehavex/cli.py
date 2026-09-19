@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import enum
 from pathlib import Path
 from typing import Optional
 
@@ -8,6 +9,8 @@ import typer
 
 from .config import CityBehavExConfig, apply_overrides, load_config
 from .llm import LLMConfig
+from .project import doctor as run_doctor
+from .project import download_yjmob, init_project
 from .reports import ComparisonConfig
 from .reports.comparison import (
     _ACTIVITY_CANDIDATES,
@@ -17,11 +20,55 @@ from .reports.comparison import (
     load_trajectory,
 )
 from .roads import RoadNetworkConfig
+from .services import route_to_local_aligners, temporary_aligners
 from .simulation import SimulationConfig, run_simulation
 from .social.config import SocialNetworkConfig
 from .tessellation import TessellationConfig, build_poi_tessellation, build_tessellation
 
+
+class AlignerDevice(str, enum.Enum):
+    cuda = "cuda"
+    cpu = "cpu"
+
+
 app = typer.Typer(help="CityBehavEx - synthetic urban mobility toolkit.")
+data_app = typer.Typer(help="Download public CityBehavEx example data.")
+app.add_typer(data_app, name="data")
+
+
+@app.command()
+def init(destination: str = typer.Argument(..., help="New empty project directory.")):
+    """Create an editable public YJMOB-1k example project."""
+    try:
+        path = init_project(Path(destination))
+    except ValueError as exc:
+        typer.echo(f"Error: {exc}", err=True)
+        raise typer.Exit(1) from exc
+    typer.echo(f"Created project -> {path}")
+
+
+@data_app.command("download")
+def data_download(
+    dataset: str = typer.Argument(..., help="Public dataset name (currently: yjmob)."),
+    project: str = typer.Option(".", "--project", help="Initialized project directory."),
+):
+    """Download the versioned prepared public sample data."""
+    if dataset != "yjmob":
+        typer.echo("Error: only the yjmob sample is currently available.", err=True)
+        raise typer.Exit(1)
+    try:
+        download_yjmob(Path(project))
+    except Exception as exc:  # noqa: BLE001 - present a CLI error, retain cause.
+        typer.echo(f"Error: {exc}", err=True)
+        raise typer.Exit(1) from exc
+    typer.echo("YJMOB-1k sample data: OK")
+
+
+@app.command()
+def doctor(config: str = typer.Option(..., "--config", help="YAML config path.")):
+    """Check configured local inputs and external service endpoints."""
+    for message in run_doctor(config):
+        typer.echo(message)
 
 
 @app.command()
@@ -253,6 +300,15 @@ def simulate(
         "--enable-road-routing/--no-enable-road-routing",
         help="Route car trips over the Overture Maps road graph instead of straight-line haversine.",
     ),
+    start_aligners: bool = typer.Option(
+        False,
+        "--start-aligners",
+        help="Temporarily start the local aligner/embedding service for this simulation.",
+    ),
+    aligner_device: AlignerDevice = typer.Option(
+        AlignerDevice.cuda, "--aligner-device", help="Local aligner device."
+    ),
+    aligner_port: int = typer.Option(8090, "--aligner-port", min=1, max=65535),
 ):
     """Run DensityEPR fallback or config-driven simulation core."""
     loaded = load_config(config)
@@ -329,8 +385,14 @@ def simulate(
         social=soc,
         comparison=comp,
     )
+    if aligner_device is AlignerDevice.cpu and start_aligners:
+        typer.echo("Warning: CPU aligner inference is substantially slower than CUDA.", err=True)
     try:
-        run_simulation(effective)
+        if start_aligners:
+            with temporary_aligners(port=aligner_port, device=aligner_device.value) as base_url:
+                run_simulation(route_to_local_aligners(effective, base_url))
+        else:
+            run_simulation(effective)
     except ValueError as exc:
         typer.echo(f"Error: {exc}", err=True)
         raise typer.Exit(1) from exc

@@ -1,0 +1,57 @@
+name: Release to PyPI
+
+on:
+  push:
+    tags: ["v[0-9]*"]
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        python: ["3.11", "3.12", "3.13"]
+        include:
+          - os: ubuntu-latest
+            manylinux: auto
+          - os: macos-13
+            manylinux: off
+          - os: macos-14
+            manylinux: off
+          - os: windows-latest
+            manylinux: off
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - uses: PyO3/maturin-action@v1
+        with:
+          command: build
+          args: --release --out dist
+          manylinux: ${{ matrix.manylinux }}
+      - uses: PyO3/maturin-action@v1
+        if: matrix.os == 'ubuntu-latest' && matrix.python == '3.11'
+        with:
+          command: sdist
+          args: --out dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: packages-${{ matrix.os }}-${{ matrix.python }}
+          path: dist
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist
