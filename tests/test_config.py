@@ -74,6 +74,7 @@ def test_social_network_config_accepts_bounded_social_graph_settings():
         friendship_update_interval_hours=12.0,
         regularity_threshold=0.4,
         max_colocation_group_size=10,
+        copresence_bias_weight=0.5,
     )
     assert config.social_graph_k == 30
     assert config.profile_graph_exact_threshold == 5000
@@ -81,6 +82,7 @@ def test_social_network_config_accepts_bounded_social_graph_settings():
     assert config.friendship_update_interval_hours == 12.0
     assert config.regularity_threshold == 0.4
     assert config.max_colocation_group_size == 10
+    assert config.copresence_bias_weight == 0.5
 
 
 def test_social_network_config_rejects_non_positive_settings():
@@ -96,6 +98,8 @@ def test_social_network_config_rejects_non_positive_settings():
         SocialNetworkConfig(strength_decay_rate=-0.1)
     with pytest.raises(ValueError):
         SocialNetworkConfig(max_colocation_group_size=1)
+    with pytest.raises(ValueError):
+        SocialNetworkConfig(copresence_bias_weight=-0.1)
 
 
 def test_llm_config_defaults_to_thirty_diaries():

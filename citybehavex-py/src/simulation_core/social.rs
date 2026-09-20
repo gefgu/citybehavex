@@ -71,15 +71,57 @@ fn cdf_sample(rng: &mut impl Rng, candidates: &[usize], cdf: &[f64]) -> usize {
     candidates[idx]
 }
 
+/// Sums `edge_sim` over connected friends currently at each location. Only
+/// ever called when `copresence_bias_weight > 0.0` -- callers must guard on
+/// that first so the disabled/default path never builds this map.
+fn friend_location_bias(
+    agents: &[AgentState],
+    neighbor_indices: &[usize],
+    edge_sim: &[f64],
+) -> FxHashMap<usize, f64> {
+    let mut map: FxHashMap<usize, f64> =
+        FxHashMap::with_capacity_and_hasher(neighbor_indices.len(), Default::default());
+    for (&nb, &sim) in neighbor_indices.iter().zip(edge_sim.iter()) {
+        if sim > 0.0 {
+            *map.entry(agents[nb].current_location).or_insert(0.0) += sim;
+        }
+    }
+    map
+}
+
+/// Builds a `loc -> bias` closure for the co-presence weight bonus. Returns
+/// a closure that always yields `0.0` (and skips building the underlying
+/// map entirely) when `copresence_bias_weight <= 0.0`, so weights --  and
+/// therefore output -- are byte-identical to no bias at all in that case.
+fn copresence_bias_lookup<'a>(
+    agents: &'a [AgentState],
+    neighbor_indices: &'a [usize],
+    edge_sim: &'a [f64],
+    copresence_bias_weight: f64,
+) -> impl Fn(usize) -> f64 + 'a {
+    let bias_map = (copresence_bias_weight > 0.0)
+        .then(|| friend_location_bias(agents, neighbor_indices, edge_sim));
+    move |loc: usize| -> f64 {
+        bias_map
+            .as_ref()
+            .and_then(|m| m.get(&loc))
+            .map_or(0.0, |&s| copresence_bias_weight * s)
+    }
+}
+
 fn make_individual_return(
     agent: usize,
     agents: &[AgentState],
     locations: &LocationInputs<'_>,
     target_semantic_cluster: Option<usize>,
+    neighbor_indices: &[usize],
+    edge_sim: &[f64],
+    copresence_bias_weight: f64,
     rng: &mut impl Rng,
     scratch: &mut Scratch,
 ) -> Option<usize> {
     let a = &agents[agent];
+    let bias_for = copresence_bias_lookup(agents, neighbor_indices, edge_sim, copresence_bias_weight);
     populate_scratchpad(
         scratch,
         a.visited_locs
@@ -87,7 +129,7 @@ fn make_individual_return(
             .filter(|&&loc| {
                 location_matches_semantic_cluster(locations, loc, target_semantic_cluster)
             })
-            .map(|&loc| (loc, count_at(&a.visit_counts, loc) as f64)),
+            .map(|&loc| (loc, count_at(&a.visit_counts, loc) as f64 + bias_for(loc))),
     );
     if scratch.candidates.is_empty() {
         None
@@ -102,6 +144,9 @@ fn social_exploration(
     locations: &LocationInputs<'_>,
     od_rows: Option<&CachedGravityOdRows>,
     n_locations: usize,
+    neighbor_indices: &[usize],
+    edge_sim: &[f64],
+    copresence_bias_weight: f64,
     rng: &mut impl Rng,
     scratch: &mut Scratch,
     target_semantic_cluster: Option<usize>,
@@ -109,6 +154,7 @@ fn social_exploration(
     let src = agents[agent].current_location;
     let home = agents[agent].home_location;
     let visit_counts = &agents[agent].visit_counts;
+    let bias_for = copresence_bias_lookup(agents, neighbor_indices, edge_sim, copresence_bias_weight);
 
     if let Some(od_rows) = od_rows {
         let row = od_rows.get(src);
@@ -160,7 +206,8 @@ fn social_exploration(
                                 target_semantic_cluster,
                             )
                             && weight.is_finite()
-                    }),
+                    })
+                    .map(|(j, weight)| (j, weight + bias_for(j))),
             );
             if scratch.candidates.is_empty() {
                 return None;
@@ -182,7 +229,7 @@ fn social_exploration(
             continue;
         }
         let d = locations.distances[src * n_locations + j].max(0.001);
-        let score = (1.0 / (d * d)) * locations.relevances[j] * src_rel;
+        let score = (1.0 / (d * d)) * locations.relevances[j] * src_rel + bias_for(j);
         scratch.candidates.push(j);
         if score > 0.0 {
             all_zero = false;
@@ -357,6 +404,9 @@ fn exploration_for_choice<R: Rng>(
         ctx.locations,
         ctx.od_rows,
         ctx.n_locations,
+        ctx.neighbor_indices,
+        ctx.edge_sim,
+        ctx.params.copresence_bias_weight,
         ctx.rng,
         ctx.scratch,
         target_semantic_cluster,
@@ -372,6 +422,9 @@ fn return_for_choice<R: Rng>(
         ctx.agents,
         ctx.locations,
         target_semantic_cluster,
+        ctx.neighbor_indices,
+        ctx.edge_sim,
+        ctx.params.copresence_bias_weight,
         ctx.rng,
         ctx.scratch,
     )

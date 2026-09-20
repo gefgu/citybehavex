@@ -76,6 +76,7 @@ def _params_from_flat(kwargs):
         strength_decay_rate=float(kwargs.pop("strength_decay_rate", 0.05)),
         max_dynamic_degree=int(kwargs.pop("max_dynamic_degree", 200)),
         max_colocation_group_size=int(kwargs.pop("max_colocation_group_size", 50)),
+        copresence_bias_weight=float(kwargs.pop("copresence_bias_weight", 0.0)),
     )
 
 
@@ -2172,6 +2173,7 @@ def _run_dynamic_social_case(
     recast_random_baseline_samples=0,
     strength_decay_rate=0.0,
     max_colocation_group_size=10,
+    copresence_bias_weight=0.0,
     end_ts=3600,
 ):
     n_agents = len(starting_locs)
@@ -2218,6 +2220,7 @@ def _run_dynamic_social_case(
         strength_decay_rate=strength_decay_rate,
         max_dynamic_degree=10,
         max_colocation_group_size=max_colocation_group_size,
+        copresence_bias_weight=copresence_bias_weight,
         return_social_edges=True,
     )
 
@@ -2300,6 +2303,108 @@ def test_dynamic_friendship_strength_grows_after_encounter():
     )
     rows = _social_rows(result)
     assert rows[(0, 1)][0] > 1.0
+
+
+def _run_copresence_bias_case(*, copresence_bias_weight):
+    """20 independent friend pairs (A_i, B_i). A_i never moves (stays home at
+    tile 0); B_i starts at tile 1 and makes one free-choice explore decision
+    at t=1800s between tile 0 (A_i's spot, far/low baseline score) and tile 2
+    (a decoy, close/high baseline score). rho=1, gamma=0 forces explore=true
+    deterministically; alpha=0 forces the independent (non social_action)
+    path -- i.e. social_exploration's no-OD hand-rolled branch, the one the
+    copresence bias applies to. With weight=0 baseline scores alone heavily
+    favor the decoy (score 1.0 vs 0.01); a large weight should flip most
+    pairs toward A_i's tile instead.
+    """
+    n_pairs = 20
+    n_agents = 2 * n_pairs
+    # Agents 0..19 = A_0..A_19 (home tile 0, never move).
+    # Agents 20..39 = B_0..B_19 (home tile 1, explore at t=1800).
+    diary_timestamps = []
+    diary_abs_locs = []
+    diary_starts = []
+    diary_ends = []
+    offset = 0
+    for _ in range(n_pairs):
+        diary_timestamps.append(0)
+        diary_abs_locs.append(0)
+        diary_starts.append(offset)
+        diary_ends.append(offset + 1)
+        offset += 1
+    for _ in range(n_pairs):
+        diary_timestamps.extend([0, 1800])
+        diary_abs_locs.extend([0, 2])
+        diary_starts.append(offset)
+        diary_ends.append(offset + 2)
+        offset += 2
+
+    neighbors = list(range(n_pairs, n_agents)) + list(range(0, n_pairs))
+    neighbor_starts = list(range(n_agents + 1))
+
+    trip, _, _ = core.simulation_core_simulate_agents(
+        latitudes=np.zeros(3, dtype=np.float64),
+        longitudes=np.zeros(3, dtype=np.float64),
+        relevances=np.ones(3, dtype=np.float64),
+        distances=np.array(
+            [0.0, 10.0, 5.0, 10.0, 0.0, 1.0, 5.0, 1.0, 0.0], dtype=np.float64
+        ),
+        neighbor_starts=np.asarray(neighbor_starts, dtype=np.int64),
+        neighbors=np.asarray(neighbors, dtype=np.int64),
+        diary_timestamps=np.asarray(diary_timestamps, dtype=np.int64),
+        diary_abs_locs=np.asarray(diary_abs_locs, dtype=np.int32),
+        diary_starts=np.asarray(diary_starts, dtype=np.int64),
+        diary_ends=np.asarray(diary_ends, dtype=np.int64),
+        edge_profile_sim=np.ones(len(neighbors), dtype=np.float64),
+        rho=1.0,
+        gamma=0.0,
+        alpha=0.0,
+        start_ts=0,
+        end_ts=3600,
+        # Deliberately larger than end_ts: edge_sim (which the copresence
+        # bias scales by) is periodically refreshed from actual mobility
+        # cosine-similarity, overwriting the seeded edge_profile_sim -- for
+        # a friend pair that hasn't co-visited anything yet that refresh is
+        # legitimately ~0. Keeping the whole run inside one window means
+        # B_i's single explore decision happens before that refresh ever
+        # fires, so the seeded edge weight is still what the bias reads.
+        indipendency_window_s=7200,
+        dt_update_mob_sim_s=7200,
+        slot_seconds=_SLOT,
+        car_speed_kmh=_SPEED,
+        n_agents=n_agents,
+        master_seed=42,
+        starting_locs=np.array([0] * n_pairs + [1] * n_pairs, dtype=np.int64),
+        starting_locs_mode_relevance=False,
+        work_tiles=np.ones(n_agents, dtype=np.int64),
+        dynamic_friendships_enabled=False,
+        friendship_update_interval_s=86400,
+        encounter_window_s=604800,
+        copresence_bias_weight=copresence_bias_weight,
+    )
+    return trip
+
+
+def _final_locations(trip, agent_indices):
+    agents_arr, loc_id = np.asarray(trip[0]), np.asarray(trip[1])
+    return {
+        agent: int(loc_id[agents_arr == agent][-1]) for agent in agent_indices
+    }
+
+
+def test_copresence_bias_increases_friend_colocation():
+    explorer_agents = list(range(20, 40))
+
+    baseline = _run_copresence_bias_case(copresence_bias_weight=0.0)
+    baseline_locs = _final_locations(baseline, explorer_agents)
+    baseline_colocated = sum(1 for loc in baseline_locs.values() if loc == 0)
+
+    biased = _run_copresence_bias_case(copresence_bias_weight=50.0)
+    biased_locs = _final_locations(biased, explorer_agents)
+    biased_colocated = sum(1 for loc in biased_locs.values() if loc == 0)
+
+    assert biased_colocated > baseline_colocated
+    assert biased_colocated >= 15  # expected ~20/20 at this weight
+    assert baseline_colocated <= 5  # expected ~0/20 at weight=0
 
 
 def test_on_day_flush_none_matches_baseline_return_shape():

@@ -325,6 +325,7 @@ pub fn simulation_core_simulate_agents<'py>(
                 rho: f64_attr(&params, "rho")?,
                 gamma: f64_attr(&params, "gamma")?,
                 alpha: f64_attr(&params, "alpha")?,
+                copresence_bias_weight: f64_attr(&params, "copresence_bias_weight")?,
                 gravity_deterrence_exponent: f64_attr(&params, "gravity_deterrence_exponent")?,
                 gravity_origin_exponent: f64_attr(&params, "gravity_origin_exponent")?,
                 gravity_destination_exponent: f64_attr(&params, "gravity_destination_exponent")?,

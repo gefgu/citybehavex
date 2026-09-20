@@ -121,8 +121,8 @@ too structured relative to a degree-preserving baseline.
 | Metric | What it represents | Calibration levers |
 | --- | --- | --- |
 | Degree | Number of ties per agent. | Tune `social.degree_mu_ln`, `social.degree_sigma_ln`, `social.max_degree`, `social.social_graph_k`, and `social.max_dynamic_degree`. |
-| Clustering coefficient | How often an agent's friends are also connected to each other. | Tune `social.similarity_temperature`, `social.home_h3_resolution`, `social.work_h3_resolution`, `social.max_ring_expansion`, and dynamic friendship thresholds. |
-| Edge persistence | Fraction of time windows in which a tie or co-presence edge recurs. | Tune `social.encounter_window_hours`, `social.regularity_threshold`, `social.friendship_update_interval_hours`, and schedule repeatability. |
+| Clustering coefficient | How often an agent's friends are also connected to each other. | Tune `social.similarity_temperature`, `social.home_h3_resolution`, `social.work_h3_resolution`, `social.max_ring_expansion`, `social.copresence_bias_weight`, and dynamic friendship thresholds. |
+| Edge persistence | Fraction of time windows in which a tie or co-presence edge recurs. | Tune `social.encounter_window_hours`, `social.regularity_threshold`, `social.friendship_update_interval_hours`, `social.copresence_bias_weight`, and schedule repeatability. |
 | Topological overlap | Shared-neighbor overlap for connected agents. | Tune `social.topological_overlap_threshold`, profile similarity, and `social.recast_random_chance_probability`. |
 | Observed network construction | Co-presence graph used for observed validation. | Tune `comparison.network_validation.location_mode`, `comparison.network_validation.location_col`, and `comparison.network_validation.h3_resolution`. Bad grouping can make observed baselines too dense or too sparse. |
 

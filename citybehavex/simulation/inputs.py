@@ -78,6 +78,7 @@ class SimulationRunParams:
     strength_decay_rate: float = 0.05
     max_dynamic_degree: int = 200
     max_colocation_group_size: int = 50
+    copresence_bias_weight: float = 0.0
 
     @classmethod
     def from_hours(
@@ -112,6 +113,7 @@ class SimulationRunParams:
         strength_decay_rate: float = 0.05,
         max_dynamic_degree: int = 200,
         max_colocation_group_size: int = 50,
+        copresence_bias_weight: float = 0.0,
     ) -> SimulationRunParams:
         return cls(
             start_ts=int(start_ts),
@@ -143,6 +145,7 @@ class SimulationRunParams:
             strength_decay_rate=float(strength_decay_rate),
             max_dynamic_degree=int(max_dynamic_degree),
             max_colocation_group_size=int(max_colocation_group_size),
+            copresence_bias_weight=float(copresence_bias_weight),
         )
 
 

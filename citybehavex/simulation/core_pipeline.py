@@ -204,6 +204,7 @@ def _run_simulation_core(
         strength_decay_rate=config.social.strength_decay_rate,
         max_dynamic_degree=config.social.max_dynamic_degree,
         max_colocation_group_size=config.social.max_colocation_group_size,
+        copresence_bias_weight=config.social.copresence_bias_weight,
     )
     initial_locations = InitialLocationInputs.build(
         starting_locs=home_tiles,

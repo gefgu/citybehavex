@@ -73,3 +73,13 @@ class SocialNetworkConfig(BaseModel):
     strength_decay_rate: float = Field(default=0.05, ge=0.0, le=1.0)
     max_dynamic_degree: int = Field(default=200, gt=0)
     max_colocation_group_size: int = Field(default=50, ge=2)
+
+    # Soft nudge on free/unconstrained location choices in
+    # social_exploration's scored fallback and make_individual_return:
+    # candidate locations matching a connected friend's last-committed
+    # current_location get an additive weight bonus of
+    # copresence_bias_weight * edge_sim. This biases an agent's OWN choice;
+    # it never moves the friend and coordinates nothing between diaries --
+    # 0.0 (default) leaves weights, and therefore output, byte-identical to
+    # no bias at all.
+    copresence_bias_weight: float = Field(default=0.0, ge=0.0)

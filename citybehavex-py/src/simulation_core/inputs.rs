@@ -186,6 +186,7 @@ pub(crate) struct SimulationParams {
     pub(crate) rho: f64,
     pub(crate) gamma: f64,
     pub(crate) alpha: f64,
+    pub(crate) copresence_bias_weight: f64,
     pub(crate) gravity_deterrence_exponent: f64,
     pub(crate) gravity_origin_exponent: f64,
     pub(crate) gravity_destination_exponent: f64,
@@ -263,6 +264,9 @@ impl SimulationParams {
         }
         if self.max_colocation_group_size < 2 {
             return Err("max_colocation_group_size must be at least 2".to_string());
+        }
+        if !(self.copresence_bias_weight.is_finite() && self.copresence_bias_weight >= 0.0) {
+            return Err("copresence_bias_weight must be non-negative".to_string());
         }
         if !(self.car_speed_kmh.is_finite() && self.car_speed_kmh > 0.0) {
             return Err("car_speed_kmh must be positive".to_string());
