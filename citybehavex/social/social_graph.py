@@ -245,12 +245,13 @@ def _colocation_pool(
     home_groups: dict[int, np.ndarray],
     work_groups: dict[int, np.ndarray],
     max_ring_expansion: int,
+    min_pool_size: int = 1,
 ) -> np.ndarray:
     pool = np.union1d(
         _pool_from_groups([home_cell], home_groups, agent),
         _pool_from_groups([work_cell], work_groups, agent),
     )
-    if pool.size > 0 or max_ring_expansion <= 0:
+    if pool.size >= min_pool_size or max_ring_expansion <= 0:
         return pool
     home_str = h3.int_to_str(int(home_cell))
     work_str = h3.int_to_str(int(work_cell))
@@ -261,7 +262,7 @@ def _colocation_pool(
         home_ring_pool = _pool_from_groups(ring_cells, home_groups, agent)
         work_ring_pool = _pool_from_groups(ring_cells, work_groups, agent)
         pool = np.union1d(home_ring_pool, work_ring_pool)
-        if pool.size > 0:
+        if pool.size >= min_pool_size:
             return pool
     return pool
 
@@ -285,8 +286,10 @@ def build_colocation_social_graph(
     ``[0, max_degree]``). Friends are then sampled -- without replacement,
     weighted by ``exp(cosine_similarity / temperature)`` -- from the pool of
     agents who share the agent's home or work H3 cell. If that pool is
-    empty, it's expanded through H3 rings around home and work (up to
-    ``max_ring_expansion``); if still empty, the agent gets zero edges (see
+    smaller than the agent's target degree, it's expanded through H3 rings
+    around home and work (up to ``max_ring_expansion``) until it's large
+    enough to draw the full target degree from, or expansion is exhausted;
+    if it's still empty after that, the agent gets zero edges (see
     ``citybehavex-py`` social.rs for the runtime "casual encounter"
     mechanism that can still connect such agents during simulation).
 
@@ -320,7 +323,15 @@ def build_colocation_social_graph(
     for i in range(n):
         degree_i = int(degrees[i])
         pool = (
-            _colocation_pool(i, int(home_cells[i]), int(work_cells[i]), home_groups, work_groups, max_ring_expansion)
+            _colocation_pool(
+                i,
+                int(home_cells[i]),
+                int(work_cells[i]),
+                home_groups,
+                work_groups,
+                max_ring_expansion,
+                min_pool_size=degree_i,
+            )
             if degree_i > 0
             else _EMPTY_POOL
         )

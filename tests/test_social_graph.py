@@ -196,6 +196,37 @@ def test_colocation_graph_expands_through_h3_rings_when_cell_is_isolated():
     assert len(neighbors_no_expansion[starts_no_expansion[0] : starts_no_expansion[1]]) == 0
 
 
+def test_colocation_graph_expands_through_h3_rings_when_pool_is_too_small():
+    # Agent 0 shares its home/work cell with exactly one other agent (a pool
+    # of size 1), but its target degree is drawn much higher than that.
+    # Expansion must still fire even though the pool isn't *empty* -- a
+    # nonzero-but-insufficient pool used to skip ring expansion entirely.
+    n, dim = 20, 4
+    embeddings = _normalized_embeddings(n, dim)
+    base_cell = h3.latlng_to_cell(37.7749, -122.4194, 9)
+    base_int = h3.str_to_int(base_cell)
+    neighbor_int = h3.str_to_int(next(iter(h3.grid_ring(base_cell, 1))))
+
+    home_cells = np.full(n, base_int, dtype=np.uint64)
+    work_cells = np.full(n, base_int, dtype=np.uint64)
+    home_cells[0] = neighbor_int
+    work_cells[0] = neighbor_int
+    home_cells[1] = neighbor_int
+    work_cells[1] = neighbor_int
+
+    kwargs = _colocation_kwargs(degree_mu_ln=np.log(10), degree_sigma_ln=0.05, max_degree=20)
+
+    starts, neighbors, _weights = build_colocation_social_graph(
+        embeddings, home_cells, work_cells, **{**kwargs, "max_ring_expansion": 2}
+    )
+    assert len(neighbors[starts[0] : starts[1]]) > 1
+
+    starts_no_expansion, neighbors_no_expansion, _ = build_colocation_social_graph(
+        embeddings, home_cells, work_cells, **{**kwargs, "max_ring_expansion": 0}
+    )
+    assert len(neighbors_no_expansion[starts_no_expansion[0] : starts_no_expansion[1]]) <= 1
+
+
 def test_colocation_graph_rejects_non_positive_temperature_and_max_degree():
     embeddings = _normalized_embeddings(5, 4)
     cells = np.zeros(5, dtype=np.uint64)
