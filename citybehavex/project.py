@@ -4,8 +4,10 @@ from __future__ import annotations
 import hashlib
 import importlib.resources
 import json
+import random
 import shutil
 import tarfile
+import time
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -15,6 +17,9 @@ from citybehavex.config import load_config
 from citybehavex.services import service_reachable
 
 _MANIFEST = "yjmob-1k-manifest.json"
+_DOWNLOAD_ATTEMPTS = 4
+_DOWNLOAD_TIMEOUT_SECONDS = 60
+_RETRYABLE_HTTP_STATUSES = {408, 429, 500, 502, 503, 504}
 
 
 def init_project(destination: Path) -> Path:
@@ -34,6 +39,52 @@ def _manifest() -> dict[str, object]:
     return json.loads(importlib.resources.files("citybehavex.templates").joinpath(_MANIFEST).read_text())
 
 
+def _retryable_download_error(exc: requests.RequestException) -> bool:
+    """Whether a failed release-asset request is worth retrying."""
+    if not isinstance(exc, requests.HTTPError):
+        return True
+    response = exc.response
+    return response is not None and response.status_code in _RETRYABLE_HTTP_STATUSES
+
+
+def _download_archive(url: str, archive: Path, expected_sha256: str) -> None:
+    """Download a release asset safely, retrying transient transport failures."""
+    partial = archive.with_suffix(archive.suffix + ".part")
+    last_error: requests.RequestException | None = None
+    for attempt in range(_DOWNLOAD_ATTEMPTS):
+        try:
+            response = requests.get(url, stream=True, timeout=_DOWNLOAD_TIMEOUT_SECONDS)
+            try:
+                response.raise_for_status()
+                digest = hashlib.sha256()
+                with partial.open("wb") as out:
+                    for chunk in response.iter_content(chunk_size=1024 * 1024):
+                        if chunk:
+                            out.write(chunk)
+                            digest.update(chunk)
+            finally:
+                response.close()
+        except requests.RequestException as exc:
+            partial.unlink(missing_ok=True)
+            if not _retryable_download_error(exc):
+                raise
+            last_error = exc
+            if attempt < _DOWNLOAD_ATTEMPTS - 1:
+                delay = min(8.0, 0.5 * (2**attempt))
+                time.sleep(delay + random.uniform(0, delay * 0.5))
+            continue
+
+        if digest.hexdigest() != expected_sha256:
+            partial.unlink(missing_ok=True)
+            raise ValueError("YJMOB sample checksum mismatch")
+        partial.replace(archive)
+        return
+
+    raise RuntimeError(
+        f"download failed after {_DOWNLOAD_ATTEMPTS} attempts; please retry later or use another network"
+    ) from last_error
+
+
 def download_yjmob(destination: Path) -> Path:
     manifest = _manifest()
     url, expected = str(manifest["url"]), str(manifest["sha256"])
@@ -46,17 +97,7 @@ def download_yjmob(destination: Path) -> Path:
         raise ValueError("sample manifest requires an HTTPS URL")
     destination.mkdir(parents=True, exist_ok=True)
     archive = destination / Path(urlparse(url).path).name
-    response = requests.get(url, stream=True, timeout=60)
-    response.raise_for_status()
-    digest = hashlib.sha256()
-    with archive.open("wb") as out:
-        for chunk in response.iter_content(chunk_size=1024 * 1024):
-            if chunk:
-                out.write(chunk)
-                digest.update(chunk)
-    if digest.hexdigest() != expected:
-        archive.unlink(missing_ok=True)
-        raise ValueError("YJMOB sample checksum mismatch")
+    _download_archive(url, archive, expected)
     with tarfile.open(archive, "r:gz") as bundle:
         root = destination.resolve()
         for member in bundle.getmembers():

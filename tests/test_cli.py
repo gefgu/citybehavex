@@ -3,6 +3,8 @@ from __future__ import annotations
 from typer.testing import CliRunner
 
 from citybehavex.cli import app
+from citybehavex.config import load_config
+from citybehavex.project import init_project
 
 
 def test_simulate_runs_with_config(monkeypatch):
@@ -24,6 +26,14 @@ def test_init_creates_public_project(tmp_path):
     assert result.exit_code == 0
     assert (tmp_path / "demo" / "README.md").exists()
     assert (tmp_path / "demo" / "configs" / "yjmob-1k.yaml").exists()
+
+
+def test_initialized_yjmob_config_uses_the_downloaded_tessellation_as_input(tmp_path):
+    project = init_project(tmp_path / "demo")
+
+    config = load_config(str(project / "configs" / "yjmob-1k.yaml"))
+
+    assert config.tessellation.path == "data/yjmob-1k/yjmob_h3_tessellation.parquet"
 
 
 def test_init_rejects_existing_file_destination(tmp_path):

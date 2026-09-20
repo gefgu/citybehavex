@@ -357,8 +357,16 @@ def _load_or_build_tessellation_df(config: CityBehavExConfig) -> tuple[pd.DataFr
     tessellation_path = sim.tessellation or tess.path
 
     if tessellation_path:
-        typer.echo(f"Loading tessellation from {tessellation_path} ...")
-        tessellation_df = pd.read_parquet(tessellation_path)
+        path = Path(tessellation_path)
+        if not path.is_file():
+            raise ValueError(
+                f"Configured tessellation file is missing: {path}. "
+                "Place a tessellation parquet at that path or configure a complete bounding box. "
+                "For the initialized YJMOB-1k example, run "
+                "`citybehavex data download yjmob --project .` first."
+            )
+        typer.echo(f"Loading tessellation from {path} ...")
+        tessellation_df = pd.read_parquet(path)
         relevance_column = sim.relevance_column or tess.relevance_column
         if tess.min_poi_count > 0 and relevance_column in tessellation_df.columns:
             n_before = len(tessellation_df)
@@ -387,8 +395,10 @@ def _load_or_build_tessellation_df(config: CityBehavExConfig) -> tuple[pd.DataFr
     max_lat = sim.max_lat if sim.max_lat is not None else tess.max_lat
     if None in [min_lon, min_lat, max_lon, max_lat]:
         raise ValueError(
-            "provide a tessellation path or all four bbox values "
-            "(min_lon, min_lat, max_lon, max_lat)"
+            "No tessellation input is available: "
+            f"the configured generated output does not exist ({tess.output!r}), and the bounding box "
+            "is incomplete. Set tessellation.path (or simulation.tessellation) to an existing parquet, "
+            "or provide min_lon, min_lat, max_lon, and max_lat."
         )
 
     if tess.poi_tessellation:

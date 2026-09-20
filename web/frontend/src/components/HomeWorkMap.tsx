@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { GeoJSON, MapContainer, TileLayer } from "react-leaflet";
+import { CARTO_ATTRIBUTION, CARTO_VOYAGER_TILES_URL } from "../carto";
 import type { Layer } from "leaflet";
 import type { Feature } from "geojson";
 import "leaflet/dist/leaflet.css";
@@ -44,8 +45,8 @@ function Panel({ title, panel }: { title: string; panel: HomeWorkPanel }) {
       </div>
       <MapContainer center={center} zoom={10} className="hw-map" scrollWheelZoom>
         <TileLayer
-          url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
-          attribution="&copy; OpenStreetMap &copy; CARTO"
+          url={CARTO_VOYAGER_TILES_URL}
+          attribution={CARTO_ATTRIBUTION}
         />
         {geojson && <GeoJSON key={res} data={geojson as never} style={style} onEachFeature={onEach} />}
       </MapContainer>

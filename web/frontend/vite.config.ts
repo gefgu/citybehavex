@@ -10,6 +10,9 @@ export default defineConfig(({ mode }) => {
   const apiTarget = env.VITE_API_PROXY_TARGET || "http://localhost:8000";
   return {
     base: env.VITE_BASE_PATH || "/",
+    // CARTO raster basemap keys are intentionally sent by the browser with
+    // every tile request. Keep this narrow rather than exposing all .env keys.
+    envPrefix: ["VITE_", "CARTODB_"],
     plugins: [react()],
     server: {
       port: 5173,

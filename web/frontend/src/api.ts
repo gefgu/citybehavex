@@ -89,6 +89,7 @@ export interface BBox {
 }
 
 let staticExperimentsCache: Promise<Experiment[]> | null = null;
+const experimentsInFlight = new Map<boolean, Promise<Experiment[]>>();
 
 async function staticExperiments(): Promise<Experiment[]> {
   if (!staticExperimentsCache) {
@@ -131,9 +132,20 @@ export interface ExperimentUpdate {
 export function fetchExperiments(withSummary = false): Promise<Experiment[]> {
   if (STATIC_DEMO) {
     void withSummary;
-    return getStaticJson<Experiment[]>("experiments.json");
+    return staticExperiments();
   }
-  return getJson<Experiment[]>(`/api/experiments?with_summary=${withSummary}`);
+  const existing = experimentsInFlight.get(withSummary);
+  if (existing) return existing;
+
+  const request = getJson<Experiment[]>(`/api/experiments?with_summary=${withSummary}`);
+  experimentsInFlight.set(withSummary, request);
+  const clear = () => {
+    if (experimentsInFlight.get(withSummary) === request) {
+      experimentsInFlight.delete(withSummary);
+    }
+  };
+  void request.then(clear, clear);
+  return request;
 }
 
 export function fetchExperiment(id: string): Promise<Experiment> {

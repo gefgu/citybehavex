@@ -5,6 +5,7 @@ import h3
 import numpy as np
 import pandas as pd
 import polars as pl
+import pytest
 
 from citybehavex.activities import (
     N_ACTIVITIES,
@@ -16,10 +17,8 @@ from citybehavex.activities import (
 from citybehavex.config.root import CityBehavExConfig
 from citybehavex.profiles import generate_profiles
 from citybehavex.profiles.config import AgentProfilesConfig
-from citybehavex.simulation.core import (
-    build_social_graph_artifact,
-    simulate_agents as _simulate_agents,
-)
+from citybehavex.simulation.core import build_social_graph_artifact
+from citybehavex.simulation.core import simulate_agents as _simulate_agents
 from citybehavex.simulation.inputs import (
     ActivityInputs,
     DiaryInputs,
@@ -36,11 +35,24 @@ from citybehavex.simulation.tessellation_pipeline import (
     _append_work_scores,
     _derive_home_anchor_candidates_from_tessellation,
     _home_anchors_output_path,
+    _load_or_build_tessellation_df,
 )
 
 _SLOT = 900
 _SPEED = 50.0
 _rust_simulate_agents = core.simulation_core_simulate_agents
+
+
+def test_missing_configured_tessellation_explains_how_to_recover(tmp_path):
+    config = CityBehavExConfig.model_validate(
+        {"tessellation": {"path": str(tmp_path / "missing.parquet")}}
+    )
+
+    with pytest.raises(ValueError, match="Configured tessellation file is missing") as exc_info:
+        _load_or_build_tessellation_df(config)
+
+    assert str(tmp_path / "missing.parquet") in str(exc_info.value)
+    assert "citybehavex data download yjmob --project ." in str(exc_info.value)
 
 
 def _params_from_flat(kwargs):

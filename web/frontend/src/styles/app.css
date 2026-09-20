@@ -288,8 +288,7 @@ body {
 .exp-card h3 {
   margin: 0;
   max-width: 100%;
-  overflow-wrap: normal;
-  word-break: normal;
+  overflow-wrap: anywhere;
 }
 .exp-toggle {
   align-self: flex-start;

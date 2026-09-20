@@ -1,5 +1,5 @@
 tessellation:
-  output: data/yjmob-1k/yjmob_h3_tessellation.parquet
+  path: data/yjmob-1k/yjmob_h3_tessellation.parquet
 simulation:
   agents: 1000
   days: 7
