@@ -134,16 +134,11 @@ citybehavex doctor --config configs/yjmob-1k.yaml
 citybehavex simulate --config configs/yjmob-1k.yaml --start-aligners
 ```
 
-No LLM setup needed for this first run — the project ships with bundled,
-pre-generated diaries (`data/yjmob-1k/llm_diaries/validated_diaries_*.json`),
-reused automatically instead of calling an LLM. To regenerate diaries
-instead (e.g. after changing `diaries.city_profile`), set
-`CITYBEHAVEX_LLM_BASE_URL`, `CITYBEHAVEX_LLM_API_KEY`, and
-`CITYBEHAVEX_LLM_MODEL` to a real OpenAI-compatible endpoint and delete the
-corresponding `validated_diaries_*.json` first.
+This first example run don't requires an LLM, it already bundles some sample diaries for you to test. If you have access to an LLM, please edit the config file for the simulation or set the `CITYBEHAVEX_LLM_BASE_URL`, `CITYBEHAVEX_LLM_API_KEY`, and `CITYBEHAVEX_LLM_MODEL` enviroment variables with an OpenAI-compatible endpoint. In the case of providing your own LLM, make sure to delete the corresponding `validated_diaries_*.json` file, so the simulation don't re-use the diaries.
+
 
 `--start-aligners` requires CUDA by default. Use `--aligner-device cpu` only
-when a GPU is unavailable; it is much slower.
+when a GPU is unavailable because it is much slower.
 
 The command writes simulation outputs under the paths configured in the YAML
 file, typically inside `data/.../results/`. Existing caches are reused when
