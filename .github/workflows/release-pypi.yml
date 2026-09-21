@@ -15,8 +15,11 @@ jobs:
           - os: ubuntu-latest
             target: x86_64
             manylinux: auto
-          - os: macos-13
-            target: x86_64
+          # macos-13 (Intel) dropped: its GitHub-hosted runner queue has
+          # repeatedly stalled releases for 15+ minutes to 16+ hours across
+          # every attempt so far, while macos-14 (Apple Silicon) has never
+          # had this problem. Intel Mac users fall back to the sdist (needs
+          # a Rust toolchain locally) until this is revisited.
           - os: macos-14
             target: aarch64
           - os: windows-latest
