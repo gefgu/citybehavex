@@ -238,6 +238,7 @@ def report(
         evaluation_adaptation_config=loaded.comparison.evaluation_adaptation,
         sections=loaded.comparison.sections,
         distance_h3_resolution=loaded.comparison.distance_h3_resolution,
+        trip_duration_path=loaded.comparison.trip_duration_path,
     )
 
 

@@ -1410,6 +1410,7 @@ def generate_comparison_report_from_paths(
     json_output_path: Optional[str] = None,
     sections: Optional[list[str]] = None,
     evaluation_adaptation_config: Optional[object] = None,
+    trip_duration_path: Optional[str] = None,
 ) -> None:
     typer.echo(f"Loading synthetic trajectories from {synthetic_path} ...")
     traj = load_trajectory(synthetic_path)
@@ -1424,6 +1425,7 @@ def generate_comparison_report_from_paths(
         json_output_path=json_output_path,
         sections=sections,
         evaluation_adaptation_config=evaluation_adaptation_config,
+        trip_duration_path=trip_duration_path,
     )
 
 
@@ -1443,6 +1445,7 @@ def generate_comparison_report(
     transport_spatial_config: Optional[object] = None,
     evaluation_adaptation_config: Optional[object] = None,
     distance_h3_resolution: Optional[int] = None,
+    trip_duration_path: Optional[str] = None,
 ) -> None:
     if not getattr(traj, "sorted", False):
         traj = _traj_dataframe(
@@ -1754,21 +1757,35 @@ def generate_comparison_report(
 
     # Trip (travel) duration. The synthetic side carries a genuine car trip
     # duration per leg; the observed visit table has no travel-time ground truth,
-    # so the real comparator is a car-time proxy from real jump lengths at the same
-    # speed (km / CAR_SPEED_KMH * 60), making both sides directly comparable.
+    # so the default real comparator is a car-time proxy from real jump lengths
+    # at the same speed (km / CAR_SPEED_KMH * 60), making both sides directly
+    # comparable. When trip_duration_path points at a real per-trip survey
+    # (a "Duration" column, minutes), those real values replace the proxy on
+    # the observed side only -- independent of which branch below the
+    # synthetic side takes (a real simulate run has genuine per-leg durations;
+    # the Ref. row, comparing two real halves, still falls back to the
+    # jump-based proxy for its own "synthetic" side since that side has no
+    # genuine duration column either).
+    real_trip_ground_truth: list[float] | None = None
+    if trip_duration_path and Path(trip_duration_path).exists():
+        trip_duration_df = pl.read_parquet(trip_duration_path)
+        real_trip_ground_truth = [
+            d for d in trip_duration_df["Duration"].drop_nulls().to_list() if d > 0
+        ]
+
     if "trip_duration_minutes" in traj.df.columns:
         synth_trip = [t for t in traj.df["trip_duration_minutes"].drop_nulls().to_list() if t > 0]
-        real_trip = [(j / CAR_SPEED_KMH) * 60.0 for j in real_jumps if j > 0]
+        real_trip = real_trip_ground_truth or [(j / CAR_SPEED_KMH) * 60.0 for j in real_jumps if j > 0]
         w_trip = wasserstein_distance(synth_trip, real_trip) if synth_trip and real_trip else None
     else:
         # No genuine travel-time ground truth on the synthetic side either
         # (e.g. two real halves compared against each other for the Ref.
-        # baseline) -- derive the same car-time proxy from jump lengths on
-        # BOTH sides instead of comparing a real stay/dwell-duration column
+        # baseline) -- derive the same car-time proxy from jump lengths for
+        # that side instead of comparing a real stay/dwell-duration column
         # against synthetic inter-event waiting-time gaps, which isn't
         # "trip duration" on either side.
         synth_trip = [(j / CAR_SPEED_KMH) * 60.0 for j in synth_jumps if j > 0]
-        real_trip = [(j / CAR_SPEED_KMH) * 60.0 for j in real_jumps if j > 0]
+        real_trip = real_trip_ground_truth or [(j / CAR_SPEED_KMH) * 60.0 for j in real_jumps if j > 0]
         w_trip = wasserstein_distance(synth_trip, real_trip) if synth_trip and real_trip else None
     if w_trip is not None:
         _record_wasserstein("trip_duration_min", w_trip, synth_trip, real_trip)

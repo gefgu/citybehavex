@@ -72,6 +72,12 @@ class ComparisonConfig(BaseModel):
     time_use_country: Optional[str] = None
     time_use_survey: Optional[int] = None
     time_use_weight_col: str = "propwt"
+    # Real per-trip travel-time ground truth (a "Duration" column, in
+    # minutes), used in place of the distance/CAR_SPEED_KMH proxy for the
+    # trip_duration_min metric's observed side. None (default) keeps the
+    # proxy -- most datasets have no real travel-time survey data.
+    trip_duration_path: Optional[str] = None
+    trip_duration_label: str = "observed"
     # Deprecated standalone metrics export; None = skip it.
     json_output: Optional[str] = None
     # Which optional comparison metric sections to compute; None (default) = run all of them.

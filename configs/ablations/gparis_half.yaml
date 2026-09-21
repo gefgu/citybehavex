@@ -189,6 +189,7 @@ profiles:
 comparison:
   path: data/gparis/gparis_visitation_full_data_half_a.parquet
   label: gparis
+  trip_duration_path: data/gparis/gparis_full_trip_with_lengths.parquet
   time_use_path: data/mtus/MTUS_haf.dta
   time_use_label: MTUS France 2009
   time_use_country: France

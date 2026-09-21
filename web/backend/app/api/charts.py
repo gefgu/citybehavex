@@ -69,7 +69,17 @@ def _time_use_path(experiment) -> Optional[Any]:  # noqa: ANN001
     )
 
 
-def _chart_build_kwargs(experiment, selected, observed_path, time_use_path) -> dict[str, Any]:  # noqa: ANN001
+def _trip_duration_path(experiment) -> Optional[Any]:  # noqa: ANN001
+    return (
+        experiment.trip_duration_path
+        if experiment.trip_duration_path is not None and experiment.trip_duration_path.exists()
+        else None
+    )
+
+
+def _chart_build_kwargs(
+    experiment, selected, observed_path, time_use_path, trip_duration_path=None
+) -> dict[str, Any]:  # noqa: ANN001
     kwargs = dict(
         synthetic_path=str(selected.path),
         observed_path=str(observed_path) if observed_path is not None else None,
@@ -80,6 +90,8 @@ def _chart_build_kwargs(experiment, selected, observed_path, time_use_path) -> d
         time_use_country=experiment.time_use_country,
         time_use_survey=experiment.time_use_survey,
         time_use_weight_col=experiment.time_use_weight_col,
+        trip_duration_path=str(trip_duration_path) if trip_duration_path is not None else None,
+        trip_duration_label=experiment.trip_duration_label,
         special_days=experiment.special_days,
     )
     transport_cfg = getattr(experiment, "transport_spatial_config", None)
@@ -127,6 +139,7 @@ async def get_charts(
         else None
     )
     time_use_path = _time_use_path(experiment)
+    trip_duration_path = _trip_duration_path(experiment)
 
     payload = await get_or_build(
         exp_id,
@@ -134,7 +147,9 @@ async def get_charts(
         selected.path,
         observed_path,
         build_fn=build_chart_base_payload,
-        build_kwargs=_chart_build_kwargs(experiment, selected, observed_path, time_use_path),
+        build_kwargs=_chart_build_kwargs(
+            experiment, selected, observed_path, time_use_path, trip_duration_path
+        ),
         executor=_chart_executor,
         refresh=refresh,
         extra_paths=tuple(
@@ -145,6 +160,7 @@ async def get_charts(
                 selected.activities_path,
                 getattr(selected, "moving_path", None),
                 time_use_path,
+                trip_duration_path,
                 road_nodes_path,
                 road_edges_path,
             )
@@ -178,6 +194,7 @@ async def get_chart_section(
         raise HTTPException(status_code=404, detail=f"no runs found for experiment {exp_id!r}")
     observed_path = _observed_path(experiment)
     time_use_path = _time_use_path(experiment)
+    trip_duration_path = _trip_duration_path(experiment)
 
     try:
         payload = await get_or_build(
@@ -187,7 +204,9 @@ async def get_chart_section(
             observed_path,
             build_fn=build_chart_section_payload,
             build_kwargs=dict(
-                **_chart_build_kwargs(experiment, selected, observed_path, time_use_path),
+                **_chart_build_kwargs(
+                    experiment, selected, observed_path, time_use_path, trip_duration_path
+                ),
                 section=section,
                 filter_key=filter,
             ),
@@ -199,6 +218,7 @@ async def get_chart_section(
                     selected.activities_path,
                     getattr(selected, "moving_path", None),
                     time_use_path,
+                    trip_duration_path,
                 )
                 if p is not None
             ),
@@ -256,6 +276,7 @@ async def get_metrics_export(
         raise HTTPException(status_code=404, detail=f"no runs found for experiment {exp_id!r}")
     observed_path = _observed_path(experiment)
     time_use_path = _time_use_path(experiment)
+    trip_duration_path = _trip_duration_path(experiment)
 
     payload = await get_or_build(
         f"{exp_id}__metrics_export",
@@ -263,7 +284,9 @@ async def get_metrics_export(
         selected.path,
         observed_path,
         build_fn=build_metrics_export_payload,
-        build_kwargs=_chart_build_kwargs(experiment, selected, observed_path, time_use_path),
+        build_kwargs=_chart_build_kwargs(
+            experiment, selected, observed_path, time_use_path, trip_duration_path
+        ),
         executor=_chart_executor,
         refresh=refresh,
         extra_paths=tuple(
@@ -271,6 +294,7 @@ async def get_metrics_export(
             for p in (
                 selected.activities_path,
                 time_use_path,
+                trip_duration_path,
             )
             if p is not None
         ),

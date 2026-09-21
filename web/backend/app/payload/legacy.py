@@ -869,6 +869,8 @@ def build_comparison_payload(
     time_use_country: Optional[str] = None,
     time_use_survey: Optional[int] = None,
     time_use_weight_col: str = "propwt",
+    trip_duration_path: Optional[str] = None,
+    trip_duration_label: str = "observed",
     road_nodes_path: Optional[str] = None,
     road_edges_path: Optional[str] = None,
     road_snap_max_distance_m: float = 750.0,
@@ -885,6 +887,8 @@ def build_comparison_payload(
         time_use_country=time_use_country,
         time_use_survey=time_use_survey,
         time_use_weight_col=time_use_weight_col,
+        trip_duration_path=trip_duration_path,
+        trip_duration_label=trip_duration_label,
         evaluation_adaptation_config=evaluation_adaptation_config,
         road_snap_max_distance_m=road_snap_max_distance_m,
         special_days=special_days,
@@ -905,6 +909,8 @@ def build_chart_base_payload(
     time_use_country: Optional[str] = None,
     time_use_survey: Optional[int] = None,
     time_use_weight_col: str = "propwt",
+    trip_duration_path: Optional[str] = None,
+    trip_duration_label: str = "observed",
     evaluation_adaptation_config: Optional[object] = None,
     special_days: Optional[list[dict[str, str]]] = None,
 ) -> dict[str, Any]:
@@ -918,6 +924,8 @@ def build_chart_base_payload(
         time_use_country=time_use_country,
         time_use_survey=time_use_survey,
         time_use_weight_col=time_use_weight_col,
+        trip_duration_path=trip_duration_path,
+        trip_duration_label=trip_duration_label,
         evaluation_adaptation_config=evaluation_adaptation_config,
         special_days=special_days,
         filter_keys=[_BASE_FILTER_KEY],
@@ -938,6 +946,8 @@ def build_chart_filter_payload(
     time_use_country: Optional[str] = None,
     time_use_survey: Optional[int] = None,
     time_use_weight_col: str = "propwt",
+    trip_duration_path: Optional[str] = None,
+    trip_duration_label: str = "observed",
     evaluation_adaptation_config: Optional[object] = None,
     special_days: Optional[list[dict[str, str]]] = None,
 ) -> dict[str, Any]:
@@ -957,6 +967,8 @@ def build_chart_filter_payload(
         time_use_country=time_use_country,
         time_use_survey=time_use_survey,
         time_use_weight_col=time_use_weight_col,
+        trip_duration_path=trip_duration_path,
+        trip_duration_label=trip_duration_label,
         evaluation_adaptation_config=evaluation_adaptation_config,
         special_days=special_days,
         filter_keys=[filter_key],
@@ -977,6 +989,8 @@ def _build_comparison_payload(
     time_use_country: Optional[str] = None,
     time_use_survey: Optional[int] = None,
     time_use_weight_col: str = "propwt",
+    trip_duration_path: Optional[str] = None,
+    trip_duration_label: str = "observed",
     transport_spatial_config: Optional[object] = None,
     evaluation_adaptation_config: Optional[object] = None,
     road_snap_max_distance_m: float = 750.0,
@@ -1051,6 +1065,16 @@ def _build_comparison_payload(
         labels["observed"] = observed_label
 
     duration_col = detect_column(real_df, _DURATION_CANDIDATES) if real_df is not None else None
+    # Real per-trip travel-time ground truth (a "Duration" column, minutes),
+    # loaded once here and reused for every filter group in
+    # distribution_group() below -- overrides the jump-length/CAR_SPEED_KMH
+    # proxy for trip_duration_min's observed side only, mirroring
+    # citybehavex.reports.comparison.generate_comparison_report's fix.
+    trip_duration_ground_truth: list[float] | None = None
+    if trip_duration_path and Path(trip_duration_path).exists():
+        trip_duration_ground_truth = [
+            d for d in pl.read_parquet(trip_duration_path)["Duration"].drop_nulls().to_list() if d > 0
+        ]
     synth_location_col = detect_column(traj.df, _LOCATION_CANDIDATES)
     resolution = _location_resolution(real_df, real_location_col) if real_df is not None else 10
     wasserstein: list[dict[str, Any]] = []
@@ -1181,6 +1205,8 @@ def _build_comparison_payload(
         elif duration_col and real_metric_group_df is not None:
             synth_trip = waiting_times_minutes(synth_traj)
             real_trip = real_metric_group_df[duration_col].drop_nulls().to_list()
+        if trip_duration_ground_truth and synth_trip is not None:
+            real_trip = trip_duration_ground_truth
 
         blocks = {
             "jump_lengths": _ecdf_block("synthetic", synth_jumps, observed_label if real_jumps is not None else None, real_jumps, "jump length", "km"),

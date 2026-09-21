@@ -136,6 +136,8 @@ class Experiment:
     time_use_country: Optional[str]
     time_use_survey: Optional[int]
     time_use_weight_col: str
+    trip_duration_path: Optional[Path]
+    trip_duration_label: str
     profiles_enabled: bool
     profiles_output: Optional[Path]
     profiles_path: Optional[Path]
@@ -162,6 +164,9 @@ class Experiment:
             "time_use_country": self.time_use_country,
             "time_use_survey": self.time_use_survey,
             "time_use_weight_col": self.time_use_weight_col,
+            "trip_duration_path": _display_path(self.trip_duration_path),
+            "trip_duration_exists": bool(self.trip_duration_path and self.trip_duration_path.exists()),
+            "trip_duration_label": self.trip_duration_label,
             "network_validation": (
                 self.network_validation_config.model_dump()
                 if hasattr(self.network_validation_config, "model_dump")
@@ -227,6 +232,7 @@ def _load_experiment(config_path: Path) -> Experiment:
     synthetic_output = _resolve(cfg.simulation.output)
     observed_path = _resolve(cfg.comparison.path)
     time_use_path = _resolve(cfg.comparison.time_use_path)
+    trip_duration_path = _resolve(cfg.comparison.trip_duration_path)
     profiles_output = _resolve(cfg.profiles.output)
     profiles_path = profiles_output if cfg.profiles.enabled else None
     road_distance_enabled = cfg.road_network.enabled and cfg.comparison.road_network_distance
@@ -280,6 +286,8 @@ def _load_experiment(config_path: Path) -> Experiment:
         time_use_country=cfg.comparison.time_use_country,
         time_use_survey=cfg.comparison.time_use_survey,
         time_use_weight_col=cfg.comparison.time_use_weight_col,
+        trip_duration_path=trip_duration_path,
+        trip_duration_label=cfg.comparison.trip_duration_label,
         profiles_enabled=cfg.profiles.enabled,
         profiles_output=profiles_output,
         profiles_path=profiles_path,
@@ -345,6 +353,8 @@ def update_experiment(exp_id: str, updates: dict[str, Any]) -> Experiment:
         "time_use_country": (comparison, "time_use_country"),
         "time_use_survey": (comparison, "time_use_survey"),
         "time_use_weight_col": (comparison, "time_use_weight_col"),
+        "trip_duration_path": (comparison, "trip_duration_path"),
+        "trip_duration_label": (comparison, "trip_duration_label"),
         "profiles_enabled": (profiles, "enabled"),
         "profiles_output": (profiles, "output"),
     }

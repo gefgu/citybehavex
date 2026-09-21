@@ -461,6 +461,48 @@ def test_generate_comparison_report_writes_json_metrics(tmp_path):
     assert payload["network_validation"]["observed_vs_random"]["distributions"]["observed"]["edge_persistence"]["count"] > 0
 
 
+def test_generate_comparison_report_trip_duration_path_overrides_proxy(tmp_path):
+    """When comparison.trip_duration_path points at real per-trip travel-time
+    ground truth (a "Duration" column), it replaces the distance/CAR_SPEED_KMH
+    proxy on the observed side of trip_duration_min -- dwell_time_min (a
+    separate stay-duration computation) is unaffected."""
+    traj, real_path = _build_report_fixture(tmp_path)
+    synthetic_path = tmp_path / "synthetic.parquet"
+    traj.df.write_parquet(synthetic_path)
+    json_path = tmp_path / "metrics.json"
+    trip_duration_path = tmp_path / "trip_durations.parquet"
+    real_durations = [10.0, 20.0, 30.0, 40.0, 50.0]
+    pl.DataFrame({"Duration": real_durations}).write_parquet(trip_duration_path)
+
+    generate_comparison_report(
+        traj=traj,
+        synthetic_path=str(synthetic_path),
+        real_path=real_path,
+        observed_label="observed",
+        json_output_path=str(json_path),
+        trip_duration_path=str(trip_duration_path),
+    )
+
+    payload = json.loads(json_path.read_text())
+    observed_trip = payload["wasserstein_distributions"]["trip_duration_min"]["observed"]
+    assert observed_trip["count"] == len(real_durations)
+    assert observed_trip["mean"] == pytest.approx(sum(real_durations) / len(real_durations))
+
+    # dwell_time_min is a separate stay-duration computation, untouched by
+    # trip_duration_path -- confirm it matches a run without the new field.
+    json_path_no_override = tmp_path / "metrics_no_override.json"
+    generate_comparison_report(
+        traj=traj,
+        synthetic_path=str(synthetic_path),
+        real_path=real_path,
+        observed_label="observed",
+        json_output_path=str(json_path_no_override),
+    )
+    payload_no_override = json.loads(json_path_no_override.read_text())
+    assert payload["wasserstein"]["dwell_time_min"] == payload_no_override["wasserstein"]["dwell_time_min"]
+    assert payload["wasserstein"]["trip_duration_min"] != payload_no_override["wasserstein"]["trip_duration_min"]
+
+
 def test_generate_comparison_report_adds_transport_spatial_synthetic_only(tmp_path):
     traj, real_path = _build_report_fixture(tmp_path)
     synthetic_path = tmp_path / "synthetic.parquet"

@@ -36,6 +36,8 @@ class ExperimentUpdate(BaseModel):
     time_use_country: str | None = None
     time_use_survey: int | None = None
     time_use_weight_col: str | None = None
+    trip_duration_path: str | None = None
+    trip_duration_label: str | None = None
     profiles_enabled: bool | None = None
     profiles_output: str | None = None
     bbox: dict[str, float] | None = None

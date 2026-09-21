@@ -7,7 +7,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Optional
 
-ARTIFACT_SCHEMA_VERSION = "v3"
+ARTIFACT_SCHEMA_VERSION = "v4"
 
 
 def path_mtime(path: str | Path | None) -> int | str:
@@ -44,6 +44,8 @@ class ComparisonContext:
     time_use_country: Optional[str] = None
     time_use_survey: Optional[int] = None
     time_use_weight_col: str = "propwt"
+    trip_duration_path: Optional[str] = None
+    trip_duration_label: str = "observed"
     transport_spatial_config: object | None = None
     evaluation_adaptation_config: object | None = None
     special_days: tuple[tuple[str, str, str], ...] = ()
@@ -61,6 +63,8 @@ class ComparisonContext:
         time_use_country: Optional[str] = None,
         time_use_survey: Optional[int] = None,
         time_use_weight_col: str = "propwt",
+        trip_duration_path: Optional[str] = None,
+        trip_duration_label: str = "observed",
         transport_spatial_config: object | None = None,
         evaluation_adaptation_config: object | None = None,
         special_days: Optional[list[dict[str, str]]] = None,
@@ -75,6 +79,8 @@ class ComparisonContext:
             time_use_country=time_use_country,
             time_use_survey=time_use_survey,
             time_use_weight_col=time_use_weight_col,
+            trip_duration_path=trip_duration_path,
+            trip_duration_label=trip_duration_label,
             transport_spatial_config=transport_spatial_config,
             evaluation_adaptation_config=evaluation_adaptation_config,
             special_days=tuple(
@@ -105,6 +111,9 @@ class ComparisonContext:
             self.time_use_country,
             self.time_use_survey,
             self.time_use_weight_col,
+            self.trip_duration_path,
+            path_mtime(self.trip_duration_path),
+            self.trip_duration_label,
             _hashable_config(self.transport_spatial_config),
             _hashable_config(self.evaluation_adaptation_config),
             self.special_days,
