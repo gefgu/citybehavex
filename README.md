@@ -17,6 +17,8 @@ simulation, replay agent trajectories, inspect profiles and activity traces, and
 compare synthetic behavior with empirical validation metrics through the web
 dashboard.
 
+[![CityBehavEx - EACL Demo Track submission video](https://img.shields.io/badge/YouTube-CityBehavEx_EACL_Demo_Video-FF0000?style=for-the-badge&logo=youtube&logoColor=white)](https://youtu.be/DDMUcI2gEt0)
+
 ## Why CityBehavEx?
 
 Recent LLM-based urban simulators can produce rich behavior descriptions, but
