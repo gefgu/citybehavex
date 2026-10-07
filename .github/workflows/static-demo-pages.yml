@@ -8,6 +8,9 @@ on:
       - "web/frontend/**"
       - "web/backend/**"
       - "web/demo_export.yaml"
+      - "web/demo_release.json"
+      - "scripts/export_static_web_demo.py"
+      - "scripts/static_demo_archive.py"
       - ".github/workflows/static-demo-pages.yml"
 
 permissions:
@@ -25,6 +28,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Fetch and validate pinned demo data
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DEMO_REPOSITORY: ${{ github.repository }}
+        run: python scripts/static_demo_archive.py fetch --repository "$DEMO_REPOSITORY"
       - uses: actions/setup-node@v4
         with:
           node-version: 20
@@ -40,6 +51,8 @@ jobs:
           VITE_BASE_PATH: "/${{ github.event.repository.name }}/"
           VITE_MAPBOX_TOKEN: ${{ vars.VITE_MAPBOX_TOKEN || secrets.VITE_MAPBOX_TOKEN }}
         run: npm run build
+      - name: Validate built demo data
+        run: python scripts/static_demo_archive.py validate web/frontend/dist/demo-data
       - uses: actions/upload-pages-artifact@v3
         with:
           path: web/frontend/dist

@@ -774,6 +774,7 @@ async def export_static_demo(manifest_path: Path) -> None:
             "generated_from": str(manifest_path.relative_to(REPO_ROOT)),
             "timeline_chunk_hours": chunk_hours,
             "timeline_max_agents": max_agents,
+            "export_agent_details": export_agent_details,
             "experiments": [
                 {
                     "id": e["id"],
