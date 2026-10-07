@@ -7,9 +7,10 @@ root is three parents up. Configs live in ``configs/``, simulation outputs under
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 CONFIGS_DIR = REPO_ROOT / "configs"
 DATA_DIR = REPO_ROOT / "data"
-CACHE_DIR = DATA_DIR / ".web_cache"
+CACHE_DIR = Path(os.environ.get("CITYBEHAVEX_WEB_CACHE_DIR", DATA_DIR / ".web_cache"))

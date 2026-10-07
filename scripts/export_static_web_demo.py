@@ -12,8 +12,10 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import os
 import shutil
 import sys
+import tempfile
 from dataclasses import replace
 from datetime import date, datetime, timedelta
 from pathlib import Path
@@ -197,9 +199,9 @@ def _copy_social_sample(src: Path, dst: Path, max_uid: int) -> None:
     dst.write_text(json.dumps(sampled, separators=(",", ":")), encoding="utf-8")
 
 
-def _sample_run(experiment: Experiment, max_uid: int) -> Experiment:
+def _sample_run(experiment: Experiment, max_uid: int, sample_root: Path) -> Experiment:
     selected = experiment.runs[0]
-    sample_dir = REPO_ROOT / "data" / "static_demo_samples" / experiment.id / selected.run_id / f"first_{max_uid}"
+    sample_dir = sample_root / experiment.id / selected.run_id / f"first_{max_uid}"
     sample_path = sample_dir / f"{selected.path.stem}_first{max_uid}{selected.path.suffix}"
     print(f"[{experiment.id}] materializing first {max_uid} users -> {sample_path}", flush=True)
 
@@ -243,7 +245,7 @@ def _sample_run(experiment: Experiment, max_uid: int) -> Experiment:
     )
 
 
-def _sample_observed(experiment: Experiment, max_users: int) -> Experiment:
+def _sample_observed(experiment: Experiment, max_users: int, sample_root: Path) -> Experiment:
     observed_path = experiment.observed_path
     if observed_path is None or not observed_path.exists():
         raise RuntimeError(f"{experiment.id}: cannot sample missing observed path")
@@ -253,7 +255,7 @@ def _sample_observed(experiment: Experiment, max_users: int) -> Experiment:
     if uid_col is None:
         raise RuntimeError(f"{experiment.id}: observed path has no uid/user_id column")
 
-    sample_dir = REPO_ROOT / "data" / "static_demo_samples" / experiment.id / "observed" / f"first_{max_users}"
+    sample_dir = sample_root / experiment.id / "observed" / f"first_{max_users}"
     sample_path = sample_dir / f"{observed_path.stem}_first{max_users}{observed_path.suffix}"
     print(f"[{experiment.id}] materializing first {max_users} observed users -> {sample_path}", flush=True)
     sample_path.parent.mkdir(parents=True, exist_ok=True)
@@ -714,6 +716,7 @@ async def export_static_demo(manifest_path: Path) -> None:
     max_agents = int(manifest.get("timeline_max_agents", 500))
     export_agent_details = bool(manifest.get("export_agent_details", True))
     sections = [tuple(item) for item in manifest.get("chart_sections", DEFAULT_SECTIONS)]
+    sample_root = Path(tempfile.mkdtemp(prefix=f"citybehavex-static-demo-{os.getpid()}-"))
 
     prepared: list[tuple[dict[str, Any], Experiment]] = []
     for entry in manifest["experiments"]:
@@ -729,10 +732,10 @@ async def export_static_demo(manifest_path: Path) -> None:
         )
         sample_agents = entry.get("sample_agents")
         if sample_agents is not None:
-            experiment = _sample_run(experiment, int(sample_agents))
+            experiment = _sample_run(experiment, int(sample_agents), sample_root)
         observed_sample_agents = entry.get("observed_sample_agents")
         if observed_sample_agents is not None:
-            experiment = _sample_observed(experiment, int(observed_sample_agents))
+            experiment = _sample_observed(experiment, int(observed_sample_agents), sample_root)
         _validate_expected_agents(experiment, entry.get("expected_agents"))
         prepared.append((entry, experiment))
 
@@ -785,6 +788,7 @@ async def export_static_demo(manifest_path: Path) -> None:
             ],
         },
     )
+    shutil.rmtree(sample_root)
 
 
 def main() -> None:
