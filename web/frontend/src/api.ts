@@ -12,12 +12,28 @@ function apiUrl(path: string): string {
 }
 
 async function getStaticJson<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`${STATIC_ROOT}/${path.replace(/^\/+/, "")}`, init);
-  return readJson<T>(res);
+  return readStaticJson<T>(path, init, true);
 }
 
 async function getStaticRawJson<T>(path: string): Promise<T> {
-  const res = await fetch(`${STATIC_ROOT}/${path.replace(/^\/+/, "")}`);
+  return readStaticJson<T>(path, undefined, false);
+}
+
+async function readStaticJson<T>(path: string, init?: RequestInit, wrapped = true): Promise<T> {
+  const assetPath = `${STATIC_ROOT}/${path.replace(/^\/+/, "")}`;
+  const compressed = await fetch(`${assetPath}.gz`, init);
+  if (compressed.ok) {
+    if (!compressed.body || typeof DecompressionStream === "undefined") {
+      throw new Error("This browser cannot read compressed static demo data.");
+    }
+    const stream = compressed.body.pipeThrough(new DecompressionStream("gzip"));
+    const body = (await new Response(stream).json()) as { data: T };
+    return wrapped ? body.data : (body as T);
+  }
+
+  // Local exports are plain JSON; the deployed demo checks in compressed assets.
+  const res = await fetch(assetPath, init);
+  if (wrapped) return readJson<T>(res);
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return (await res.json()) as T;
 }

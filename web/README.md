@@ -93,6 +93,16 @@ frontend reads those files instead of `/api/...`, uses hash routing for GitHub
 Pages deep links, and keeps the regular local API behavior unchanged when
 `VITE_STATIC_DEMO` is unset.
 
+The GitHub Pages deployment reads the checked-in `.json.gz` demo payloads in
+that directory, so it does not need the private simulation datasets. To refresh
+the committed demo data, export it locally and gzip the JSON files before
+committing:
+
+```bash
+uv run python scripts/export_static_web_demo.py --manifest web/demo_export.yaml
+find web/frontend/public/demo-data -type f -name '*.json' -exec gzip -9 {} +
+```
+
 ## Production
 
 `npm run build` emits `web/frontend/dist`. When that directory exists, the
